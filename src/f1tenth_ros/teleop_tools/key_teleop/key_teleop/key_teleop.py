@@ -137,8 +137,8 @@ class SimpleKeyTeleop(Node):
 
         self._hz = self.declare_parameter('hz', 60).value
 
-        self._forward_rate = self.declare_parameter('forward_rate', 1.0).value
-        self._backward_rate = self.declare_parameter('backward_rate', 1.0).value
+        self._forward_rate = self.declare_parameter('forward_rate', 2.0).value
+        self._backward_rate = self.declare_parameter('backward_rate', 2.0).value
         self._rotation_rate = self.declare_parameter('rotation_rate', 0.2).value
         self._last_pressed = {}
         self._is_key_pressed = False

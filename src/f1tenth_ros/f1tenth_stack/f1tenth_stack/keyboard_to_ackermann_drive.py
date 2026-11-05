@@ -36,9 +36,9 @@ class KeyToAck(Node):
   def _process_key_vel(self, msg):
     self.speed_queue.append(msg.linear.x)
     if msg.angular.z >= EPS:
-      self.steering_queue.append(0.48)
+      self.steering_queue.append(0.6)
     elif msg.angular.z <= -EPS:
-      self.steering_queue.append(-0.48)
+      self.steering_queue.append(-0.6)
     else:
       self.steering_queue.append(0.0)  
 
