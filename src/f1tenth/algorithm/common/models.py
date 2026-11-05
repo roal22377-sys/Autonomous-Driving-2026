@@ -80,10 +80,10 @@ class Actor(nn.Module):
         self.activation = args.activation
 
         # ======= implement here ======= #
-        self.fc1 = 
-        self.fc2 = 
+        self.fc1 = nn.Linear(self.obs_dim, self.hidden1_units)
+        self.fc2 = nn.Linear(self.hidden1_units, self.hidden2_units)
 
-        self.fc_mean = 
+        self.fc_mean = nn.Linear(self.hidden2_units, self.action_dim)
         # ============================== #
         self.activ = eval(f'torch.nn.{self.activation}()')
         self.output_activ = torch.tanh
@@ -96,7 +96,8 @@ class Actor(nn.Module):
 
     def forward(self, x):
         # ======= implement here ======= #
-        x = 
+        x = self.activ(self.fc1(x))
+        x = self.activ(self.fc2(x))
         # ============================== #
         mean = self.output_activ(self.fc_mean(x))
 
@@ -121,17 +122,18 @@ class SquashedActor(nn.Module):
         self.activation = args.activation
 
         # ======= implement here ======= #
-        self.fc1 = 
-        self.fc2 = 
+        self.fc1 = nn.Linear(self.obs_dim, self.hidden1_units)
+        self.fc2 = nn.Linear(self.hidden1_units, self.hidden2_units)
         
-        self.mean_layer = 
-        self.log_std_layer = 
+        self.mean_layer = nn.Linear(self.hidden2_units, self.action_dim)
+        self.log_std_layer = nn.Linear(self.hidden2_units, self.action_dim)
         # ============================== #
         self.activ = eval(f'torch.nn.{self.activation}()')
         
     def forward(self, x):
         # ======= implement here ======= #
-        x = 
+        x = self.activ(self.fc1(x))
+        x = self.activ(self.fc2(x))
         # ============================== #
         mean = self.mean_layer(x)
         
@@ -158,17 +160,19 @@ class Critic(nn.Module):
         self.activation = args.activation
 
         # ======= implement here ======= #
-        self.fc1 = 
-        self.fc2 = 
-        self.fc3 = 
+        self.fc1 = nn.Linear(self.obs_dim, self.hidden1_units)
+        self.fc2 = nn.Linear(self.hidden1_units, self.hidden2_units)
+        self.fc3 = nn.Linear(self.hidden2_units, 1)
         # ============================== #
         self.activ = eval(f'torch.nn.{self.activation}()')
 
     def forward(self, x):
         # ======= implement here ======= #
-        x = 
+        x = self.activ(self.fc1(x))
+        x = self.activ(self.fc2(x))
+        x = self.fc3(x)
         # ============================== #
-        assert x.dim == 2
+        assert x.dim() == 2
         return x
 
     def initialize(self):
@@ -185,17 +189,20 @@ class QCritic(nn.Module):
         self.activation = args.activation
 
         # ======= implement here ======= #
-        self.fc1 = 
-        self.fc2 = 
-        self.fc3 = 
+        self.fc1 = nn.Linear(self.obs_dim + self.action_dim, self.hidden1_units)
+        self.fc2 = nn.Linear(self.hidden1_units, self.hidden2_units)
+        self.fc3 = nn.Linear(self.hidden2_units, 1)
         # ============================== #
         self.activ = eval(f'torch.nn.{self.activation}()')
 
     def forward(self, state, action):
         # ======= implement here ======= #
-        x = 
+        x = torch.cat([state, action], dim=-1)
+        x = self.activ(self.fc1(x))
+        x = self.activ(self.fc2(x))
+        x = self.fc3(x)
         # ============================== #
-        assert x.dim == 2
+        assert x.dim() == 2
         return x
 
     def initialize(self):

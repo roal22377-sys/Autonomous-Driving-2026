@@ -43,9 +43,9 @@ class Agent(AgentBase):
         action_dists = self.actor(states_tensor)
 
         # ============================ implement here ============================ #
-        MSE_Loss = 
-        action_mean = 
-        actor_loss = 
+        MSE_Loss = torch.nn.MSELoss()
+        action_mean = action_dists.loc      # deterministic action (tanh output, normalized to [-1, 1])
+        actor_loss = MSE_Loss(action_mean, actions_tensor)      # behavior cloning: regress expert actions
         # ======================================================================== #
         
         # update
