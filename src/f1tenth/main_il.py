@@ -59,6 +59,7 @@ def getParser():
     parser.add_argument('--save_freq', type=int, default=int(5e5), help='# of time steps for save.')
     # train
     parser.add_argument('--epochs', type=int, default=50, help='# of epochs for update.')
+    parser.add_argument('--updates_per_epoch', type=int, default=1, help='# of gradient updates per epoch.')
     parser.add_argument('--threshold', type=int, default=200, help='minimum steps of expert rollout.')
     parser.add_argument('--total_steps', type=int, default=int(1e5), help='total interaction steps.')
     # for eval
@@ -199,8 +200,10 @@ def train(args):
     best_score = -np.inf
     cprint(f'\n[Train] start.', bold=True, underline=True)
     for epoch in range(1, args.epochs+1):
-        total_step = epoch*args.batch_size
-        train_results = agent.train()
+        total_step = epoch*args.batch_size*args.updates_per_epoch
+        losses = [agent.train()['actor_loss'] for _ in range(args.updates_per_epoch)]
+        train_results = {'actor_loss': float(np.mean(losses))}
+        cprint(f'[Train] epoch {epoch} \t actor_loss: {train_results["actor_loss"]:.5f}', color='yellow')
 
         # logging
         for key, value in train_results.items():

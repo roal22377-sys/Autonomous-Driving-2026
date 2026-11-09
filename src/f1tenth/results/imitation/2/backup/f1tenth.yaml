@@ -1,0 +1,19 @@
+# base
+map: null
+max_episode_steps: 1000
+obs_dim: 1080
+action_dim: 2
+show_centerline: false
+
+# env configs
+timestep: 0.025
+min_speed: 1.0
+max_speed: 4.0
+max_steer: 0.48     # calibration
+control_input: ["speed", "steering_angle"]
+observation_config: {"type": "original"}
+reset_config: {"type": "cl_random_static"}
+
+# etc
+num_agents: 1
+ego_idx: 0
