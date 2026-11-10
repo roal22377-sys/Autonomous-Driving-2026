@@ -19,3 +19,6 @@ __pycache__/
 # ROS bags / runtime data
 *.db3
 rosbag2_*/
+
+# Course manuals (large PDFs, not ours to publish)
+file/
