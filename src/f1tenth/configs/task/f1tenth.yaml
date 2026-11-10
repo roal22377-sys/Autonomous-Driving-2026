@@ -24,7 +24,7 @@ speed_obs:
 
 # env configs
 timestep: 0.025
-min_speed: 1.0
+min_speed: 2.0     # [m/s] lowest speed the policy can command
 max_speed: 8.0     # [m/s] policy speed range is [min_speed, max_speed]; VESC speed_max 30000 ERPM ~ 8.6 m/s
 max_steer: 0.48     # calibration
 control_input: ["speed", "steering_angle"]
