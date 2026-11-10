@@ -152,16 +152,18 @@ def train(args):
     train_logger = {arg: Logger(args.log_dir, arg) for arg in log_list['train']}
 
     # ======= collect trajectories ======= #
-    # cache is tied to the observation settings so data made with different obs
-    # processing (e.g. the old raw 1080-dim expert_data.pkl) is never reused
-    obs_config = {'obs_dim': args.obs_dim, **train_env.obs_cfg}
+    # cache is tied to the observation and action-label settings so data made with
+    # different settings (e.g. the old raw 1080-dim expert_data.pkl) is never reused
+    data_config = {'obs_dim': args.obs_dim, **train_env.obs_cfg,
+                   'min_speed': args.min_speed, 'max_speed': args.max_speed, 'max_steer': args.max_steer,
+                   'expert': dict(PARAM), 'speed_label': 'inverse_unnormalize'}
     expert_data_path = f'expert_data_obs{args.obs_dim}.pkl'
     expert_data = None
     if os.path.isfile(expert_data_path):
         with open(expert_data_path, 'rb') as f:
             expert_data = pickle.load(f)
-        if expert_data.get('obs_config') != obs_config:
-            cprint(f'\n[Rollout] {expert_data_path} was collected with different observation settings. re-collecting.', color='red')
+        if expert_data.get('data_config') != data_config:
+            cprint(f'\n[Rollout] {expert_data_path} was collected with different settings. re-collecting.', color='red')
             expert_data = None
 
     if expert_data is not None:
@@ -183,7 +185,11 @@ def train(args):
             terminate = False
             while ep_step < args.max_episode_steps and not terminate:
                 speed, steer = planner.plan(info['obs_dict'], PARAM)
-                action = np.clip([steer/(train_env.max_steer+EPS), speed/train_env.max_speed], -np.ones(2), np.ones(2))
+                # expert speed [m/s] -> [-1, 1]: exact inverse of unnormalize_speed() in env.step,
+                # so the car drives the expert's speed (clipped to [min_speed, max_speed])
+                speed_action = (speed - (train_env.max_speed + train_env.min_speed)/2.0) \
+                               / ((train_env.max_speed - train_env.min_speed)/2.0)
+                action = np.clip([steer/(train_env.max_steer+EPS), speed_action], -np.ones(2), np.ones(2))
                 ep_observations.append(observation)
                 ep_actions.append(action)
 
@@ -200,7 +206,7 @@ def train(args):
         observations = np.concatenate(observations, axis=0)
         actions = np.concatenate(actions, axis=0)
         with open(expert_data_path, 'wb') as f:
-            pickle.dump({'observations':observations, 'actions':actions, 'obs_config':obs_config}, f)
+            pickle.dump({'observations':observations, 'actions':actions, 'data_config':data_config}, f)
     agent.step(observations, actions)
     train_env.close()
     # ==================================== #

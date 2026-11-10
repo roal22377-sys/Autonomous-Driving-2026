@@ -18,14 +18,14 @@ lidar:
 #   sim: linear_vels_x / real: /odom twist.linear.x from vesc_to_odom_node
 speed_obs:
   enabled: true
-  clip: [0.0, 5.0]          # [m/s] reading is clipped to this range
+  clip: [0.0, 9.0]          # [m/s] reading is clipped to this range (> max_speed)
   noise_std: 0.05           # [m/s] gaussian noise on the reading, expert data collection only
   scale_range: [0.9, 1.1]   # per-episode reading scale error (odom calibration), expert data collection only
 
 # env configs
 timestep: 0.025
 min_speed: 1.0
-max_speed: 4.0
+max_speed: 8.0     # [m/s] policy speed range is [min_speed, max_speed]; VESC speed_max 30000 ERPM ~ 8.6 m/s
 max_steer: 0.48     # calibration
 control_input: ["speed", "steering_angle"]
 observation_config: {"type": "original"}

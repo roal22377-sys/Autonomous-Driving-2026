@@ -141,7 +141,7 @@ class F1Wrapper(gym.Wrapper):
 
             Changed to:             [desired steer, normalized speed]
                                     steer : -1(left) ~ 1(right)
-                                    speed : -1 ~ 1              -> multiplied by self.max_speed
+                                    speed : -1 ~ 1              -> mapped linearly to [min_speed, max_speed]
         '''
         _action = action.copy()
         _action[0] *= self.max_steer
