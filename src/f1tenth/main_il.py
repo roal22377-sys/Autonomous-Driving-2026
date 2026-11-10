@@ -118,8 +118,8 @@ def train(args):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    # define train environment (lidar noise only for expert data collection)
-    train_env = F1Wrapper(args=args, maps=MAPS, scan_noise=True)
+    # define train environment (observation noise only for expert data collection)
+    train_env = F1Wrapper(args=args, maps=MAPS, obs_noise=True)
 
     # define eval environment
     render_mode = None
@@ -152,16 +152,16 @@ def train(args):
     train_logger = {arg: Logger(args.log_dir, arg) for arg in log_list['train']}
 
     # ======= collect trajectories ======= #
-    # cache is tied to the observation settings so data made with different lidar
+    # cache is tied to the observation settings so data made with different obs
     # processing (e.g. the old raw 1080-dim expert_data.pkl) is never reused
-    obs_config = {'obs_dim': args.obs_dim, 'lidar': train_env.lidar_cfg}
+    obs_config = {'obs_dim': args.obs_dim, **train_env.obs_cfg}
     expert_data_path = f'expert_data_obs{args.obs_dim}.pkl'
     expert_data = None
     if os.path.isfile(expert_data_path):
         with open(expert_data_path, 'rb') as f:
             expert_data = pickle.load(f)
         if expert_data.get('obs_config') != obs_config:
-            cprint(f'\n[Rollout] {expert_data_path} was collected with different lidar settings. re-collecting.', color='red')
+            cprint(f'\n[Rollout] {expert_data_path} was collected with different observation settings. re-collecting.', color='red')
             expert_data = None
 
     if expert_data is not None:

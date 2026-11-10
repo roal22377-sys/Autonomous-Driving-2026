@@ -4,3 +4,4 @@ agent_node:
     algo_idx: 
     scan_topic: scan
     drive_topic: drive
+    odom_topic: odom

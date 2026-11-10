@@ -8,6 +8,7 @@
   <license>MIT</license>
 
   <depend>ackermann_msgs</depend>
+  <depend>nav_msgs</depend>
   <depend>urg_node</depend>
   <depend>joy</depend>
   <depend>joy_teleop</depend>

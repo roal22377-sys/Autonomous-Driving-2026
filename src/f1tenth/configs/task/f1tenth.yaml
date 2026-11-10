@@ -1,7 +1,7 @@
 # base
 map: null
 max_episode_steps: 1000
-obs_dim: 54         # must equal lidar.num_beams (observation = processed lidar only)
+obs_dim: 55         # must equal lidar.num_beams + (1 if speed_obs.enabled)
 action_dim: 2
 show_centerline: false
 
@@ -13,6 +13,14 @@ lidar:
   pooling: min        # min | mean | median over each bin
   noise_std: 0.03     # [m] gaussian noise on raw beams, expert data collection only
   dropout_prob: 0.01  # fraction of raw beams dropped (-> invalid), expert data collection only
+
+# vehicle speed input, appended after lidar (utils/observation.py)
+#   sim: linear_vels_x / real: /odom twist.linear.x from vesc_to_odom_node
+speed_obs:
+  enabled: true
+  clip: [0.0, 5.0]          # [m/s] reading is clipped to this range
+  noise_std: 0.05           # [m/s] gaussian noise on the reading, expert data collection only
+  scale_range: [0.9, 1.1]   # per-episode reading scale error (odom calibration), expert data collection only
 
 # env configs
 timestep: 0.025

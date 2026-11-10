@@ -16,7 +16,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
-from utils.lidar import get_lidar_config, process_scan, add_scan_noise
+from utils.observation import get_obs_config, make_observation, add_obs_noise
 
 EPS = 1e-8
 
@@ -29,10 +29,10 @@ def unnormalize_speed(value, minimum, maximum):
 
 
 class F1Wrapper(gym.Wrapper):
-    def __init__(self, args, maps, render_mode=None, scan_noise=False) -> None:
+    def __init__(self, args, maps, render_mode=None, obs_noise=False) -> None:
         '''
-            scan_noise: add lidar noise/dropout (lidar.noise_std, lidar.dropout_prob)
-                        to observations. Use it only for collecting training data.
+            obs_noise: add lidar noise/dropout and speed reading error (see `lidar`,
+                       `speed_obs` in f1tenth.yaml). Use it only for collecting training data.
         '''
 
         self._env = gym.make("f1tenth_gym:f1tenth-v0", 
@@ -53,13 +53,11 @@ class F1Wrapper(gym.Wrapper):
         self.observation_space = spaces.Box(-np.inf*np.ones(self.obs_dim), np.inf*np.ones(self.obs_dim), dtype=np.float32)
         self.action_space = spaces.Box(-np.ones(self.action_dim), np.ones(self.action_dim), dtype=np.float32)
 
-        # for lidar preprocessing
-        self.lidar_cfg = get_lidar_config(args)
-        if self.obs_dim != self.lidar_cfg['num_beams']:
-            raise ValueError(f"obs_dim ({self.obs_dim}) must equal lidar.num_beams "
-                             f"({self.lidar_cfg['num_beams']}) in configs/task/f1tenth.yaml.")
-        self.scan_noise = scan_noise
-        self.scan_rng = np.random.default_rng(args.get('seed', None))
+        # for observation (lidar + speed), checks obs_dim
+        self.obs_cfg = get_obs_config(args)
+        self.obs_noise = obs_noise
+        self.noise_rng = np.random.default_rng(args.get('seed', None))
+        self.speed_scale = 1.0
 
     def _reset_pose(self, obs_dict):
         # collision
@@ -107,6 +105,9 @@ class F1Wrapper(gym.Wrapper):
 
     def reset(self, **kwargs):
         self.history = deque(maxlen=10)
+        if self.obs_noise:
+            # per-episode speed reading error, like an imperfect odom calibration
+            self.speed_scale = self.noise_rng.uniform(*self.obs_cfg['speed']['scale_range'])
         obs_dict, info = self._env.reset(**kwargs)
         if self.show_centerline:
             self._env.unwrapped.add_render_callback(self._env.track.centerline.render_waypoints)
@@ -172,13 +173,14 @@ class F1Wrapper(gym.Wrapper):
                 'lap_times'     | (num_agents,)
                 'lap_counts'    | (num_agents,)
             
-            ==> Changed to include only scans, downsampled by utils/lidar.py
-                (1080 raw beams -> lidar.num_beams, clipped to lidar.max_range)
+            ==> Changed to [downsampled lidar (lidar.num_beams), speed (if speed_obs.enabled)]
+                built by utils/observation.py, the same code agent_node.py uses.
         '''
         scan = np.array(obs_dict['scans']).reshape(-1)      # raw lidar value (1080,)
-        if self.scan_noise:
-            scan = add_scan_noise(scan, self.scan_rng, **self.lidar_cfg)
-        observation = process_scan(scan, **self.lidar_cfg)
+        speed = float(obs_dict['linear_vels_x'][0])         # longitudinal speed [m/s]
+        if self.obs_noise:
+            scan, speed = add_obs_noise(scan, speed, self.noise_rng, self.obs_cfg, self.speed_scale)
+        observation = make_observation(scan, speed, self.obs_cfg)
 
         return observation
     # ======================================================================== #
