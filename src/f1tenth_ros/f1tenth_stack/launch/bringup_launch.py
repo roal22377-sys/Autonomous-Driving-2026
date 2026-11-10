@@ -50,26 +50,25 @@ def generate_launch_description():
     '''
         TODO: uncomment this and add "agent_la" in LaunchDescription if you want to test your autonomous driving agent.
     '''
-    # agent_la = DeclareLaunchArgument(
-    #     'agent_config',
-    #     default_value=agent_config,
-    #     description='Descriptions for reinforcement learning agent configs')
+    agent_la = DeclareLaunchArgument(
+        'agent_config',
+        default_value=agent_config,
+        description='Descriptions for reinforcement learning agent configs')
     
     '''
         TODO: replace ld
     '''
-    ld = LaunchDescription([vesc_la, sensors_la, mux_la])
-    #ld = LaunchDescription([vesc_la, sensors_la, mux_la, agent_la])
+    ld = LaunchDescription([vesc_la, sensors_la, mux_la, agent_la])
 
     '''
         TODO: uncomment this if you want to test your autonomous driving agent.
     '''
-    # agent_node = Node(
-    #     package='f1tenth_stack',
-    #     executable='agent_node',
-    #     name='agent_node',
-    #     parameters=[LaunchConfiguration('agent_config')]
-    # )
+    agent_node = Node(
+        package='f1tenth_stack',
+        executable='agent_node',
+        name='agent_node',
+        parameters=[LaunchConfiguration('agent_config')]
+    )
     key_to_ackermann_node = Node(
         package='f1tenth_stack',
         executable='keyboard_to_ackermann_drive',
@@ -130,6 +129,6 @@ def generate_launch_description():
     '''
         TODO: uncomment this if you want to test your autonomous driving agent.
     '''
-    #ld.add_action(agent_node)
+    ld.add_action(agent_node)
 
     return ld

@@ -1,7 +1,8 @@
 agent_node:
   ros__parameters:
-    name: 
-    algo_idx: 
+    name: imitation
+    algo_idx: 3
     scan_topic: scan
     drive_topic: drive
     odom_topic: odom
+    speed_limit: 4.0    # [m/s] cap on commanded speed (practice); 0.0 = no cap (model max_speed)

@@ -39,10 +39,14 @@ class AgentNode(Node):
     self.declare_parameter('scan_topic', 'scan')
     self.declare_parameter('drive_topic', 'drive')
     self.declare_parameter('odom_topic', 'odom')
+    self.declare_parameter('speed_limit', 0.0)     # [m/s] cap on commanded speed for practice runs; <= 0 disables
 
     self.scan_topic = self.get_parameter('scan_topic').value
     self.drive_topic = self.get_parameter('drive_topic').value
     self.odom_topic = self.get_parameter('odom_topic').value
+    self.speed_limit = float(self.get_parameter('speed_limit').value)
+    if self.speed_limit > 0:
+      self.get_logger().info(f'[drive] speed limited to {self.speed_limit} m/s')
 
     # fix seed
     seed = 123
@@ -126,6 +130,9 @@ class AgentNode(Node):
     # transform action
     action[0] *= self.args.max_steer
     action[1] = unnormalize_speed(action[1], self.args.min_speed, self.args.max_speed)
+    if self.speed_limit > 0:
+      # cap after unnormalizing, so the model's output mapping stays as trained
+      action[1] = min(action[1], self.speed_limit)
     
     # publish drive
     msg = AckermannDriveStamped()
