@@ -5,6 +5,7 @@ import sys
 sim_path = 'src/f1tenth'
 sys.path.append(sim_path)
 from utils.vectorize import RunningMeanStd
+from utils.lidar import get_lidar_config, process_scan
 
 import rclpy
 import rclpy.duration
@@ -52,12 +53,6 @@ class AgentNode(Node):
       self.device = torch.device('cpu')
       self.get_logger().info('[torch] cpu is used.')
     
-    # observation
-    '''
-      TODO: pre-define things to process raw scan to observation.
-    '''
-    self.obs_dim = 
-
     # load parameters
     name = self.get_parameter('name').value
     algo_idx = self.get_parameter('algo_idx').value
@@ -65,6 +60,18 @@ class AgentNode(Node):
     backup_dir = os.path.join(sim_path, f"results/{name}/{algo_idx}/backup")
     with open(f'{backup_dir}/f1tenth.yaml', 'r') as f:
       self.args = EasyDict(YAML().load(f))
+
+    # observation
+    '''
+      obs_dim and lidar processing come from the model's backup f1tenth.yaml,
+      so the real car always processes scans exactly like the model was trained.
+    '''
+    self.obs_dim = self.args.obs_dim
+    self.lidar_cfg = get_lidar_config(self.args)
+    if self.obs_dim != self.lidar_cfg['num_beams']:
+      raise ValueError(f"obs_dim ({self.obs_dim}) != lidar.num_beams ({self.lidar_cfg['num_beams']}) in {backup_dir}/f1tenth.yaml")
+    self.get_logger().info(f"[obs] lidar 1080 -> {self.lidar_cfg['num_beams']} ({self.lidar_cfg['pooling']} pooling), "
+                           f"max_range {self.lidar_cfg['max_range']} m")
 
     # load algorithm
     try:
@@ -109,8 +116,9 @@ class AgentNode(Node):
 
   def getObs(self, raw_scan: np.ndarray):
     '''
-      TODO: make raw scan data to the form of observation you used to train model.
+      Same processing as getObs in src/f1tenth/utils/env.py (without sim noise).
     '''
+    observation = process_scan(raw_scan, **self.lidar_cfg)
     return observation
 
 def main(args=None):

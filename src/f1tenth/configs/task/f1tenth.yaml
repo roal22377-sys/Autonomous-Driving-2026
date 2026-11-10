@@ -1,9 +1,18 @@
 # base
 map: null
 max_episode_steps: 1000
-obs_dim: 1080
+obs_dim: 54         # must equal lidar.num_beams (observation = processed lidar only)
 action_dim: 2
 show_centerline: false
+
+# lidar preprocessing (utils/lidar.py), shared by sim env.py and real agent_node.py
+lidar:
+  num_beams: 54       # 1080 raw beams -> 54 bins of 20 beams (5 deg each); must divide 1080
+  max_range: 10.0     # [m] clip; real Hokuyo UST-10LX max is 10 m (sim default is 30 m)
+  min_valid: 0.05     # [m] readings below this, and NaN/inf, are invalid -> max_range
+  pooling: min        # min | mean | median over each bin
+  noise_std: 0.03     # [m] gaussian noise on raw beams, expert data collection only
+  dropout_prob: 0.01  # fraction of raw beams dropped (-> invalid), expert data collection only
 
 # env configs
 timestep: 0.025
