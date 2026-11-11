@@ -4,6 +4,7 @@ from launch.substitutions import Command
 from launch.substitutions import LaunchConfiguration
 from launch.actions import DeclareLaunchArgument
 from launch.actions import IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 from ament_index_python.packages import get_package_share_directory
 import os
@@ -58,7 +59,13 @@ def generate_launch_description():
     '''
         TODO: replace ld
     '''
-    ld = LaunchDescription([vesc_la, sensors_la, mux_la, agent_la])
+    # use_agent:=false runs keyboard-only (e.g. calibration), so the policy's /drive
+    # can't take over the servo/motor whenever no key is pressed.
+    use_agent_la = DeclareLaunchArgument(
+        'use_agent',
+        default_value='true',
+        description='Launch agent_node (autonomous driving policy)')
+    ld = LaunchDescription([vesc_la, sensors_la, mux_la, agent_la, use_agent_la])
 
     '''
         TODO: uncomment this if you want to test your autonomous driving agent.
@@ -67,7 +74,8 @@ def generate_launch_description():
         package='f1tenth_stack',
         executable='agent_node',
         name='agent_node',
-        parameters=[LaunchConfiguration('agent_config')]
+        parameters=[LaunchConfiguration('agent_config')],
+        condition=IfCondition(LaunchConfiguration('use_agent'))
     )
     key_to_ackermann_node = Node(
         package='f1tenth_stack',
