@@ -18,7 +18,7 @@ import gymnasium as gym
 from utils.env import F1Wrapper
 from utils.logger import Logger
 from utils.video import create_video
-from utils.rule_based import PurePursuitPlanner
+from utils.rule_based import CurvaturePursuitPlanner
 from utils.color import cprint
 
 from algorithm import algo_dict
@@ -34,12 +34,15 @@ MAPS = ['Sochi', 'Spa', 'Nuerburgring', 'Monza', 'Melbourne', 'Austin',
 EVAL_MAPS = ['Sochi', 'IMS', 'Catalunya', 'Zandvoort', 'Silverstone', 'SaoPaulo',       # easy
              'YasMarina', 'MoscowRaceway', 'Shanghai', 'MexicoCity', 'Montreal']        # hard
 
-PARAM = {
-    "mass": 3.463388126201571,
-    "lf": 0.15597534362552312,
-    "tlad": 0.82461887897713965,
-    "vgain": 0.5,
+# expert: CurvaturePursuitPlanner (utils/rule_based.py) on the centerline.
+# The old PurePursuitPlanner on the raceline crashed right after most random starts
+# (start >0.7 m off the raceline) and never slowed for corners (fixed 4 m/s).
+EXPERT = {
+    "path": "centerline",
+    "a_lat": 3.0,       # [m/s^2] lateral accel limit -> corner speed
+    "a_brake": 4.0,     # [m/s^2] braking limit for the speed profile
 }
+WHEELBASE = 0.17145 + 0.15875
 
 def getParser():
     parser = argparse.ArgumentParser(description='F1tenth.')
@@ -62,6 +65,11 @@ def getParser():
     parser.add_argument('--updates_per_epoch', type=int, default=1, help='# of gradient updates per epoch.')
     parser.add_argument('--threshold', type=int, default=200, help='minimum steps of expert rollout.')
     parser.add_argument('--total_steps', type=int, default=int(1e5), help='total interaction steps.')
+    parser.add_argument('--dart_std', type=float, default=0.15,
+                        help='max std of correlated steering noise executed during expert rollout (DART). '
+                             'labels stay the clean expert action, so the data contains recovery behavior.')
+    parser.add_argument('--max_episode_steps', type=int, default=None,
+                        help='override task max_episode_steps for expert rollout and eval (e.g. 6000 = 150 s, enough for one lap).')
     # for eval
     parser.add_argument('--eval_num', type=int, default=5, help='# of evaluation epochs.')
     parser.add_argument('--eval_freq', type=int, default=int(5e4), help='# of time steps for eval.')
@@ -156,7 +164,9 @@ def train(args):
     # different settings (e.g. the old raw 1080-dim expert_data.pkl) is never reused
     data_config = {'obs_dim': args.obs_dim, **train_env.obs_cfg,
                    'min_speed': args.min_speed, 'max_speed': args.max_speed, 'max_steer': args.max_steer,
-                   'expert': dict(PARAM), 'speed_label': 'inverse_unnormalize'}
+                   'expert': {'planner': 'CurvaturePursuitPlanner', **EXPERT}, 'dart_std': args.dart_std,
+                   'speed_label': 'inverse_unnormalize',
+                   'max_episode_steps': args.max_episode_steps, 'total_steps': args.total_steps}
     expert_data_path = f'expert_data_obs{args.obs_dim}.pkl'
     expert_data = None
     if os.path.isfile(expert_data_path):
@@ -178,13 +188,17 @@ def train(args):
 
             observation, info = train_env.reset()
             track = train_env._env.unwrapped.track
-            planner = PurePursuitPlanner(track=track, wb=0.17145 + 0.15875)
+            planner = CurvaturePursuitPlanner(track, WHEELBASE, v_min=train_env.min_speed, v_max=train_env.max_speed,
+                                              max_steer=train_env.max_steer, **EXPERT)
             ep_observations, ep_actions = [], []
             ep_step, ep_reward = 0, 0
+            # DART: per-episode noise level, AR(1) noise so it actually pushes the car off the path
+            noise_std = np.random.uniform(0.0, args.dart_std)
+            noise = 0.0
 
             terminate = False
             while ep_step < args.max_episode_steps and not terminate:
-                speed, steer = planner.plan(info['obs_dict'], PARAM)
+                speed, steer = planner.plan(info['obs_dict'])
                 # expert speed [m/s] -> [-1, 1]: exact inverse of unnormalize_speed() in env.step,
                 # so the car drives the expert's speed (clipped to [min_speed, max_speed])
                 speed_action = (speed - (train_env.max_speed + train_env.min_speed)/2.0) \
@@ -193,7 +207,10 @@ def train(args):
                 ep_observations.append(observation)
                 ep_actions.append(action)
 
-                observation, reward, terminate, truncate, info = train_env.step(action)
+                # execute noisy steering, keep the clean expert action as the label
+                noise = 0.9*noise + np.sqrt(1 - 0.9**2)*noise_std*np.random.randn()
+                exec_action = np.clip(action + np.array([noise, 0.0]), -np.ones(2), np.ones(2))
+                observation, reward, terminate, truncate, info = train_env.step(exec_action)
                 ep_step += 1
                 ep_reward += reward
 
@@ -300,6 +317,7 @@ if __name__ == "__main__":
     if args.name == None:
         args.name = 'imitation'
     args = EasyDict(vars(args))
+    max_episode_steps = args.pop('max_episode_steps')     # task config would overwrite the CLI value
 
     # load configurations & merge them
     with open('configs/task/f1tenth.yaml', 'r') as f:
@@ -311,6 +329,8 @@ if __name__ == "__main__":
     args.update(task_args)
     args.update(dynamic_args)
     args.update(agent_args)
+    if max_episode_steps is not None:
+        args.max_episode_steps = max_episode_steps
     args.save_dir = f"results/{args.name}/{args.algo_idx}"
 
     # ==== processing args ==== #

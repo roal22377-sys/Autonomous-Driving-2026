@@ -1,7 +1,7 @@
 agent_node:
   ros__parameters:
     name: imitation
-    algo_idx: 3
+    algo_idx: 6
     scan_topic: scan
     drive_topic: drive
     odom_topic: odom

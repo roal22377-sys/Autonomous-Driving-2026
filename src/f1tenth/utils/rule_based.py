@@ -278,3 +278,85 @@ class PurePursuitPlanner:
         speed = vgain * speed
 
         return speed, steering_angle
+
+class CurvaturePursuitPlanner:
+    """
+    Robust expert for imitation learning.
+
+    Differences from PurePursuitPlanner:
+      - lookahead point is found by arc length along the path from the nearest
+        point, so the car merges back smoothly from any offset (e.g. random
+        centerline starts far from the raceline) and never "loses" the path
+      - speed comes from the path curvature ahead (lateral acceleration limit),
+        so it slows down before tight corners instead of driving a fixed speed
+      - steering is limited to the car's max steer
+    """
+
+    def __init__(self, track, wb, path='centerline', v_min=2.0, v_max=8.0, a_lat=4.0,
+                 a_brake=4.0, max_steer=0.48, lad_base=0.6, lad_gain=0.2):
+        line = track.raceline if path == 'raceline' else track.centerline
+        xy = np.stack([line.xs, line.ys]).T.astype(np.float64)
+        # drop the duplicated closing point so the loop wraps cleanly
+        if np.linalg.norm(xy[0] - xy[-1]) < 1e-3:
+            xy = xy[:-1]
+        seg = np.linalg.norm(np.diff(np.vstack([xy, xy[:1]]), axis=0), axis=1)
+        self.xy = xy
+        self.n = xy.shape[0]
+        self.ds = float(np.mean(seg))
+        self.wheelbase = wb
+        self.v_min, self.v_max = v_min, v_max
+        self.a_brake = a_brake
+        self.max_steer = max_steer
+        self.lad_base, self.lad_gain = lad_base, lad_gain
+
+        # curvature from three points spaced ~1 m apart (robust to waypoint noise)
+        k = max(1, int(round(1.0 / self.ds)))
+        p0, p1, p2 = np.roll(xy, k, axis=0), xy, np.roll(xy, -k, axis=0)
+        a = np.linalg.norm(p1 - p0, axis=1)
+        b = np.linalg.norm(p2 - p1, axis=1)
+        c = np.linalg.norm(p2 - p0, axis=1)
+        cross = (p1 - p0)[:, 0] * (p2 - p1)[:, 1] - (p1 - p0)[:, 1] * (p2 - p1)[:, 0]
+        kappa = np.abs(2.0 * cross / (a * b * c + 1e-9))
+        v_corner = np.clip(np.sqrt(a_lat / (kappa + 1e-6)), v_min, v_max)
+
+        # backward pass so the car is already slow when it reaches a corner
+        v = v_corner.copy()
+        for _ in range(2):
+            for i in range(self.n - 1, -1, -1):
+                j = (i + 1) % self.n
+                v[i] = min(v[i], np.sqrt(v[j] ** 2 + 2.0 * a_brake * seg[i]))
+        self.v_profile = v
+        self.last_index = None
+
+    def _nearest_index(self, pos):
+        if self.last_index is None:
+            idx = np.arange(self.n)
+        else:  # local search around the previous index (avoids jumping across the track)
+            idx = (self.last_index + np.arange(-50, 200)) % self.n
+        d = np.sum((self.xy[idx] - pos) ** 2, axis=1)
+        i = int(idx[np.argmin(d)])
+        if self.last_index is not None and np.sqrt(d.min()) > 2.0:   # lost: global search
+            i = int(np.argmin(np.sum((self.xy - pos) ** 2, axis=1)))
+        self.last_index = i
+        return i
+
+    def reset(self):
+        self.last_index = None
+
+    def plan(self, obs_dict, work=None):
+        x, y, th = obs_dict['poses_x'][0], obs_dict['poses_y'][0], obs_dict['poses_theta'][0]
+        v_now = float(obs_dict['linear_vels_x'][0])
+        pos = np.array([x, y])
+        i = self._nearest_index(pos)
+
+        lad = self.lad_base + self.lad_gain * max(v_now, self.v_min)
+        target = self.xy[(i + int(round(lad / self.ds))) % self.n]
+
+        dx, dy = target - pos
+        local_y = -np.sin(th) * dx + np.cos(th) * dy
+        dist2 = dx * dx + dy * dy
+        steer = np.arctan(self.wheelbase * 2.0 * local_y / max(dist2, 1e-6))
+        steer = float(np.clip(steer, -self.max_steer, self.max_steer))
+
+        speed = float(self.v_profile[i])
+        return speed, steer
