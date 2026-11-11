@@ -34,6 +34,9 @@ vesc_to_odom_node:
     # publish odom to base link tf
     publish_tf: true
     use_servo_cmd_to_calc_angular_velocity: false
+    # |speed| below this (m/s) is treated as 0. At rest the VESC reports ~-177 erpm spikes
+    # (= 0.05 m/s at gain 3500), which slipped past the old hardcoded 0.05 and drifted x.
+    speed_deadband: 0.1
     # car wheelbase is about 25cm
     wheelbase: .35
 

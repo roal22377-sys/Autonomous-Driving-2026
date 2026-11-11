@@ -61,6 +61,8 @@ VescToOdom::VescToOdom(const rclcpp::NodeOptions & options)
 
   speed_to_erpm_gain_ = declare_parameter("speed_to_erpm_gain").get<double>();
   speed_to_erpm_offset_ = declare_parameter("speed_to_erpm_offset").get<double>();
+  // speeds below this (m/s) count as standstill; VESC erpm noise at rest (~180 erpm) must stay under it
+  speed_deadband_ = declare_parameter("speed_deadband", 0.05);
 
   if (use_servo_cmd_) {
     steering_to_servo_gain_ = declare_parameter("steering_angle_to_servo_gain").get<double>();
@@ -98,7 +100,7 @@ void VescToOdom::vescStateCallback(const VescStateStamped::SharedPtr state)
 
   // convert to engineering units
   double current_speed = -(-state->state.speed - speed_to_erpm_offset_) / speed_to_erpm_gain_;
-  if (std::fabs(current_speed) < 0.05) {
+  if (std::fabs(current_speed) < speed_deadband_) {
     current_speed = 0.0;
   }
   double current_steering_angle(0.0), current_angular_velocity(0.0);
