@@ -87,19 +87,25 @@ class Agent(AgentBase):
             
             # ============================ implement here ============================ #
             with torch.no_grad():
-                entropy_alpha = 
+                entropy_alpha = self.log_entropy_alpha.exp()
 
             # critic update
             with torch.no_grad():
                 ##############
                 ##  eq.1~2  ##
                 ##############
-                target_v = 
-                target_q = 
+                # y = r + gamma*(1-d)*(min_i Q_targ_i(s', a') - alpha*log pi(a'|s')),  a' ~ pi(.|s')
+                next_action_dists = self.actor(next_states_tensor)
+                next_actions_tensor = next_action_dists.rsample()
+                next_log_probs_tensor = torch.sum(next_action_dists.log_prob(next_actions_tensor), dim=-1, keepdim=True)
+                target_v = self.target_critic.minimum(next_states_tensor, next_actions_tensor) \
+                            - entropy_alpha*next_log_probs_tensor
+                target_q = rewards_tensor + self.discount_factor*(1.0 - fails_tensor)*target_v
 
             self.critic_optim.zero_grad()
             critic1, critic2 = self.critic(states_tensor, actions_tensor)
-            critic_loss = 
+            # L^Q(phi_i) = E[(Q_phi_i(s,a) - y)^2], i = 1, 2
+            critic_loss = F.mse_loss(critic1, target_q) + F.mse_loss(critic2, target_q)
             critic_loss.backward()
             clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
             self.critic_optim.step()
@@ -111,22 +117,32 @@ class Agent(AgentBase):
             ##############
             ##   eq.4   ##
             ##############
+            # L^H(alpha) = E[-alpha*log pi(a|s) - alpha*H_0] = alpha*(H - H_0)
+            #   H > H_0 -> alpha decreases,  H < H_0 -> alpha increases
             with torch.no_grad():
-                entropy = 
-                    
+                action_dists = self.actor(states_tensor)
+                sampled_actions_tensor = action_dists.rsample()
+                entropy = -torch.mean(torch.sum(action_dists.log_prob(sampled_actions_tensor), dim=-1))
+
             self.alpha_optim.zero_grad()
-            entropy_loss = 
+            entropy_loss = self.log_entropy_alpha.exp()*(entropy - self.target_entropy)
+            entropy_loss = entropy_loss.mean()
             entropy_loss.backward()
             self.alpha_optim.step()
-                
+
             # actor update
             ##############
             ##  eq.5~6  ##
             ##############
+            # a = f_theta(eps, s) via rsample (reparameterization trick)
+            # L^pi = E[alpha*log pi(f(eps,s)|s) - min_i Q_phi_i(s, f(eps,s))]
             self.critic.eval()
-            q = 
+            action_dists = self.actor(states_tensor)
+            new_actions_tensor = action_dists.rsample()
+            log_probs_tensor = torch.sum(action_dists.log_prob(new_actions_tensor), dim=-1, keepdim=True)
+            q = self.critic.minimum(states_tensor, new_actions_tensor)
             self.actor_optim.zero_grad()
-            actor_loss = 
+            actor_loss = torch.mean(entropy_alpha*log_probs_tensor - q)
             actor_loss.backward()
             clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
             self.actor_optim.step()
@@ -187,7 +203,9 @@ class Agent(AgentBase):
             checkpoint = torch.load(checkpoint_file)
             self.actor.load_state_dict(checkpoint['actor'])
             self.critic.load_state_dict(checkpoint['critic'])
-            self.log_entropy_alpha = checkpoint['log_entropy_alpha']
+            # copy in place: alpha_optim holds a reference to this tensor, reassigning would orphan it
+            with torch.no_grad():
+                self.log_entropy_alpha.copy_(checkpoint['log_entropy_alpha'])
             self.actor_optim.load_state_dict(checkpoint['actor_optim'])
             self.critic_optim.load_state_dict(checkpoint['critic_optim'])
             self.alpha_optim.load_state_dict(checkpoint['alpha_optim'])

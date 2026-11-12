@@ -11,12 +11,16 @@ def list_chunk(lst, n):
 class RolloutBuffer:
     def __init__(
             self, device:torch.device,
-            discount_factor:float, 
+            obs_dim:int,
+            action_dim:int,
+            discount_factor:float,
             gae_coeff:float, 
             n_envs:int,
             n_steps:int,
             minibatch_size:int) -> None:
         self.device = device
+        self.obs_dim = obs_dim
+        self.action_dim = action_dim
         self.discount_factor = discount_factor
         self.gae_coeff = gae_coeff
         self.n_envs = n_envs
@@ -91,26 +95,29 @@ class RolloutBuffer:
             reward_values = reward_critic(states_tensor).squeeze(-1).detach().cpu().numpy()
 
             # get targets & advantages
-            # Option 1. Monte Carlo estimate of returns
-            discounted_reward = 0.0
-            reward_targets = np.zeros_like(rewards)
-            for t in reversed(range(len(reward_targets))):
-                discounted_reward = rewards[t] + self.discount_factor*(1.0 - fails[t])*discounted_reward
-                reward_targets[t] = discounted_reward
-            advantages = reward_targets - reward_values
+            # # Option 1. Monte Carlo estimate of returns
+            # #   NOTE: does not bootstrap at time-limit truncation or at the end of the rollout,
+            # #   and a truncated episode's return leaks into the next episode (only fails cut it).
+            # discounted_reward = 0.0
+            # reward_targets = np.zeros_like(rewards)
+            # for t in reversed(range(len(reward_targets))):
+            #     discounted_reward = rewards[t] + self.discount_factor*(1.0 - fails[t])*discounted_reward
+            #     reward_targets[t] = discounted_reward
+            # advantages = reward_targets - reward_values
 
             # # Option 2. 1-step TD
             # reward_targets = rewards + self.discount_factor*(1.0 - fails)*next_reward_values
             # advantages = reward_targets - reward_values
 
-            # # Option 3. GAE
-            # reward_delta = 0.0
-            # reward_targets = np.zeros_like(rewards)
-            # for t in reversed(range(len(reward_targets))):
-            #     reward_targets[t] = rewards[t] + self.discount_factor*(1.0 - fails[t])*next_reward_values[t] \
-            #                     + self.discount_factor*(1.0 - dones[t])*reward_delta
-            #     reward_delta = self.gae_coeff*(reward_targets[t] - reward_values[t])
-            # advantages = reward_targets - reward_values
+            # Option 3. GAE (used): lambda-return target, bootstraps with V(s') unless the episode failed,
+            # and stops propagating at episode boundaries (dones). lambda = gae_coeff.
+            reward_delta = 0.0
+            reward_targets = np.zeros_like(rewards)
+            for t in reversed(range(len(reward_targets))):
+                reward_targets[t] = rewards[t] + self.discount_factor*(1.0 - fails[t])*next_reward_values[t] \
+                                + self.discount_factor*(1.0 - dones[t])*reward_delta
+                reward_delta = self.gae_coeff*(reward_targets[t] - reward_values[t])
+            advantages = reward_targets - reward_values
 
             # append
             states_list.append(states)

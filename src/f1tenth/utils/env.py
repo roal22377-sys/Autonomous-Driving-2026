@@ -119,13 +119,17 @@ class F1Wrapper(gym.Wrapper):
     # ============================ implement here ============================ #
     # TODO
     # You need to implement your own reward function.
-    def calc_reward(self):        
-        # forward reward
-        forward_reward = 1.0
+    PROGRESS_COEFF = 10.0     # reward per meter of centerline progress (8 m/s * 0.025 s -> ~2.0/step)
+    COLLISION_COST = 10.0
+
+    def calc_reward(self):
+        # forward reward: progress along the centerline (frenet s) this step [m].
+        # Rewards speed, not mere survival; driving backwards gives a negative reward.
+        forward_reward = self.PROGRESS_COEFF*float(self.delta_s)
 
         # collison cost
-        collision_cost = 10.0 if self.collision else 0.0 
-        
+        collision_cost = self.COLLISION_COST if self.collision else 0.0
+
         # final reward
         reward = forward_reward - collision_cost
         reward_dict = {'forward_reward': forward_reward,

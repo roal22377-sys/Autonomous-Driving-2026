@@ -77,21 +77,29 @@ class Agent(AgentBase):
                 ##############
                 ##   eq.3   ##
                 ##############
-                critic_loss = 
+                # L^VF = E[(V(s_t) - R_t)^2]
+                values_tensor = self.critic(states_tensor).squeeze(-1)
+                critic_loss = torch.mean(torch.square(values_tensor - reward_targets_tensor))
 
                 # actor loss
                 ##############
                 ##  eq.5-6  ##
                 ##############
-                prob_ratios_tensor =
-                clipped_ratios_tensor =
+                # r_t = pi_theta(a|s) / pi_old(a|s) = exp(log pi_theta - log pi_old)
+                action_dists = self.actor(states_tensor)
+                log_probs_tensor = torch.sum(action_dists.log_prob(actions_tensor), dim=-1)
+                prob_ratios_tensor = torch.exp(log_probs_tensor - old_log_probs_tensor)
+                clipped_ratios_tensor = torch.clamp(prob_ratios_tensor, 1.0 - self.clip_ratio, 1.0 + self.clip_ratio)
 
                 ##############
                 ##   eq.7   ##
                 ##############
-                actor_objective = 
+                # L^CLIP = E[min(r_t A_t, clip(r_t, 1-eps, 1+eps) A_t)]
+                actor_objective = torch.mean(torch.minimum(
+                    prob_ratios_tensor*reward_gaes_tensor,
+                    clipped_ratios_tensor*reward_gaes_tensor))
                 actor_loss = -actor_objective
-                entropy = 
+                entropy = torch.mean(torch.sum(action_dists.entropy(), dim=-1))
 
                 # total loss
                 total_loss = actor_loss + self.critic_coeff*critic_loss - self.ent_coeff*entropy
@@ -103,9 +111,11 @@ class Agent(AgentBase):
                 clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
+            # KL(pi_old || pi_new) averaged over the whole rollout, for early stopping & adaptive lr
             with torch.no_grad():
-                kl = kl_divergence(...)
-                entropy = 
+                total_new_action_dists = self.actor(total_states_tensor)
+                kl = torch.mean(torch.sum(kl_divergence(total_old_action_dists, total_new_action_dists), dim=-1))
+                entropy = torch.mean(torch.sum(total_new_action_dists.entropy(), dim=-1))
         # ======================================================================== #
 
             if kl > self.max_kl*self.kl_tolerance: break
