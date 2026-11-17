@@ -3,12 +3,14 @@
 #   tools/drive_session.sh            # open 5 tabs: bringup / teleop(e-stop) / bag record / cmd monitor / agent
 #   tools/drive_session.sh --stop     # stop agent, bag (saved cleanly), bringup on the car
 #   tools/drive_session.sh --fetch    # extract the newest bag on the car -> logs/<bag>_extracted/
+#   tools/drive_session.sh --agent    # (re)start only the agent in this terminal (bringup keeps running)
+# ros2 run uses /usr/bin/python3, so torch comes from PYTHONPATH (venv site-packages), not from activate.
 # The agent tab waits for Enter, so press 's' in the teleop tab first (holds the car stopped);
 # then 'r' = drive, 's' = stop.
 set -e
 CAR_HOST="${CAR_HOST:-jowonjun@10.106.0.73}"
 SSH_OPTS="-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
-CAR_ENV='source ~/venv/torch210/bin/activate && cd ~/ros2_ws && source /opt/ros/foxy/setup.bash && source install/setup.bash && export ROS_DOMAIN_ID=6'
+CAR_ENV='export PYTHONPATH=$HOME/venv/torch210/lib/python3.8/site-packages:$PYTHONPATH && source ~/venv/torch210/bin/activate && cd ~/ros2_ws && source /opt/ros/foxy/setup.bash && source install/setup.bash && export ROS_DOMAIN_ID=6'
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if ! ssh $SSH_OPTS -o BatchMode=yes "$CAR_HOST" true; then
@@ -31,8 +33,15 @@ case "$1" in
     scp -rq "$CAR_HOST:${BAG}_extracted" "$REPO/logs/"
     echo "[done] $REPO/logs/$(basename "$BAG")_extracted"
     exit 0 ;;
+  --agent)
+    # (re)start only the agent in this terminal, e.g. after it crashed; bringup keeps running
+    if ssh $SSH_OPTS "$CAR_HOST" 'pgrep -f "[a]gent_node" >/dev/null'; then
+      echo "[error] agent_node already running on the car"; exit 1
+    fi
+    read -p "Press s in the TELEOP tab first, then Enter here to start the agent: "
+    exec ssh $SSH_OPTS -t "$CAR_HOST" "$CAR_ENV && ros2 run f1tenth_stack agent_node --ros-args --params-file src/f1tenth_ros/f1tenth_stack/config/agent.yaml" ;;
   "") ;;
-  *) echo "usage: $0 [--stop|--fetch]"; exit 1 ;;
+  *) echo "usage: $0 [--stop|--fetch|--agent]"; exit 1 ;;
 esac
 
 if ssh $SSH_OPTS "$CAR_HOST" 'pgrep -f "[r]os2 launch f1tenth_stack|[a]gent_node" >/dev/null'; then

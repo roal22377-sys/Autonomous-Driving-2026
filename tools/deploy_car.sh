@@ -53,7 +53,7 @@ ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$CAR_HOST" "set -e
 
 if [ -n "$LAUNCH" ]; then
   echo "[car] bringup ($LAUNCH) -- Ctrl+C to stop"
-  exec ssh "${SSH_OPTS[@]}" -t "$CAR_HOST" "cd $CAR_WS && source \$HOME/venv/torch210/bin/activate && source /opt/ros/foxy/setup.bash && source $CAR_WS/install/setup.bash && \
+  exec ssh "${SSH_OPTS[@]}" -t "$CAR_HOST" "cd $CAR_WS && export PYTHONPATH=\$HOME/venv/torch210/lib/python3.8/site-packages:\$PYTHONPATH && source \$HOME/venv/torch210/bin/activate && source /opt/ros/foxy/setup.bash && source $CAR_WS/install/setup.bash && \
     export ROS_DOMAIN_ID=$CAR_DOMAIN_ID && \
     ros2 launch f1tenth_stack bringup_launch.py \
       vesc_config:=$CAR_WS/src/f1tenth_ros/f1tenth_stack/config/vesc.yaml $LAUNCH"
