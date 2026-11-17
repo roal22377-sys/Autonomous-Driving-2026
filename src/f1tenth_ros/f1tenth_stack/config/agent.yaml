@@ -5,4 +5,4 @@ agent_node:
     scan_topic: scan
     drive_topic: drive
     odom_topic: odom
-    speed_limit: 4.0    # [m/s] cap on commanded speed (practice); 0.0 = no cap (model max_speed)
+    speed_limit: 3.0    # [m/s] cap on commanded speed (practice); 0.0 = no cap (model max_speed)
