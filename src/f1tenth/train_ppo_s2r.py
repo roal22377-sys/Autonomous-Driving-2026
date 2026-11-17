@@ -98,7 +98,7 @@ def main():
     # IL policy (actor + frozen normalizer) and a frozen copy as the BC teacher
     il_dir = f'results/{args.il}'
     rms = RunningMeanStd('agent_obs', args.obs_dim)
-    rms.load(f'{il_dir}/sim2real')
+    rms.load(f'{il_dir}/sim2real', required=True)
     actor = IL.make_actor(args)
     actor.load_state_dict(torch.load(f'{il_dir}/checkpoint/model.pt')['actor'])
     with torch.no_grad():
@@ -150,7 +150,11 @@ def main():
             a = a.numpy()
             nobs, rew, term, trunc, info = venv.step(np.clip(a, -1, 1))
             npriv = np.stack(list(info['privileged'])).astype(np.float32)
-            done, fail = term | trunc, term & ~trunc
+            done = term | trunc
+            # only a crash cuts the value; finishing the laps (success) is bootstrapped like a time limit
+            succ = np.array([bool(info['final_info'][i].get('success', False)) if d else False
+                             for i, d in enumerate(done)])
+            fail = term & ~trunc & ~succ
             next_o, next_p = nobs.copy(), npriv.copy()
             for i in np.where(done)[0]:                       # autoreset: use the real final state
                 next_o[i] = info['final_observation'][i]

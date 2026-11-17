@@ -47,8 +47,11 @@ class RunningMeanStd(object):
         else:
             return norm_obs * std + mean
     
-    def load(self, save_dir):
+    def load(self, save_dir, required=False):
         file_name = f"{save_dir}/{self.name}_scale.pkl"
+        if required and not os.path.exists(file_name):
+            # running a trained actor on unnormalized observations drives blind; never do it silently
+            raise FileNotFoundError(f'observation normalizer missing: {file_name}')
         if os.path.exists(file_name):
             with open(file_name, 'rb') as f:
                 self.mean, self.var, self.count = pickle.load(f)

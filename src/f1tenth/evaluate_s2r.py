@@ -45,7 +45,7 @@ def model_args(model):
 
 
 def run(job):
-    model, path, mode, cap = job
+    model, path, mode, cap, start = job
     torch.set_num_threads(1)
     seed = sum(map(ord, os.path.basename(path)))      # same start pose / noise per track for every model
     np.random.seed(seed)
@@ -56,8 +56,9 @@ def run(job):
     if mode == 'ideal':      # same track, plain simulator
         env.sim_mode = 'ideal'
     env.fixed_speed_cap = cap            # applied to the sent command like agent_node.py speed_limit
+    env.start_mode = start               # 'center' or 'random' (anywhere across the track, heading error)
     rms = RunningMeanStd('agent_obs', args.obs_dim)
-    rms.load(f'results/{model}/sim2real')
+    rms.load(f'results/{model}/sim2real', required=True)
     actor = torch.load(f'results/{model}/sim2real/actor.pt', map_location='cpu')
     actor.eval()
     obs, info = env.reset(options={'track': path})
@@ -69,8 +70,8 @@ def run(job):
         steer.append(a[0] * env.max_steer)
         speed.append(float(info['obs_dict']['linear_vels_x'][0]))
         done = term or trunc
-    ok = bool(env._env.unwrapped.toggle_list[0] >= 2 * env.laps)
-    return (model, f'{mode}@{cap:g}', os.path.basename(path)[:-4], ok, float(env._env.unwrapped.lap_times[0]),
+    ok = bool(env.success)
+    return (model, f'{mode}@{cap:g}/{start}', os.path.basename(path)[:-4], ok, float(env.elapsed),
             float(np.mean(speed)), float(np.abs(np.diff(steer)).mean()))
 
 
@@ -79,6 +80,7 @@ def main():
     p.add_argument('models', nargs='+')
     p.add_argument('--modes', nargs='+', default=['eval', 'ideal'])
     p.add_argument('--caps', nargs='+', type=float, default=[8.0, 3.0], help='speed limits [m/s] (8 = none)')
+    p.add_argument('--starts', nargs='+', default=['center', 'random'])
     p.add_argument('--workers', type=int, default=22)
     p.add_argument('--max_tracks', type=int, default=0, help='limit the number of tracks (smoke tests)')
     a = p.parse_args()
@@ -86,12 +88,12 @@ def main():
                      (HOLDOUT in t or os.path.basename(t)[:-4] in [m + s for m in EVAL_MAPS for s in ('', '_rev')])])
     if a.max_tracks:
         tracks = tracks[:a.max_tracks]
-    jobs = [(m, t, mode, cap) for m in a.models for mode in a.modes for cap in a.caps for t in tracks]
-    a.modes = [f'{mode}@{cap:g}' for mode in a.modes for cap in a.caps]
+    jobs = [(m, t, mode, cap, st) for m in a.models for mode in a.modes for cap in a.caps for st in a.starts for t in tracks]
+    a.modes = [f'{mode}@{cap:g}/{st}' for mode in a.modes for cap in a.caps for st in a.starts]
     with mp.get_context('spawn').Pool(a.workers) as pool:
         res = pool.map(run, jobs)
     print(f'\n{len(tracks)} tracks x 2 laps')
-    print(f'{"model":16s} {"mode":9s} {"success":>9s} {"2-lap time*":>12s} {"avg speed":>10s} {"|dsteer|":>9s}')
+    print(f'{"model":16s} {"mode":17s} {"success":>9s} {"2-lap time*":>12s} {"avg speed":>10s} {"|dsteer|":>9s}')
     common = {}
     for mode in a.modes:      # lap time over tracks every model finished, so the comparison is fair
         ok_sets = [set(r[2] for r in res if r[0] == m and r[1] == mode and r[3]) for m in a.models]
@@ -101,12 +103,12 @@ def main():
             rr = [r for r in res if r[0] == m and r[1] == mode]
             succ = np.mean([r[3] for r in rr])
             lap = np.mean([r[4] for r in rr if r[2] in common[mode]]) if common[mode] else float('nan')
-            print(f'{m:16s} {mode:9s} {succ*100:8.1f}% {lap:11.1f}s {np.mean([r[5] for r in rr]):9.2f} '
+            print(f'{m:16s} {mode:17s} {succ*100:8.1f}% {lap:11.1f}s {np.mean([r[5] for r in rr]):9.2f} '
                   f'{np.mean([r[6] for r in rr]):9.4f}')
     print(f'* mean over the tracks all models finished ({ {k: len(v) for k, v in common.items()} })')
     for r in res:
         if not r[3]:
-            print(f'  fail {r[0]:14s} {r[1]:9s} {r[2]:24s} at {r[4]:.1f}s')
+            print(f'  fail {r[0]:14s} {r[1]:17s} {r[2]:24s} at {r[4]:.1f}s')
 
 
 if __name__ == '__main__':

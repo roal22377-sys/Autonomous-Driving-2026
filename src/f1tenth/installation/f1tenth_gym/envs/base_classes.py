@@ -117,7 +117,9 @@ class RaceCar(object):
 
         # steering delay buffer
         self.steer_buffer = np.empty((0,))
-        self.steer_buffer_size = 2
+        # was 2 (a hidden 0.05 s steering delay). All delay is now modelled explicitly by
+        # utils/env.py (sim2real.steer_delay), so the expert can compensate for exactly it.
+        self.steer_buffer_size = 0
 
         # collision identifier
         self.in_collision = False
@@ -138,8 +140,16 @@ class RaceCar(object):
             RaceCar.side_distances = np.zeros((num_beams,))
 
             dist_sides = params["width"] / 2.0
-            dist_fr = (params["lf"] + params["lr"]) / 2.0 - self.lidar_pos_offset
-            dist_re = (params["lf"] + params["lr"]) / 2.0 + self.lidar_pos_offset
+            # body = params["length"] centered on the wheelbase middle, which is (lf - lr)/2 ahead of
+            # the CG (state x, y). The original used the wheelbase (lf + lr) as the body length, so the
+            # 0.60 m car was only 0.35 m long for wall collisions (front ended 2 cm ahead of the lidar).
+            if params.get("front_overhang") is not None:
+                # measured body: front bumper = front axle + front_overhang (from the CG: lf + overhang)
+                front = params["lf"] + params["front_overhang"]
+            else:
+                front = params["length"] / 2.0 + (params["lf"] - params["lr"]) / 2.0
+            dist_fr = front - self.lidar_pos_offset
+            dist_re = (params["length"] - front) + self.lidar_pos_offset
 
             for i in range(num_beams):
                 angle = -fov / 2.0 + i * scan_ang_incr
@@ -294,7 +304,9 @@ class RaceCar(object):
 
         # steering delay
         steer = 0.0
-        if self.steer_buffer.shape[0] < self.steer_buffer_size:
+        if self.steer_buffer_size == 0:
+            steer = raw_steer
+        elif self.steer_buffer.shape[0] < self.steer_buffer_size:
             steer = 0.0
             self.steer_buffer = np.append(raw_steer, self.steer_buffer)
         else:

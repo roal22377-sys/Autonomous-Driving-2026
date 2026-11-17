@@ -80,7 +80,9 @@ def add_scan_noise(raw_scan, rng, noise_std, dropout_prob, spike_short_prob=0.0,
     '''
     scan = np.asarray(raw_scan, dtype=np.float32).reshape(-1).copy()
     if rotation_beams:
-        scan = np.roll(scan, int(rotation_beams))
+        # shift without wrapping (the scan covers 270 deg, its ends are not neighbours)
+        k = int(rotation_beams)
+        scan = np.concatenate([np.full(k, scan[0]), scan[:-k]]) if k > 0 else np.concatenate([scan[-k:], np.full(-k, scan[-1])])
     if noise_std > 0:
         scan += rng.normal(0.0, noise_std, size=scan.shape).astype(np.float32)
     if spike_short_prob > 0:

@@ -198,7 +198,8 @@ class F110Env(gym.Env):
                 "v_max": args.v_max,
                 "width": args.width,
                 "length": args.length,
-                "lidar_pos_offset": args.lidar_pos_offset
+                "lidar_pos_offset": args.lidar_pos_offset,
+                "front_overhang": args.get("front_overhang", None)
             },
             "num_agents": args.num_agents,
             "timestep": args.timestep,

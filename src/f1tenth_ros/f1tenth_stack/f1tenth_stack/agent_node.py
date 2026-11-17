@@ -94,7 +94,7 @@ class AgentNode(Node):
     # load algorithm
     try:
       self.obs_rms = RunningMeanStd('agent_obs', self.obs_dim)
-      self.obs_rms.load(save_dir)
+      self.obs_rms.load(save_dir, required=True)
       self.actor = torch.load(f'{save_dir}/actor.pt').to(self.device)
       self.get_logger().info('[model] agent load success')
     except:
@@ -136,7 +136,8 @@ class AgentNode(Node):
       action = self.actor(state_tensor).loc.cpu().numpy()
     
     # transform action
-    action[0] *= self.args.max_steer
+    # policy angle [rad] -> servo command: calibration says command = angle * steer_cmd_gain
+    action[0] *= self.args.max_steer * float(self.args.get('steer_cmd_gain', 1.0))
     action[1] = unnormalize_speed(action[1], self.args.min_speed, self.args.max_speed)
     if self.speed_limit > 0:
       # cap after unnormalizing, so the model's output mapping stays as trained
@@ -150,7 +151,7 @@ class AgentNode(Node):
     self.drive_pub.publish(msg)
 
     # remember what was actually sent (after the speed cap), normalized like the policy output
-    self.history.push([action[0] / self.args.max_steer,
+    self.history.push([action[0] / (self.args.max_steer * float(self.args.get('steer_cmd_gain', 1.0))),
                        normalize_speed(action[1], self.args.min_speed, self.args.max_speed)])
 
   def getObs(self, raw_scan: np.ndarray, speed=None):

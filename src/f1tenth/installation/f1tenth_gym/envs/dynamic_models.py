@@ -400,6 +400,7 @@ def vehicle_dynamics_st(
     return f
 
 
+SPEED_P_GAIN = 10.0     # [1/s] ~0.1 s speed loop; the old 10*a_max/v_max was ~0.27 s (real: ~0.03 s + accel limit)
 STEER_P_GAIN = 40.0     # = 1 / timestep (0.025 s): reach the target within one step if the rate allows
 
 
@@ -435,15 +436,15 @@ def pid_accl(speed, current_speed, max_a, max_v, min_v):
     """
     # accl
     vel_diff = speed - current_speed
-    # currently forward
-    if current_speed > 0.0:
+    # currently forward (or standing still)
+    if current_speed >= 0.0:
         if vel_diff > 0:
-            # accelerate
-            kp = 10.0 * max_a / max_v
+            # accelerate: fast speed loop, saturated by a_max (VESC speed PID + current limit)
+            kp = SPEED_P_GAIN
             accl = kp * vel_diff
         else:
             # braking
-            kp = 10.0 * max_a / (-min_v)
+            kp = SPEED_P_GAIN
             accl = kp * vel_diff
     # currently backwards
     else:

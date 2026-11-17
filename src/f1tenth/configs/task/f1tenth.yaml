@@ -43,8 +43,8 @@ action_history:
 # sim-to-real gaps measured on the car; utils/env.py applies them when sim_mode != 'ideal'
 #   train: sample each episode from the ranges, eval: fixed nominal values
 sim2real:
-  steer_delay: [0.10, 0.25]   # [s] effective steering delay (servo + tire); real ~0.2 s reproduces the weave
-  steer_delay_nominal: 0.20
+  steer_delay: [0.10, 0.30]   # [s] total steering delay (servo + tire); 0.25 total reproduced the real weave
+  steer_delay_nominal: 0.25   #     (the old sim's hidden 2-step buffer is gone, see base_classes.py)
   speed_delay: [0.0, 0.05]    # [s] speed command -> wheel speed (real ~0.03 s)
   speed_delay_nominal: 0.03
   a_max: [2.5, 3.5]           # [m/s^2] real accel p95 2.7 (VESC current limit); sim default 9.51
@@ -58,7 +58,8 @@ sim2real:
 timestep: 0.025
 min_speed: 2.0     # [m/s] lowest speed the policy can command
 max_speed: 8.0     # [m/s] policy speed range is [min_speed, max_speed]; VESC speed_max 30000 ERPM ~ 8.6 m/s
-max_steer: 0.497    # calibration
+max_steer: 0.482    # [rad] true wheel angle at full lock: atan(2*0.34 / (1.00 + 0.30)), inner circle 1.0 m both sides
+steer_cmd_gain: 1.031   # real car: command = angle * gain (0.497 command gave that 1.0 m circle); agent_node only
 control_input: ["speed", "steering_angle"]
 observation_config: {"type": "original"}
 reset_config: {"type": "cl_random_static"}

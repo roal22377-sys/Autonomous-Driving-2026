@@ -173,6 +173,9 @@ class F1Wrapper(gym.Wrapper):
         elif abs(self.delta_s) > total_track_s/2.0 and self.delta_s > 0:
             # moved backwards across the start point
             self.delta_s -= total_track_s
+        if abs(self.delta_s) > 1.0:
+            # a jump to another part of the centerline (projection glitch), not real motion
+            self.delta_s = 0.0
 
         # frenet coordinate pose
         self.position_frenet = np.stack([poses_s, poses_d]).T
@@ -206,7 +209,14 @@ class F1Wrapper(gym.Wrapper):
         self.history.reset()
         self.last_action = np.zeros(2, dtype=np.float32)
         self.prev_cmd = np.zeros(2, dtype=np.float32)
+        if self.track_file is not None and 'poses' not in options:
+            options['poses'] = self._start_pose(options['map'])
 
+        # laps are counted from progress along the track (progress_laps), not from the start-line
+        # band of f110_env, which misses laps when the start is off-center or the track is wide
+        self.progress_laps = self.sim_mode != 'ideal'
+        self._env.unwrapped.num_laps = 10**6 if self.progress_laps else self.laps
+        self.progress, self.elapsed, self.success, self.lap_times = 0.0, 0.0, False, []
         obs_dict, info = self._env.reset(options=options, **kwargs)
         # enough steps for all laps even at a slow 1.6 m/s
         if self.s2r.get('laps_steps', False) and self.sim_mode != 'ideal':
@@ -281,14 +291,53 @@ class F1Wrapper(gym.Wrapper):
 
         obs_dict, _, terminate, truncate, info = self._env.step(_action)
         self._step_pose(obs_dict)
+        self.elapsed += self.timestep
+        if self.progress_laps:
+            length = float(self._env.track.centerline.spline.s[-1])
+            self.progress += float(self.delta_s)
+            if self.progress >= (len(self.lap_times) + 1) * length:
+                self.lap_times.append(self.elapsed)
+            if self.progress >= self.laps * length and not self.collision:
+                self.success, terminate = True, True
+        else:
+            self.success = bool(self._env.unwrapped.toggle_list[0] >= 2 * self.laps)
+            self.lap_times = list(self._env.unwrapped.lap_split_times)
         obs = self.getObs(obs_dict)
         reward, reward_dict = self.calc_reward(cmd)
         info['obs_dict'] = obs_dict
         info.update(reward_dict)
-        info['lap_count'] = int(self._env.unwrapped.lap_counts[0])
-        info['lap_split_times'] = list(self._env.unwrapped.lap_split_times)
+        info['lap_count'] = len(self.lap_times)
+        info['lap_split_times'] = list(self.lap_times)
+        info['success'] = self.success
         info['privileged'] = self.privileged()
         return obs, reward, terminate, truncate, info
+
+    START_MAX_HEADING = 0.35      # [rad] heading error at random starts
+    start_mode = None              # None: random offset in 'train', centerline otherwise; or 'center' / 'random'
+
+    def _start_pose(self, track):
+        '''
+            Start pose on a generated track. Random starts (train, or start_mode='random') put the
+            car anywhere across the drivable width with a heading error, so the policy learns to
+            merge onto the race line from far away; otherwise on the centerline, heading along it.
+        '''
+        xy = np.stack([track.centerline.xs, track.centerline.ys], axis=1).astype(np.float64)
+        n = len(xy)
+        i = int(self.noise_rng.integers(n))
+        t = xy[(i + 1) % n] - xy[i - 1]
+        yaw = float(np.arctan2(t[1], t[0]))
+        mode = self.start_mode or ('random' if self.sim_mode == 'train' else 'center')
+        x, y, th = xy[i, 0], xy[i, 1], yaw
+        if mode == 'random' and hasattr(track, 'w_left'):
+            dh = float(self.noise_rng.uniform(-self.START_MAX_HEADING, self.START_MAX_HEADING))
+            # keep the 0.30 x 0.60 body clear of the wall it points at: half width 0.15 + 0.15, plus
+            # the sideways reach of the front corner (~0.8 m ahead incl. the first moments of driving)
+            margin = 0.3 + 0.8*abs(np.sin(dh))
+            lo, hi = -(float(track.w_right[i]) - margin), float(track.w_left[i]) - margin
+            off = float(self.noise_rng.uniform(lo, hi)) if hi > lo else 0.0
+            x, y = x - off*np.sin(yaw), y + off*np.cos(yaw)
+            th = yaw + dh
+        return np.array([[x, y, th]])
 
     def _sample_speed_cap(self):
         if self.fixed_speed_cap is not None:

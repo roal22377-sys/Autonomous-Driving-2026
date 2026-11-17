@@ -58,13 +58,15 @@ def _smooth_noise(s, length, rng, corr_len, std):
 def _self_clearance(xy, s, length, min_ds=6.0):
     '''Distance from each point to the nearest point of a *different* part of the track.'''
     tree = cKDTree(xy)
-    k = min(80, len(xy))
-    d, idx = tree.query(xy, k=k)
-    ds = np.abs(s[idx] - s[:, None])
-    ds = np.minimum(ds, length - ds)
-    d = np.where(ds > min_ds, d, np.inf)
-    out = d.min(axis=1)
-    out[~np.isfinite(out)] = 10.0
+    reach = 2 * 2.2 + 2 * 3.5 + 1.0          # widest corridor incl. pockets on both sides
+    out = np.full(len(xy), 10.0)
+    for i, nb in enumerate(tree.query_ball_point(xy, r=reach)):
+        nb = np.asarray(nb, dtype=int)
+        ds = np.abs(s[nb] - s[i])
+        ds = np.minimum(ds, length - ds)
+        nb = nb[ds > min_ds]
+        if len(nb):
+            out[i] = np.min(np.linalg.norm(xy[nb] - xy[i], axis=1))
     return out
 
 

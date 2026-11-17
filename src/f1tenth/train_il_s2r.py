@@ -49,7 +49,7 @@ MAPS = ['Sochi', 'Spa', 'Nuerburgring', 'Monza', 'Melbourne', 'Austin',
 EVAL_MAPS = ['Sochi', 'IMS', 'Catalunya', 'Zandvoort', 'Silverstone', 'SaoPaulo',
              'YasMarina', 'MoscowRaceway', 'Shanghai', 'MexicoCity', 'Montreal']
 HOLDOUT = '_w105'               # generated variant kept out of training
-WHEELBASE = 0.17145 + 0.15875
+WHEELBASE = None                # from configs/task/dynamic.yaml (length_f + length_r)
 EXPERT = {'a_lat': 4.0, 'lad_base': 0.6, 'lad_gain': 0.22, 'merge_dist': 0.6}
 STEER_LOSS_WEIGHT = 2.0         # steering errors matter more than speed errors
 
@@ -69,6 +69,9 @@ def get_args(argv=None):
     p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--hidden_dim', type=int, default=256)
     p.add_argument('--eval_tracks', type=int, default=44)
+    p.add_argument('--max_data', type=float, default=1.2e7,
+                   help='keep at most this many samples (oldest DAgger rounds dropped, expert round kept)')
+    p.add_argument('--min_beta', type=float, default=0.1, help='expert-driven episode fraction never below this')
     a = p.parse_args(argv)
     args = EasyDict(vars(a))
     for f in ['configs/task/f1tenth.yaml', 'configs/task/dynamic.yaml', 'configs/algorithm/imitation.yaml']:
@@ -110,7 +113,7 @@ def rollout_worker(job):
     while total < n_steps:
         obs, info = env.reset()
         # the expert respects this episode's speed cap (the policy is told the cap in its observation)
-        pl = RacelinePlanner(env._env.unwrapped.track, WHEELBASE, v_min=env.min_speed, v_max=env.speed_cap,
+        pl = RacelinePlanner(env._env.unwrapped.track, args.length_f + args.length_r, v_min=env.min_speed, v_max=env.speed_cap,
                              a_acc=env.params['a_max'], a_brake=env.params['a_max'], max_steer=env.max_steer, **EXPERT)
         expert_drives = actor is None or np.random.rand() < beta
         noise_std = np.random.uniform(0.0, dart_std) if expert_drives else 0.0
@@ -131,7 +134,7 @@ def rollout_worker(job):
             steps += 1
             done = term or trunc
         total += steps
-        stats.append((expert_drives, int(env._env.unwrapped.toggle_list[0] >= 2 * env.laps), steps))
+        stats.append((expert_drives, int(env.success), steps))
     env.close()
     return np.asarray(O, np.float32), np.asarray(Y, np.float32), stats
 
@@ -150,7 +153,7 @@ def collect(args, n_steps, policy, beta, dart_std, tracks, round_idx):
 
 # ------------------------------------------------------------------ evaluation (workers)
 def eval_worker(job):
-    path, policy, mode, seed, cap = job
+    path, policy, mode, seed, cap, start = job
     torch.set_num_threads(1)
     np.random.seed(seed)          # same start pose / noise for every model -> comparable results
     random.seed(seed)
@@ -158,6 +161,7 @@ def eval_worker(job):
     args.seed = seed
     env = F1Wrapper(args, MAPS, obs_noise=(mode != 'ideal'), sim_mode=mode, tracks=[path])
     env.fixed_speed_cap = cap
+    env.start_mode = start
     actor = make_actor(args)
     actor.load_state_dict(policy[0])
     actor.eval()
@@ -170,21 +174,27 @@ def eval_worker(job):
         steers.append(act[0])
         obs, r, term, trunc, info = env.step(act)
         done = term or trunc
-    ok = bool(env._env.unwrapped.toggle_list[0] >= 2 * env.laps)
+    ok = bool(env.success)
     st = np.asarray(steers) * env.max_steer
-    return f'{os.path.basename(path)[:-4]}@{cap:g}', ok, float(env._env.unwrapped.lap_times[0]), float(np.abs(np.diff(st)).mean())
+    return f'{os.path.basename(path)[:-4]}@{cap:g}/{start}', ok, float(env.elapsed), float(np.abs(np.diff(st)).mean())
 
 
-EVAL_CAPS = (8.0, 3.0)      # uncapped and a real-car practice limit
+# (speed cap [m/s], start): uncapped from the centerline (lap time), uncapped and car-practice cap
+# from random starts anywhere across the track with a heading error (merging onto the race line)
+EVAL_SETTINGS = ((8.0, 'center'), (8.0, 'random'), (3.0, 'random'))
+EVAL_CAPS = tuple(c for c, _ in EVAL_SETTINGS)
 
 
-def evaluate(args, policy, tracks, mode='eval', caps=EVAL_CAPS):
-    '''success over all (track, cap) runs; lap = mean 2-lap time of the uncapped runs that finished'''
-    jobs = [(p, policy, mode, 7 + i, cap) for cap in caps for i, p in enumerate(sorted(tracks))]
+def evaluate(args, policy, tracks, mode='eval', settings=EVAL_SETTINGS):
+    '''success over all runs; lap = mean 2-lap time of the first setting's runs that finished'''
+    jobs = [(p, policy, mode, 7 + i, cap, start) for cap, start in settings for i, p in enumerate(sorted(tracks))]
     with mp.get_context('spawn').Pool(min(args.workers, len(jobs))) as pool:
         res = pool.map(eval_worker, jobs)
     succ = np.mean([r[1] for r in res])
-    fast = [r for r in res if r[0].endswith(f'@{caps[0]:g}') and r[1]]
+    held = [r[1] for r in res if HOLDOUT in r[0]]
+    print(f'      held-out tracks ({HOLDOUT}, never trained on): success {np.mean(held)*100:.1f}% '
+          f'| training geometries: {np.mean([r[1] for r in res if HOLDOUT not in r[0]])*100:.1f}%', flush=True)
+    fast = [r for r in res if r[0].endswith(f'@{settings[0][0]:g}/{settings[0][1]}') and r[1]]
     lap = np.mean([r[2] for r in fast]) if fast else float('nan')
     return succ, lap, res
 
@@ -272,7 +282,7 @@ def main():
         save(args, actor, rms, tag=f'round{rnd}')
         succ, lap, res = evaluate(args, policy, eval_tracks, 'eval')
         cprint(f'[round {rnd}] data {len(Oall)} | bc val {vl:.5f} ({time.time()-t0:.0f}s) | '
-               f'EVAL (delay 0.2 s, a_max 3, noise, caps {EVAL_CAPS}): 2-lap success {succ*100:.1f}% '
+               f'EVAL (delay 0.2 s, a_max 3, noise, {EVAL_SETTINGS}): 2-lap success {succ*100:.1f}% '
                f'mean uncapped 2-lap time {lap:.1f}s',
                color='cyan', bold=True)
         for r in res:
@@ -287,7 +297,7 @@ def main():
         if rnd == args.dagger_iters:
             break
         # DAgger: the student drives (expert drives a fraction beta of the episodes), expert labels
-        beta = 0.5 ** (rnd + 1)
+        beta = max(0.5 ** (rnd + 1), args.min_beta)
         t0 = time.time()
         O, Y, stats = collect(args, args.dagger_steps, policy, beta, args.dart_std, train_tracks, rnd + 1)
         stu = [s for s in stats if not s[0]]
@@ -296,6 +306,10 @@ def main():
                f'({time.time()-t0:.0f}s)', color='yellow')
         data_O.append(O)
         data_Y.append(Y)
+        # memory cap (23 GB RAM): drop the oldest DAgger rounds, always keep the expert round 0
+        while sum(len(o) for o in data_O) > args.max_data and len(data_O) > 2:
+            del data_O[1], data_Y[1]
+            print(f'      [data] cap {args.max_data:.0f}: dropped the oldest DAgger round', flush=True)
 
 
 if __name__ == '__main__':
