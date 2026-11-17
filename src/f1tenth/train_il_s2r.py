@@ -24,6 +24,7 @@ import os
 import sys
 import time
 import pickle
+import glob
 import random
 import multiprocessing as mp
 from shutil import copyfile
@@ -67,11 +68,19 @@ def get_args(argv=None):
     p.add_argument('--grad_steps', type=int, default=15000, help='gradient steps after each data round')
     p.add_argument('--batch', type=int, default=4096)
     p.add_argument('--lr', type=float, default=1e-3)
-    p.add_argument('--hidden_dim', type=int, default=256)
+    p.add_argument('--hidden_dim', type=int, default=512, help='actor width (2 hidden layers); run 7 used 256')
     p.add_argument('--eval_tracks', type=int, default=44)
     p.add_argument('--max_data', type=float, default=1.2e7,
                    help='keep at most this many samples (oldest DAgger rounds dropped, expert round kept)')
     p.add_argument('--min_beta', type=float, default=0.1, help='expert-driven episode fraction never below this')
+    p.add_argument('--init', default=None, help='start from this model (e.g. imitation/7): its actor + normalizer, '
+                                               'and go straight to DAgger with it driving')
+    p.add_argument('--resume', action='store_true', help='reload the data saved in <save_dir>/data and continue')
+    # CAPS (Mysore et al. 2021) smoothness regularization: removes high-frequency steering jitter without
+    # adding delay. temporal: pi(s_t) ~ pi(s_t+1); spatial: pi(s) ~ pi(s + noise)
+    p.add_argument('--caps_t', type=float, default=0.3, help='temporal smoothness weight (0 = off)')
+    p.add_argument('--caps_s', type=float, default=0.3, help='spatial smoothness weight (0 = off)')
+    p.add_argument('--caps_sigma', type=float, default=0.05, help='spatial noise std in normalized obs units')
     a = p.parse_args(argv)
     args = EasyDict(vars(a))
     for f in ['configs/task/f1tenth.yaml', 'configs/task/dynamic.yaml', 'configs/algorithm/imitation.yaml']:
@@ -82,6 +91,15 @@ def get_args(argv=None):
     args.device = torch.device('cpu')
     args.save_dir = f'results/{args.name}/{args.algo_idx}'
     return args
+
+
+def actor_from_state(state_dict):
+    '''actor with the width of a saved state dict (256 for run 7, 512 for run 8+)'''
+    a = get_args([])
+    a.hidden_dim = int(state_dict['fc1.weight'].shape[0])
+    actor = make_actor(a)
+    actor.load_state_dict(state_dict)
+    return actor
 
 
 def make_actor(args):
@@ -104,12 +122,11 @@ def rollout_worker(job):
     env = F1Wrapper(args, MAPS, obs_noise=True, sim_mode='train', tracks=tracks)
     actor = None
     if policy is not None:
-        actor = make_actor(args)
-        actor.load_state_dict(policy[0])
+        actor = actor_from_state(policy[0])
         actor.eval()
         mean, std = policy[1], np.sqrt(policy[2] + 1e-8)
 
-    O, Y, stats, total = [], [], [], 0
+    O, Y, N, stats, total = [], [], [], [], 0      # N[i]: sample i+1 is the next step of the same episode
     while total < n_steps:
         obs, info = env.reset()
         # the expert respects this episode's speed cap (the policy is told the cap in its observation)
@@ -124,6 +141,7 @@ def rollout_worker(job):
             label = np.clip([s / env.max_steer, normalize_speed(v, env.min_speed, env.max_speed)], -1, 1)
             O.append(obs)
             Y.append(label)
+            N.append(True)
             if expert_drives:
                 noise = 0.9 * noise + np.sqrt(1 - 0.9 ** 2) * noise_std * np.random.randn()
                 act = np.clip(label + np.array([noise, 0.0]), -1, 1)
@@ -133,10 +151,11 @@ def rollout_worker(job):
             obs, r, term, trunc, info = env.step(act)
             steps += 1
             done = term or trunc
+        N[-1] = False
         total += steps
         stats.append((expert_drives, int(env.success), steps))
     env.close()
-    return np.asarray(O, np.float32), np.asarray(Y, np.float32), stats
+    return np.asarray(O, np.float32), np.asarray(Y, np.float32), stats, np.asarray(N, bool)
 
 
 def collect(args, n_steps, policy, beta, dart_std, tracks, round_idx):
@@ -148,7 +167,8 @@ def collect(args, n_steps, policy, beta, dart_std, tracks, round_idx):
     O = np.concatenate([r[0] for r in res])
     Y = np.concatenate([r[1] for r in res])
     stats = [s for r in res for s in r[2]]
-    return O, Y, stats
+    Nn = np.concatenate([r[3] for r in res])
+    return O, Y, stats, Nn
 
 
 # ------------------------------------------------------------------ evaluation (workers)
@@ -162,8 +182,7 @@ def eval_worker(job):
     env = F1Wrapper(args, MAPS, obs_noise=(mode != 'ideal'), sim_mode=mode, tracks=[path])
     env.fixed_speed_cap = cap
     env.start_mode = start
-    actor = make_actor(args)
-    actor.load_state_dict(policy[0])
+    actor = actor_from_state(policy[0])
     actor.eval()
     mean, std = policy[1], np.sqrt(policy[2] + 1e-8)
     obs, info = env.reset(options={'track': path})
@@ -200,7 +219,7 @@ def evaluate(args, policy, tracks, mode='eval', settings=EVAL_SETTINGS):
 
 
 # ------------------------------------------------------------------ behavior cloning
-def train_bc(args, actor, O, Y, rms, grad_steps, lr):
+def train_bc(args, actor, O, Y, rms, grad_steps, lr, Nn=None):
     torch.set_num_threads(args.workers)
     X = torch.as_tensor(rms.normalize(O), dtype=torch.float32)
     T = torch.as_tensor(Y, dtype=torch.float32)
@@ -208,13 +227,22 @@ def train_bc(args, actor, O, Y, rms, grad_steps, lr):
     perm = torch.randperm(n)
     nval = max(2000, n // 50)
     val, tr = perm[:nval], perm[nval:]
+    # samples whose next sample is the next step of the same episode (CAPS temporal term)
+    nxt = torch.as_tensor(np.where(Nn[:-1])[0]) if (Nn is not None and args.caps_t > 0) else None
     w = torch.tensor([STEER_LOSS_WEIGHT, 1.0])
     opt = torch.optim.Adam(actor.parameters(), lr=lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=grad_steps, eta_min=lr * 0.05)
     actor.train()
     for it in range(1, grad_steps + 1):
         idx = tr[torch.randint(len(tr), (args.batch,))]
-        loss = ((actor(X[idx]).loc - T[idx]) ** 2 * w).mean()
+        out = actor(X[idx]).loc
+        loss = ((out - T[idx]) ** 2 * w).mean()
+        if args.caps_s > 0:
+            noisy = actor(X[idx] + args.caps_sigma * torch.randn_like(X[idx])).loc
+            loss = loss + args.caps_s * ((noisy - out) ** 2).mean()
+        if nxt is not None:
+            j = nxt[torch.randint(len(nxt), (args.batch // 2,))]
+            loss = loss + args.caps_t * ((actor(X[j + 1]).loc - actor(X[j]).loc) ** 2).mean()
         opt.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(actor.parameters(), args.max_grad_norm)
@@ -264,25 +292,59 @@ def main():
     actor.initialize()
     rms = RunningMeanStd('agent_obs', args.obs_dim)
     log = []
+    data_dir = f'{args.save_dir}/data'
+    os.makedirs(data_dir, exist_ok=True)
 
-    # round 0: expert drives (DART)
-    t0 = time.time()
-    O, Y, stats = collect(args, args.expert_steps, None, 1.0, args.dart_std, train_tracks, 0)
-    succ = np.mean([s[1] for s in stats])
-    cprint(f'[round 0] expert+DART {len(O)} steps, {len(stats)} episodes, 2-lap success {succ*100:.0f}% '
-           f'({time.time()-t0:.0f}s)', color='yellow')
-    rms.update(O)
-    data_O, data_Y = [O], [Y]
+    def save_round(k, O, Y, Nn):
+        np.savez(f'{data_dir}/round{k:03d}.npz', O=O, Y=Y, N=Nn)
 
-    for rnd in range(0, args.dagger_iters + 1):
-        Oall, Yall = np.concatenate(data_O), np.concatenate(data_Y)
+    start_rnd = 0
+    if args.resume and sorted(glob.glob(f'{data_dir}/round*.npz')):
+        # continue: saved data + the newest round checkpoint (actor + normalizer)
+        files = sorted(glob.glob(f'{data_dir}/round*.npz'))
+        data_O, data_Y, data_N = [], [], []
+        for f in files:
+            z = np.load(f)
+            data_O.append(z['O']); data_Y.append(z['Y']); data_N.append(z['N'])
+        ck = torch.load(sorted(glob.glob(f'{args.save_dir}/checkpoint/model_round*.pt'))[-1])
+        actor.load_state_dict(ck['actor']); rms.mean, rms.var = ck['obs_mean'], ck['obs_var']
+        if os.path.isfile(f'{args.save_dir}/train_log.pkl'):
+            log = pickle.load(open(f'{args.save_dir}/train_log.pkl', 'rb'))
+        start_rnd = len(files) - 1
+        while sum(len(o) for o in data_O) > args.max_data and len(data_O) > 2:
+            del data_O[1], data_Y[1], data_N[1]
+        cprint(f'[resume] {len(files)} data rounds ({sum(len(o) for o in data_O)} samples), continuing at round {start_rnd}', bold=True)
+    else:
+        if args.init:
+            # start from an existing model: its normalizer stays fixed so the actor keeps working
+            src = f'results/{args.init}'
+            rms.load(f'{src}/sim2real', required=True)
+            actor.load_state_dict(torch.load(f'{src}/checkpoint/model.pt')['actor'])
+            cprint(f'[init] actor + normalizer from {src}', bold=True)
+        # round 0: expert drives (DART)
         t0 = time.time()
-        vl = train_bc(args, actor, Oall, Yall, rms, args.grad_steps, args.lr if rnd == 0 else args.lr * 0.5)
+        O, Y, stats, Nn = collect(args, args.expert_steps, None, 1.0, args.dart_std, train_tracks, 0)
+        succ = np.mean([s[1] for s in stats])
+        cprint(f'[round 0] expert+DART {len(O)} steps, {len(stats)} episodes, 2-lap success {succ*100:.0f}% '
+               f'({time.time()-t0:.0f}s)', color='yellow')
+        if not args.init:
+            rms.update(O)
+        data_O, data_Y, data_N = [O], [Y], [Nn]
+        save_round(0, O, Y, Nn)
+
+    s2r = args.sim2real
+    eval_desc = (f"delay {s2r['steer_delay_nominal']} s, a_max {s2r['a_max_nominal']}, noise, "
+                 f"start/cap {EVAL_SETTINGS}")
+    for rnd in range(start_rnd, args.dagger_iters + 1):
+        Oall, Yall, Nall = np.concatenate(data_O), np.concatenate(data_Y), np.concatenate(data_N)
+        t0 = time.time()
+        vl = train_bc(args, actor, Oall, Yall, rms, args.grad_steps,
+                      args.lr if (rnd == 0 and not args.init) else args.lr * 0.5, Nall)
         policy = ({k: v.clone() for k, v in actor.state_dict().items()}, rms.mean.copy(), rms.var.copy())
         save(args, actor, rms, tag=f'round{rnd}')
         succ, lap, res = evaluate(args, policy, eval_tracks, 'eval')
         cprint(f'[round {rnd}] data {len(Oall)} | bc val {vl:.5f} ({time.time()-t0:.0f}s) | '
-               f'EVAL (delay 0.2 s, a_max 3, noise, {EVAL_SETTINGS}): 2-lap success {succ*100:.1f}% '
+               f'EVAL ({eval_desc}): 2-lap success {succ*100:.1f}% '
                f'mean uncapped 2-lap time {lap:.1f}s',
                color='cyan', bold=True)
         for r in res:
@@ -299,16 +361,19 @@ def main():
         # DAgger: the student drives (expert drives a fraction beta of the episodes), expert labels
         beta = max(0.5 ** (rnd + 1), args.min_beta)
         t0 = time.time()
-        O, Y, stats = collect(args, args.dagger_steps, policy, beta, args.dart_std, train_tracks, rnd + 1)
+        O, Y, stats, Nn = collect(args, args.dagger_steps, policy, beta, args.dart_std, train_tracks, rnd + 1)
+        save_round(rnd + 1, O, Y, Nn)
         stu = [s for s in stats if not s[0]]
         cprint(f'[dagger {rnd+1}] beta {beta:.2f}: {len(O)} steps, student 2-lap success '
                f'{np.mean([s[1] for s in stu])*100 if stu else float("nan"):.0f}% over {len(stu)} episodes '
                f'({time.time()-t0:.0f}s)', color='yellow')
         data_O.append(O)
         data_Y.append(Y)
+        data_N.append(Nn)
         # memory cap (23 GB RAM): drop the oldest DAgger rounds, always keep the expert round 0
+        # (the files stay on disk; --resume reloads them all, so keep max_data in mind there too)
         while sum(len(o) for o in data_O) > args.max_data and len(data_O) > 2:
-            del data_O[1], data_Y[1]
+            del data_O[1], data_Y[1], data_N[1]
             print(f'      [data] cap {args.max_data:.0f}: dropped the oldest DAgger round', flush=True)
 
 

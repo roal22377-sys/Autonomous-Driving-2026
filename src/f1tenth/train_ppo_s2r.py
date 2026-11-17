@@ -99,12 +99,11 @@ def main():
     il_dir = f'results/{args.il}'
     rms = RunningMeanStd('agent_obs', args.obs_dim)
     rms.load(f'{il_dir}/sim2real', required=True)
-    actor = IL.make_actor(args)
-    actor.load_state_dict(torch.load(f'{il_dir}/checkpoint/model.pt')['actor'])
+    actor = IL.actor_from_state(torch.load(f'{il_dir}/checkpoint/model.pt')['actor'])
+    args.hidden_dim = actor.hidden1_units          # critic gets the same width
     with torch.no_grad():
         actor.log_std.fill_(args.log_std)
-    teacher = IL.make_actor(args)
-    teacher.load_state_dict(actor.state_dict())
+    teacher = IL.actor_from_state(actor.state_dict())
     teacher.eval()
 
     # asymmetric critic: [normalized obs, normalized privileged state]

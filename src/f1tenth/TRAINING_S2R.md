@@ -28,15 +28,35 @@
 # 0. 트랙 생성 (한 번, 약 3분)
 OMP_NUM_THREADS=1 ~/venv/torch210/bin/python3 -m utils.track_gen 6 22
 
-# 1. IL
-OMP_NUM_THREADS=1 ~/venv/torch210/bin/python3 -u train_il_s2r.py --algo_idx 7 --workers 22 \
-    --expert_steps 1.5e6 --dagger_iters 3 --dagger_steps 8e5 --dart_std 0.08 --grad_steps 20000
+# 1. IL (run 8 = 다음 학습 "A 방법": 512x2 신경망 + CAPS 떨림 억제, 라운드별 데이터 저장)
+OMP_NUM_THREADS=1 nohup ~/venv/torch210/bin/python3 -u train_il_s2r.py --algo_idx 8 --workers 22 \
+    --hidden_dim 512 --caps_t 0.3 --caps_s 0.3 \
+    --expert_steps 1.5e6 --dagger_iters 1000 --dagger_steps 8e5 --dart_std 0.08 --grad_steps 20000 \
+    > results/imitation_8_train.log 2>&1 &
+#    멈췄다가 이어서: 같은 명령에 --resume (results/imitation/8/data/round*.npz 사용)
 
 # 2. PPO 미세조정
-OMP_NUM_THREADS=1 ~/venv/torch210/bin/python3 -u train_ppo_s2r.py --il imitation/7 --algo_idx 1 --workers 22
+OMP_NUM_THREADS=1 ~/venv/torch210/bin/python3 -u train_ppo_s2r.py --il imitation/8 --algo_idx 1 --workers 22
 
 # 3. 비교 (같은 트랙·출발 위치, 실차 조건 eval / 원래 시뮬레이터 ideal, 속도 상한 8·3)
-OMP_NUM_THREADS=1 ~/venv/torch210/bin/python3 -u evaluate_s2r.py imitation/6 imitation/7 ppo_s2r/1
+OMP_NUM_THREADS=1 ~/venv/torch210/bin/python3 -u evaluate_s2r.py imitation/6 imitation/7 imitation/8 ppo_s2r/1
 ```
 
 기준 (IL run 6, 실차 조건): 상한 없음 0%, 3 m/s 33% 완주 (트랙 3개 샘플). 원래 시뮬레이터에서는 100%.
+
+## 결과 기록
+
+### IL run 7 (256x2, CAPS 없음, 2026-11-17) — 라운드 3에서 중단
+실차 조건 평가 (지연 0.25 s, a_max 3, 노이즈 / 44 트랙 x 3 조건, 2바퀴)
+
+| 라운드 | 8 m/s 중앙선 | 8 m/s 무작위 출발 | 3 m/s 무작위 출발 | 전체 | 처음 보는 트랙 | 조향 떨림 (8/3 m/s) |
+|---|---|---|---|---|---|---|
+| 0 | 9.1% | 9.1% | 59.1% | 25.8% | 18.2% | 0.008 / 0.008 |
+| 1 | 6.8% | 6.8% | 84.1% | 32.6% | 28.8% | 0.016 / 0.024 |
+| 2 | 81.8% | 90.9% | 100% | 90.9% | 83.3% | 0.015 / 0.043 |
+| 3 | 95.5% | 95.5% | 97.7% | **96.2%** | 93.9% | 0.017 / 0.039 |
+
+- 같은 35개 트랙 2바퀴: 라운드 2 169.6 s → 라운드 3 181.3 s (expert 약 136 s). 갈수록 조심스럽게(느리게) 달림
+- 라운드 2 모델 검증: 직선 라인 오차 0.47 m (expert 0.08), 2~5 Hz 조향 떨림 (실차 와리가리 0.4~0.9 Hz와는 다른 미세 떨림)
+- 결론: 안정성은 확보, 랩 타임·떨림이 과제 → run 8에서 CAPS + 512x2, 이후 접지력 측정 반영 후 PPO
+- 최고 모델: results/imitation/7 (라운드 3). 예전 run 6은 같은 조건 0%
