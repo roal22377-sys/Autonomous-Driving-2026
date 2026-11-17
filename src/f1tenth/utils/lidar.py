@@ -23,6 +23,9 @@ DEFAULT_LIDAR_CONFIG = {
     'pooling': 'min',
     'noise_std': 0.0,
     'dropout_prob': 0.0,
+    'spike_short_prob': 0.0,    # isolated return much shorter than the wall (dust, edge), sim only
+    'spike_long_prob': 0.0,     # isolated return much longer (mixed pixel / missed edge), sim only
+    'rotation_deg': 0.0,        # per-episode mount yaw error, sim only
 }
 
 _POOLING = {
@@ -38,7 +41,7 @@ def get_lidar_config(args):
     cfg.update(dict(args.get('lidar', None) or {}))
     cfg['num_beams'] = int(cfg['num_beams'])
     cfg['pooling'] = str(cfg['pooling'])
-    for key in ('max_range', 'min_valid', 'noise_std', 'dropout_prob'):
+    for key in ('max_range', 'min_valid', 'noise_std', 'dropout_prob', 'spike_short_prob', 'spike_long_prob', 'rotation_deg'):
         cfg[key] = float(cfg[key])
 
     if RAW_BEAMS % cfg['num_beams'] != 0:
@@ -66,14 +69,26 @@ def process_scan(raw_scan, num_beams, max_range, min_valid, pooling, **_):
     return _POOLING[pooling](scan.reshape(num_beams, -1), axis=1).astype(np.float32)
 
 
-def add_scan_noise(raw_scan, rng, noise_std, dropout_prob, **_):
+def add_scan_noise(raw_scan, rng, noise_std, dropout_prob, spike_short_prob=0.0, spike_long_prob=0.0,
+                   rotation_beams=0, **_):
     '''
         Sim-only augmentation on the raw scan, before process_scan().
-        Gaussian range noise + random dropouts (set to inf, like a missed return).
+        Matches the real Hokuyo measured on the car (logs/run_1117_14*, stationary frames):
+          gaussian range noise ~0.005-0.008 m, invalid returns 0-0.25 %,
+          isolated short spikes ~0.02-0.06 %, isolated long spikes ~0.02-0.09 %.
+        rotation_beams: per-episode mount yaw error, as a shift in beams (0.25 deg / beam).
     '''
     scan = np.asarray(raw_scan, dtype=np.float32).reshape(-1).copy()
+    if rotation_beams:
+        scan = np.roll(scan, int(rotation_beams))
     if noise_std > 0:
         scan += rng.normal(0.0, noise_std, size=scan.shape).astype(np.float32)
+    if spike_short_prob > 0:
+        m = rng.random(scan.shape) < spike_short_prob
+        scan[m] *= rng.uniform(0.1, 0.7, size=int(m.sum())).astype(np.float32)
+    if spike_long_prob > 0:
+        m = rng.random(scan.shape) < spike_long_prob
+        scan[m] += rng.uniform(0.5, 5.0, size=int(m.sum())).astype(np.float32)
     if dropout_prob > 0:
         scan[rng.random(scan.shape) < dropout_prob] = np.inf
     return scan

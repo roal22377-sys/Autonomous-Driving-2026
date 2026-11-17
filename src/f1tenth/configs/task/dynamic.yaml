@@ -19,6 +19,6 @@ v_switch: 7.319
 a_max: 9.51
 v_min: -8.0
 v_max: 8.0
-width: 0.29
-length: 0.57
+width: 0.30   # [m] real car (measured)
+length: 0.60  # [m] real car (measured)
 lidar_pos_offset: 0.155

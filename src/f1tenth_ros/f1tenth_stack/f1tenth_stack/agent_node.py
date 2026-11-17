@@ -6,7 +6,7 @@ import time
 sim_path = 'src/f1tenth'
 sys.path.append(sim_path)
 from utils.vectorize import RunningMeanStd
-from utils.observation import get_obs_config, make_observation
+from utils.observation import get_obs_config, make_observation, ActionHistory
 
 import rclpy
 import rclpy.duration
@@ -23,6 +23,9 @@ from ackermann_msgs.msg import AckermannDriveStamped
 import numpy as np
 
 ODOM_TIMEOUT = 0.5      # [s] don't drive if the speed reading is older than this
+
+def normalize_speed(speed, minimum, maximum):
+    return (speed - (maximum + minimum)/2.0) / ((maximum - minimum)/2.0)
 
 def unnormalize_speed(value, minimum, maximum):
     temp_a = (maximum - minimum)/2.0
@@ -82,7 +85,11 @@ class AgentNode(Node):
     lidar_cfg = self.obs_cfg['lidar']
     self.get_logger().info(f"[obs] lidar 1080 -> {lidar_cfg['num_beams']} ({lidar_cfg['pooling']} pooling), "
                            f"max_range {lidar_cfg['max_range']} m, "
-                           f"speed input: {'/' + self.odom_topic if self.use_speed else 'off'} (obs_dim {self.obs_dim})")
+                           f"speed input: {'/' + self.odom_topic if self.use_speed else 'off'}, "
+                           f"action history: {self.obs_cfg['history']['length']}, "
+                           f"speed-limit input: {'on' if self.obs_cfg['speed_limit']['enabled'] else 'off'} (obs_dim {self.obs_dim})")
+    # last commands this node sent (normalized), same as ActionHistory in utils/env.py
+    self.history = ActionHistory(self.obs_cfg['history']['length'])
 
     # load algorithm
     try:
@@ -116,6 +123,7 @@ class AgentNode(Node):
     if self.use_speed and (self.odom_time is None or time.monotonic() - self.odom_time > ODOM_TIMEOUT):
       self.get_logger().warn(f'no /{self.odom_topic} in the last {ODOM_TIMEOUT}s, not publishing drive. '
                              'is vesc_to_odom_node running?', throttle_duration_sec=1.0)
+      self.history.reset()
       return
 
     # make obs
@@ -141,12 +149,18 @@ class AgentNode(Node):
     msg.drive.speed = float(action[1])
     self.drive_pub.publish(msg)
 
+    # remember what was actually sent (after the speed cap), normalized like the policy output
+    self.history.push([action[0] / self.args.max_steer,
+                       normalize_speed(action[1], self.args.min_speed, self.args.max_speed)])
+
   def getObs(self, raw_scan: np.ndarray, speed=None):
     '''
       Same processing as getObs in src/f1tenth/utils/env.py (without sim noise).
       speed: /odom linear.x [m/s], used only if the model has a speed input.
     '''
-    observation = make_observation(raw_scan, speed if speed is not None else 0.0, self.obs_cfg)
+    # models trained with a speed-limit input are told the cap (agent.yaml speed_limit; <= 0 = none)
+    observation = make_observation(raw_scan, speed if speed is not None else 0.0, self.obs_cfg, self.history,
+                                   self.speed_limit if self.speed_limit > 0 else None)
     return observation
 
 def main(args=None):

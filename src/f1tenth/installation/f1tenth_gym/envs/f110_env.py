@@ -105,6 +105,9 @@ class F110Env(gym.Env):
         self.observation_config = self.config["observation_config"]
         self.action_type = CarAction(self.config["control_input"], params=self.params)
         self.max_episode_steps = self.config["max_episode_steps"]
+        # episode ends (success) after this many laps; lap_times[0] = time to finish all of them
+        self.num_laps = int(args.get("laps", 1))
+        self.lap_split_times = []
 
         # radius to consider done
         self.start_thresh = 0.5  # 10cm
@@ -212,7 +215,8 @@ class F110Env(gym.Env):
         if map is None:
             idx = random.randint(0, len(self.maps)-1)
             map = self.maps[idx]
-        assert map in self.maps
+        # a Track object (generated track variant, utils/track_gen.py) may be passed directly
+        assert isinstance(map, Track) or map in self.maps
         self.map = map
         self.sim.set_map(self.map)
 
@@ -287,22 +291,25 @@ class F110Env(gym.Env):
 
         dist2 = delta_pt[0, :] ** 2 + temp_y**2
         closes = dist2 <= 0.1
+        laps_toggles = 2 * self.num_laps
         for i in range(self.num_agents):
             if closes[i] and not self.near_starts[i]:
                 self.near_starts[i] = True
                 self.toggle_list[i] += 1
+                if i == self.ego_idx and self.toggle_list[i] % 2 == 0:
+                    self.lap_split_times.append(self.current_time)   # crossed the line: one more lap
             elif not closes[i] and self.near_starts[i]:
                 self.near_starts[i] = False
                 self.toggle_list[i] += 1
             self.lap_counts[i] = self.toggle_list[i] // 2
-            if self.toggle_list[i] < 4:
+            if self.toggle_list[i] < laps_toggles + 2:
                 self.lap_times[i] = self.current_time
 
-        terminate = (self.collisions[self.ego_idx]) or np.all(self.toggle_list >= 2)
+        terminate = (self.collisions[self.ego_idx]) or np.all(self.toggle_list >= laps_toggles)
         truncate = (self.current_time // self.timestep) >= self.max_episode_steps
         terminate, truncate = bool(terminate), bool(truncate)
 
-        return terminate, truncate, self.toggle_list >= 2
+        return terminate, truncate, self.toggle_list >= laps_toggles
 
     def _update_state(self):
         """
@@ -392,6 +399,7 @@ class F110Env(gym.Env):
         self.near_start = True
         self.near_starts = np.array([True] * self.num_agents)
         self.toggle_list = np.zeros((self.num_agents,))
+        self.lap_split_times = []
 
         # states after reset
         if options is not None and "poses" in options:

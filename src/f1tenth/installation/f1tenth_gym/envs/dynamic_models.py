@@ -400,14 +400,22 @@ def vehicle_dynamics_st(
     return f
 
 
+STEER_P_GAIN = 40.0     # = 1 / timestep (0.025 s): reach the target within one step if the rate allows
+
+
 @njit(cache=True)
 def pid_steer(steer, current_steer, max_sv):
-    # steering
+    # steering: position-controlled servo, rate limited to max_sv.
+    # The original bang-bang version (always +-max_sv) overshot by up to max_sv*dt = 0.066 rad and
+    # chattered between 0 and 0.066 around small targets, so the mean steering was ~35 % below the
+    # command. Harmless without delay, but with the real car's ~0.2 s steering delay it made every
+    # controller understeer and crash. A real servo stops at the commanded angle.
     steer_diff = steer - current_steer
-    if np.fabs(steer_diff) > 1e-4:
-        sv = (steer_diff / np.fabs(steer_diff)) * max_sv
-    else:
-        sv = 0.0
+    sv = STEER_P_GAIN * steer_diff
+    if sv > max_sv:
+        sv = max_sv
+    elif sv < -max_sv:
+        sv = -max_sv
 
     return sv
 

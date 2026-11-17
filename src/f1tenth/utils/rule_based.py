@@ -360,3 +360,79 @@ class CurvaturePursuitPlanner:
 
         speed = float(self.v_profile[i])
         return speed, steer
+
+
+class RacelinePlanner:
+    """
+    Expert for the sim2real setup (utils/env.py sim_mode='train'/'eval').
+
+      - follows the track's minimum-curvature race line (utils/raceline.py), not the centerline
+      - speed profile from the line curvature (lateral accel limit) with braking AND
+        acceleration passes using the car's real acceleration limit
+      - delay compensation: the steering command reaches the car `steer_delay` later, so the
+        planner predicts where the car will be once the already-sent commands have been applied
+        (kinematic bicycle through the pending command queue) and pursues from there.
+        Without it, even the expert weaves at ~0.6 Hz with a 0.2 s delay, exactly like the car.
+    """
+
+    def __init__(self, track, wb, v_min=2.0, v_max=8.0, a_lat=4.0, a_acc=3.0, a_brake=3.0,
+                 max_steer=0.497, lad_base=0.6, lad_gain=0.22, sv_max=2.65, merge_dist=0.6):
+        from utils.raceline import speed_profile
+        self.merge_dist = merge_dist
+        line = track.raceline
+        xy = np.stack([line.xs, line.ys]).T.astype(np.float64)
+        if np.linalg.norm(xy[0] - xy[-1]) < 1e-3:
+            xy = xy[:-1]
+        self.xy, self.n = xy, xy.shape[0]
+        self.ds = float(np.mean(np.linalg.norm(np.roll(xy, -1, axis=0) - xy, axis=1)))
+        self.wheelbase, self.max_steer, self.sv_max = wb, max_steer, sv_max
+        self.v_min, self.v_max, self.a_acc = v_min, v_max, a_acc
+        self.lad_base, self.lad_gain = lad_base, lad_gain
+        self.v_profile = speed_profile(xy, v_min, v_max, a_lat, a_acc, a_brake)
+        self.last_index = None
+
+    def reset(self):
+        self.last_index = None
+
+    def _nearest_index(self, pos):
+        if self.last_index is None:
+            idx = np.arange(self.n)
+        else:
+            idx = (self.last_index + np.arange(-50, 250)) % self.n
+        d = np.sum((self.xy[idx] - pos) ** 2, axis=1)
+        i = int(idx[np.argmin(d)])
+        if self.last_index is not None and np.sqrt(d.min()) > 2.0:
+            i = int(np.argmin(np.sum((self.xy - pos) ** 2, axis=1)))
+        self.last_index = i
+        return i
+
+    def predict(self, state, steer_queue, speed_queue, dt):
+        '''roll the true state [x, y, steer, v, yaw, ...] through the pending commands'''
+        x, y, d, v, th = state[0], state[1], state[2], state[3], state[4]
+        n = max(len(steer_queue), len(speed_queue))
+        for k in range(n):
+            if k < len(steer_queue):
+                d += np.clip(steer_queue[k] - d, -self.sv_max * dt, self.sv_max * dt)
+            if k < len(speed_queue):
+                v += np.clip(speed_queue[k] - v, -self.a_acc * dt, self.a_acc * dt)
+            x += v * np.cos(th) * dt
+            y += v * np.sin(th) * dt
+            th += v / self.wheelbase * np.tan(d) * dt
+        return x, y, th, v
+
+    def plan(self, state, steer_queue=(), speed_queue=(), dt=0.025):
+        x, y, th, v = self.predict(state, steer_queue, speed_queue, dt)
+        pos = np.array([x, y])
+        i = self._nearest_index(pos)
+        lad = self.lad_base + self.lad_gain * max(v, self.v_min)
+        target = self.xy[(i + int(round(lad / self.ds))) % self.n]
+        dx, dy = target - pos
+        local_y = -np.sin(th) * dx + np.cos(th) * dy
+        steer = np.arctan(self.wheelbase * 2.0 * local_y / max(dx * dx + dy * dy, 1e-6))
+        steer = float(np.clip(steer, -self.max_steer, self.max_steer))
+        # speed for where the car will be when this command lands (a little ahead of the prediction)
+        speed = float(self.v_profile[(i + int(round(0.3 / self.ds))) % self.n])
+        # far from the line (start on the centerline, after a disturbance): merge back slowly
+        e = float(np.linalg.norm(self.xy[i] - pos))
+        speed = min(speed, self.v_min + (speed - self.v_min) * max(0.0, 1.0 - e / self.merge_dist))
+        return speed, steer

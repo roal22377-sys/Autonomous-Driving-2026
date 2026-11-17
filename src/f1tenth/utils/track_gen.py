@@ -1,0 +1,223 @@
+'''
+    Randomized training tracks built from the F1 map centerlines.
+
+    Why: every original map is exactly 2.2 m wide with continuous walls, so the policy only ever
+    saw side walls at ~1.1 m. The real track is 2.4 m wide on median (4.1 m p90) and has open
+    side areas, and the policy crashed whenever a side reading left the training range.
+
+    A variant = one map centerline with
+      - a random, smoothly varying width (left/right independent)          -> width diversity
+      - a few "pockets": short side areas much wider than the track        -> open-side readings
+      - optionally the reverse driving direction                           -> both directions
+      - its own minimum-curvature race line (utils/raceline.py)            -> expert follows it
+    Walls are solid (everything outside the corridor is occupied). Widths are capped so the
+    corridor never merges with a neighbouring part of the same track (no shortcuts).
+
+    Variants are generated once (python -m utils.track_gen ...) into installation/maps_gen/
+    and loaded per episode by utils/env.py.
+'''
+
+import os
+import glob
+import numpy as np
+from scipy.spatial import cKDTree
+
+from utils.raceline import resample_closed, tangents_normals, min_curvature_line, refine_min_time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+MAP_DIR = os.path.join(HERE, '..', 'installation', 'maps')
+GEN_DIR = os.path.join(HERE, '..', 'installation', 'maps_gen')
+
+RESOLUTION = 0.08          # [m/cell], originals use ~0.085
+CAR_HALF_WIDTH = 0.15         # real car is 0.30 m wide, 0.60 m long
+RACELINE_MARGIN = 0.55     # race line keeps this far from the walls: half width 0.15 + 0.40 for tracking error under ~0.2 s steering delay
+DENSE_DS = 0.1             # centerline / race line waypoint spacing used by the env and expert
+OPT_DS = 0.5               # spacing for the race line optimization
+# car limits for the lap-time refinement (same as the expert: train_il_s2r.EXPERT, a_max nominal)
+LAP_TIME_LIMITS = dict(v_min=2.0, v_max=8.0, a_lat=4.0, a_acc=3.0, a_brake=3.0)
+
+
+def load_centerline(map_name):
+    a = np.loadtxt(os.path.join(MAP_DIR, map_name, f'{map_name}_centerline.csv'), delimiter=',', comments='#')
+    xy = a[:, :2]
+    if np.linalg.norm(xy[0] - xy[-1]) < 1e-3:
+        xy = xy[:-1]
+    return xy
+
+
+def _smooth_noise(s, length, rng, corr_len, std):
+    '''Smooth periodic random function of arclength s (random Fourier series).'''
+    kmax = max(1, int(length / corr_len))
+    out = np.zeros_like(s)
+    for k in range(1, kmax + 1):
+        amp = rng.normal(0.0, 1.0) / np.sqrt(kmax)
+        out += amp * np.sin(2 * np.pi * k * s / length + rng.uniform(0, 2 * np.pi))
+    return std * out / (np.std(out) + 1e-9)
+
+
+def _self_clearance(xy, s, length, min_ds=6.0):
+    '''Distance from each point to the nearest point of a *different* part of the track.'''
+    tree = cKDTree(xy)
+    k = min(80, len(xy))
+    d, idx = tree.query(xy, k=k)
+    ds = np.abs(s[idx] - s[:, None])
+    ds = np.minimum(ds, length - ds)
+    d = np.where(ds > min_ds, d, np.inf)
+    out = d.min(axis=1)
+    out[~np.isfinite(out)] = 10.0
+    return out
+
+
+def make_variant(map_name, seed, reverse=False, original=False):
+    '''
+        original=True keeps the original geometry (1.1 m each side, no pockets).
+        returns a dict of arrays (see save/load below).
+    '''
+    rng = np.random.default_rng(seed)
+    center, length = resample_closed(load_centerline(map_name), DENSE_DS)
+    if reverse:
+        center = center[::-1].copy()
+    N = len(center)
+    s = np.arange(N) * (length / N)
+
+    if original:
+        wl = np.full(N, 1.1)
+        wr = np.full(N, 1.1)
+        pocket_l = np.zeros(N)
+        pocket_r = np.zeros(N)
+    else:
+        base = rng.uniform(0.85, 1.6)                                  # half width -> 1.7..3.2 m track
+        var = _smooth_noise(s, length, rng, corr_len=15.0, std=0.18)    # slow width changes
+        asym = _smooth_noise(s, length, rng, corr_len=20.0, std=0.12)   # centerline not centered
+        wl = np.clip(base + var + asym, 0.7, 2.2)
+        wr = np.clip(base + var - asym, 0.7, 2.2)
+        # pockets: open side areas (doorways, gaps, wider sections next to the barrier)
+        pocket_l, pocket_r = np.zeros(N), np.zeros(N)
+        for _ in range(rng.poisson(length / 45.0)):
+            c = rng.uniform(0, length)
+            half = rng.uniform(0.5, 2.0)
+            depth = rng.uniform(1.0, 3.5)
+            dist = np.abs(s - c)
+            dist = np.minimum(dist, length - dist)
+            bump = depth * np.clip(1.0 - dist / half, 0.0, 1.0) ** 0.5
+            if rng.random() < 0.5:
+                pocket_l = np.maximum(pocket_l, bump)
+            else:
+                pocket_r = np.maximum(pocket_r, bump)
+
+    # never merge with a neighbouring part of the track
+    clear = _self_clearance(center, s, length)
+    cap = np.maximum(clear / 2.0 - 0.15, 0.6)
+    wl, wr = np.minimum(wl, cap), np.minimum(wr, cap)
+    wl_occ = np.minimum(wl + pocket_l, cap)
+    wr_occ = np.minimum(wr + pocket_r, cap)
+
+    # race line on the drivable corridor (pockets excluded): minimum curvature, then refined
+    # for minimum lap time with the car's limits (late apexes etc., utils/raceline.py)
+    c_opt, _ = resample_closed(center, OPT_DS)
+    tree = cKDTree(center)
+    _, j = tree.query(c_opt)
+    _, off = min_curvature_line(c_opt, wl[j], wr[j], RACELINE_MARGIN)
+    line_opt, _, _ = refine_min_time(c_opt, wl[j], wr[j], RACELINE_MARGIN, off, **LAP_TIME_LIMITS)
+    raceline, _ = resample_closed(line_opt, DENSE_DS)
+
+    occ, origin = rasterize(center, wl_occ, wr_occ)
+    return {
+        'name': f"{map_name}{'_rev' if reverse else ''}{'' if original else f'_w{seed}'}",
+        'map': map_name, 'reverse': reverse, 'original': original,
+        'occupancy': occ, 'origin': np.array([origin[0], origin[1], 0.0]), 'resolution': RESOLUTION,
+        'centerline': center.astype(np.float32), 'w_left': wl.astype(np.float32), 'w_right': wr.astype(np.float32),
+        'raceline': raceline.astype(np.float32), 'length': length,
+    }
+
+
+def rasterize(center, wl, wr):
+    '''Occupancy grid (255 free / 0 occupied), rows = y, cols = x, like the original map images.'''
+    pad = float(max(wl.max(), wr.max())) + 1.0
+    xmin, ymin = center.min(axis=0) - pad
+    xmax, ymax = center.max(axis=0) + pad
+    W = int(np.ceil((xmax - xmin) / RESOLUTION))
+    H = int(np.ceil((ymax - ymin) / RESOLUTION))
+    xs = xmin + (np.arange(W) + 0.5) * RESOLUTION
+    ys = ymin + (np.arange(H) + 0.5) * RESOLUTION
+    gx, gy = np.meshgrid(xs, ys)
+    pts = np.stack([gx.ravel(), gy.ravel()], axis=1)
+
+    t, n = tangents_normals(center)
+    tree = cKDTree(center)
+    d, i = tree.query(pts, distance_upper_bound=pad, workers=1)
+    occ = np.zeros(len(pts), dtype=np.uint8)
+    ok = np.isfinite(d)
+    ii = i[ok]
+    rel = pts[ok] - center[ii]
+    lat = np.sum(rel * n[ii], axis=1)
+    free = (lat <= wl[ii]) & (lat >= -wr[ii])
+    idx = np.where(ok)[0][free]
+    occ[idx] = 255
+    occ = occ.reshape(H, W)
+    occ[0, :] = occ[-1, :] = 0
+    occ[:, 0] = occ[:, -1] = 0
+    return occ, (xmin, ymin)
+
+
+def save_variant(v, out_dir=GEN_DIR):
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"{v['name']}.npz")
+    np.savez_compressed(path, **{k: np.asarray(val) for k, val in v.items()})
+    return path
+
+
+def to_track(path):
+    '''Load a saved variant as a gym Track (with centerline & raceline Raceline objects).'''
+    from f1tenth_gym.envs.track import Track, Raceline
+    from f1tenth_gym.envs.track.track import TrackSpec
+    z = np.load(path)
+    occ = z['occupancy'].astype(np.float32)
+    spec = TrackSpec(name=str(z['name']), image=None, resolution=float(z['resolution']),
+                     origin=tuple(float(x) for x in z['origin']), negate=0,
+                     occupied_thresh=0.45, free_thresh=0.196, width=0.0)
+
+    def line(xy):
+        xs, ys = xy[:, 0].astype(np.float32), xy[:, 1].astype(np.float32)
+        return Raceline(xs=xs, ys=ys, velxs=np.full_like(xs, 8.0))
+
+    track = Track(spec=spec, occupancy_map=occ, centerline=line(z['centerline']),
+                  raceline=line(z['raceline']), name=str(z['name']))
+    track.w_left, track.w_right = z['w_left'], z['w_right']
+    track.gen_length = float(z['length'])
+    return track
+
+
+def list_variants(maps=None, gen_dir=GEN_DIR):
+    files = sorted(glob.glob(os.path.join(gen_dir, '*.npz')))
+    if maps is not None:
+        files = [f for f in files if variant_map(f) in maps]
+    return files
+
+
+def variant_map(path):
+    '''map name of a variant file: Sochi.npz, Sochi_rev.npz, Sochi_w101.npz -> Sochi'''
+    return os.path.basename(path)[:-4].split('_')[0]
+
+
+def _job(job):
+    map_name, seed, reverse, original = job
+    return save_variant(make_variant(map_name, seed, reverse, original))
+
+
+if __name__ == '__main__':
+    # python -m utils.track_gen <variants_per_map> [workers]
+    import sys
+    import multiprocessing as mp
+    sys.path.insert(0, os.path.join(HERE, '..', 'installation'))
+    from main_il import MAPS
+    per_map = int(sys.argv[1]) if len(sys.argv) > 1 else 6
+    workers = int(sys.argv[2]) if len(sys.argv) > 2 else 16
+    jobs = []
+    for m in MAPS:
+        for rev in (False, True):
+            jobs.append((m, 0, rev, True))                              # original geometry
+            jobs += [(m, 100 + k, rev, False) for k in range(per_map)]  # randomized
+    with mp.get_context('fork').Pool(workers) as p:
+        for i, path in enumerate(p.imap_unordered(_job, jobs)):
+            print(f'[{i + 1}/{len(jobs)}] {os.path.basename(path)}', flush=True)
