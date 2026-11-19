@@ -32,6 +32,15 @@ SEQUENCE = [
     (0.00, 'right 0.00 (END)', ['more', 'gap', 'buzz', 'cm']),
     (CENTER, 'center', []),
 ]
+# --quick: only the two open questions (left end gap, right end strain)
+QUICK_SEQUENCE = [
+    (CENTER, 'center', []),
+    (1.00, 'left 1.00 (END)', ['gap', 'buzz']),
+    (CENTER, 'center', []),
+    (0.061, 'right 0.061 (current right max)', ['gap', 'buzz']),
+    (0.00, 'right 0.00 (END)', ['buzz']),
+    (CENTER, 'center', []),
+]
 QUESTIONS = {
     'more': '이전 값보다 바퀴가 더 꺾였나요? (y/n)',
     'gap':  '바퀴(너클)와 스토퍼 사이에 틈이 남아 있나요? (y/n)',
@@ -80,21 +89,31 @@ def main():
             print('[error] vesc_driver가 응답하지 않아요. bringup이 실행 중인가요?')
             return
 
+        quick = '--quick' in sys.argv
+        seq = QUICK_SEQUENCE if quick else SEQUENCE
         print('\n=== 조향 서보 범위 확인 (바퀴 띄운 상태) ===')
-        print('앞바퀴 바깥면에 긴 막대(자)를 붙이고, 막대 끝 아래 종이에 위치를 표시하세요.')
-        stick, _ = ask('막대 길이는 바퀴 중심에서 끝까지 몇 cm? (숫자, 모르면 Enter)', CENTER, False)
-        out.write(f'stick_cm: {stick}\n')
-        print('지금 중앙(0.558)입니다. 막대 끝 위치를 종이에 표시하세요.')
-        for i, (v, label, qs) in enumerate(SEQUENCE):
+        if quick:
+            print('두 가지만 봅니다: 왼쪽 끝에서 스토퍼와의 틈, 오른쪽 끝에서 서보 소리.')
+            print('y/n 질문은 y 또는 n을 입력해야 다음으로 넘어가요.')
+        else:
+            print('앞바퀴 바깥면에 긴 막대(자)를 붙이고, 막대 끝 아래 종이에 위치를 표시하세요.')
+            stick, _ = ask('막대 길이는 바퀴 중심에서 끝까지 몇 cm? (숫자, 모르면 Enter)', CENTER, False)
+            out.write(f'stick_cm: {stick}\n')
+            print('지금 중앙(0.558)입니다. 막대 끝 위치를 종이에 표시하세요.')
+        for i, (v, label, qs) in enumerate(seq):
             end = 'END' in label or '0.061' in label
-            print(f'\n[{i + 1}/{len(SEQUENCE)}] 서보 {v:.3f}  ({label})')
+            print(f'\n[{i + 1}/{len(seq)}] 서보 {v:.3f}  ({label})')
             ans = {}
             if not qs:
                 ask('  Enter로 다음', v, False)
             hold = v
             for q in qs:
-                a, hold = ask('  ' + QUESTIONS[q], hold, end)
-                ans[q] = a
+                while True:
+                    a, hold = ask('  ' + QUESTIONS[q], hold, end)
+                    if q == 'cm' or a.lower() in ('y', 'n'):
+                        break
+                    print('  y 또는 n을 입력해 주세요.')
+                ans[q] = a.lower() if q != 'cm' else a
             out.write(f'servo {v:.3f} | {label} | ' + ' | '.join(f'{k}={x}' for k, x in ans.items()) + '\n')
             out.flush()
         print(f'\n[done] 결과 저장: {path}\n이제 Claude에게 "끝났어"라고 알려 주세요.')

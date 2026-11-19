@@ -19,4 +19,4 @@ ros2 launch f1tenth_stack bringup_launch.py \
   vesc_config:=$HOME/ros2_ws/src/f1tenth_ros/f1tenth_stack/config/vesc.yaml use_agent:=false \
   > /tmp/servo_bringup.log 2>&1 &
 sleep 6
-python3 tools/servo_range_check.py
+python3 tools/servo_range_check.py "$@"
