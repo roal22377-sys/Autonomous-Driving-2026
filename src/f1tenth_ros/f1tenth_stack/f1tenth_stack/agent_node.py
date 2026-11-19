@@ -23,6 +23,26 @@ from ackermann_msgs.msg import AckermannDriveStamped
 import numpy as np
 
 ODOM_TIMEOUT = 0.5      # [s] don't drive if the speed reading is older than this
+VESC_SERVO_RANGE = (0.0, 1.0)   # VESC firmware clamps the servo output to this, whatever vesc.yaml says
+
+def steering_command_limits(vesc_config):
+    '''
+      Steering commands the servo can actually reach: servo = gain*cmd + offset, clipped by
+      vesc_driver to [servo_min, servo_max] and by the VESC to [0, 1]. With the straight-ahead
+      offset 0.558 the left end is 1.0 - 0.558 = 0.442, less than the policy's 0.497.
+      Returns (min_cmd, max_cmd), or None if the file can't be read.
+    '''
+    with open(vesc_config, 'r') as f:
+      cfg = YAML().load(f)
+    p = next(iter(cfg.values()))['ros__parameters']
+    gain = float(p['steering_angle_to_servo_gain'])
+    offset = float(p['steering_angle_to_servo_offset'])
+    lo = max(float(p.get('servo_min', 0.0)), VESC_SERVO_RANGE[0])
+    hi = min(float(p.get('servo_max', 1.0)), VESC_SERVO_RANGE[1])
+    a, b = (lo - offset) / gain, (hi - offset) / gain
+    # small margin: the command is float32, and 0.442 + 0.558 can land a hair above 1.0
+    margin = 5e-4
+    return min(a, b) + margin, max(a, b) - margin
 
 def normalize_speed(speed, minimum, maximum):
     return (speed - (maximum + minimum)/2.0) / ((maximum - minimum)/2.0)
@@ -43,6 +63,8 @@ class AgentNode(Node):
     self.declare_parameter('drive_topic', 'drive')
     self.declare_parameter('odom_topic', 'odom')
     self.declare_parameter('speed_limit', 0.0)     # [m/s] cap on commanded speed for practice runs; <= 0 disables
+    # servo calibration, to clip steering to what the servo can reach (relative to ~/ros2_ws like sim_path)
+    self.declare_parameter('vesc_config', 'src/f1tenth_ros/f1tenth_stack/config/vesc.yaml')
 
     self.scan_topic = self.get_parameter('scan_topic').value
     self.drive_topic = self.get_parameter('drive_topic').value
@@ -50,6 +72,18 @@ class AgentNode(Node):
     self.speed_limit = float(self.get_parameter('speed_limit').value)
     if self.speed_limit > 0:
       self.get_logger().info(f'[drive] speed limited to {self.speed_limit} m/s')
+
+    # steering limits the servo can reach. Commands beyond them would be clipped by the VESC anyway;
+    # clipping here keeps the action history (model input) equal to what the car really did.
+    vesc_config = self.get_parameter('vesc_config').value
+    try:
+      self.steer_min, self.steer_max = steering_command_limits(vesc_config)
+      self.get_logger().info(f'[drive] steering command limits from {vesc_config}: '
+                             f'right {self.steer_min:+.3f}, left {self.steer_max:+.3f}')
+    except Exception as e:
+      self.steer_min, self.steer_max = -np.inf, np.inf
+      self.get_logger().warn(f'[drive] could not read servo limits from {vesc_config} ({e}); '
+                             'steering is not clipped here (the VESC still clips at the servo end)')
 
     # fix seed
     seed = 123
@@ -138,6 +172,8 @@ class AgentNode(Node):
     # transform action
     # policy angle [rad] -> servo command: calibration says command = angle * steer_cmd_gain
     action[0] *= self.args.max_steer * float(self.args.get('steer_cmd_gain', 1.0))
+    # the servo can't go past these (left end is short of the policy's range with offset 0.558)
+    action[0] = np.clip(action[0], self.steer_min, self.steer_max)
     action[1] = unnormalize_speed(action[1], self.args.min_speed, self.args.max_speed)
     if self.speed_limit > 0:
       # cap after unnormalizing, so the model's output mapping stays as trained
@@ -150,7 +186,7 @@ class AgentNode(Node):
     msg.drive.speed = float(action[1])
     self.drive_pub.publish(msg)
 
-    # remember what was actually sent (after the speed cap), normalized like the policy output
+    # remember what was actually sent (after the steering clip and speed cap), normalized like the policy output
     self.history.push([action[0] / (self.args.max_steer * float(self.args.get('steer_cmd_gain', 1.0))),
                        normalize_speed(action[1], self.args.min_speed, self.args.max_speed)])
 

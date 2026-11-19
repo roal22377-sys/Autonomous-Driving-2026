@@ -74,7 +74,8 @@ def generate_launch_description():
         package='f1tenth_stack',
         executable='agent_node',
         name='agent_node',
-        parameters=[LaunchConfiguration('agent_config')],
+        # vesc_config: same servo calibration as the vesc nodes, for the steering limits
+        parameters=[LaunchConfiguration('agent_config'), {'vesc_config': LaunchConfiguration('vesc_config')}],
         condition=IfCondition(LaunchConfiguration('use_agent'))
     )
     key_to_ackermann_node = Node(
