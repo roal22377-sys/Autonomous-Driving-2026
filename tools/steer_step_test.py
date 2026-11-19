@@ -158,19 +158,32 @@ def main():
         print('[wait] /odom and /scan ...')
         t0 = time.monotonic()
         while state['odom'] is None or state['front'] is None:
-            rclpy.spin_once(node, timeout_sec=0.1)
+            # vesc_to_odom publishes /odom only after it has seen a servo command, so send "stopped"
+            send(0.0, 0.0)
+            rclpy.spin_once(node, timeout_sec=0.05)
             if time.monotonic() - t0 > 10:
                 print('[error] no /odom or /scan for 10 s. Is bringup running?')
                 return
         if a.stand:
-            input('Wheels off the ground? Start the slow-motion video (screen + front wheel in view), '
-                  'then press Enter (Ctrl+C = stop) ')
+            prompt = ('Wheels off the ground? Start the slow-motion video (screen + front wheel in view), '
+                      'then press Enter (Ctrl+C = stop) ')
         else:
             print(f'[ready] free space ahead {state["front"]:.1f} m. In the keyboard tab press r (release), not s.')
-            input('Put the car at the start, then press Enter to start (Ctrl+C = stop) ')
+            prompt = 'Put the car at the start, then press Enter to start (Ctrl+C = stop) '
+        # keep commanding "stopped" while waiting for Enter (input() would block the publishing)
+        import select
+        import sys
+        print(prompt, end='', flush=True)
+        while not select.select([sys.stdin], [], [], 1.0 / a.rate)[0]:
+            send(0.0, 0.0)
+            rclpy.spin_once(node, timeout_sec=0.0)
+        sys.stdin.readline()
+        t_cd = time.monotonic() + 3.0
         for i in (3, 2, 1):
             print(f'  {i}...')
-            time.sleep(1.0)
+            while time.monotonic() < t_cd - (i - 1):
+                send(0.0, 0.0)
+                time.sleep(1.0 / a.rate)
 
         print('[drive] running the pattern')
         aborted = False
