@@ -1,0 +1,20 @@
+# normalization
+norm_obs: true
+norm_reward: false
+
+# for network parameters
+activation: LeakyReLU
+hidden_dim: 256
+log_std_init: -1.0
+log_std_grad: false
+
+# for training
+batch_size: 1000
+lr: 3.0e-4
+max_grad_norm: 1.0
+discount_factor: 1.0    # for code compatibility
+
+# logger
+log_list:
+  rollout: [score, step, ep_len]
+  train: [actor_loss]
