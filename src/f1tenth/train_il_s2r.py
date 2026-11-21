@@ -108,6 +108,46 @@ def make_actor(args):
 
 
 # ------------------------------------------------------------------ rollouts (workers)
+# ------------------------------------------------------------------ progress (shared counter)
+_COUNTER = None
+T_START = time.time()
+
+
+def _init_counter(c):
+    global _COUNTER
+    _COUNTER = c
+
+
+def _tick(n):
+    if _COUNTER is not None:
+        with _COUNTER.get_lock():
+            _COUNTER.value += n
+
+
+def _hms(sec):
+    sec = int(max(sec, 0))
+    return f'{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}'
+
+
+def run_pool(fn, jobs, workers, total, label, unit, every=60):
+    '''pool.map with a progress line every `every` s: done/total, elapsed, ETA, time since start'''
+    ctx = mp.get_context('spawn')
+    counter = ctx.Value('l', 0)
+    t0 = time.time()
+    with ctx.Pool(workers, initializer=_init_counter, initargs=(counter,)) as pool:
+        ar = pool.map_async(fn, jobs)
+        while not ar.ready():
+            ar.wait(every)
+            if ar.ready():
+                break
+            done, el = counter.value, time.time() - t0
+            eta = el / done * (total - done) if done > 0 else float('nan')
+            print(f'    [{label}] {min(done, total)}/{total} {unit} ({min(done / total, 1) * 100:.0f}%) | '
+                  f'elapsed {_hms(el)} | ETA {_hms(eta) if done > 0 else "?"} | total {_hms(time.time() - T_START)}',
+                  flush=True)
+        return ar.get()
+
+
 def rollout_worker(job):
     '''
         job: (wid, n_steps, policy, beta, dart_std, tracks, seed)
@@ -154,6 +194,7 @@ def rollout_worker(job):
             done = term or trunc
         N[-1] = False
         total += steps
+        _tick(steps)
         stats.append((expert_drives, int(env.success), steps))
     env.close()
     return np.asarray(O, np.float32), np.asarray(Y, np.float32), stats, np.asarray(N, bool)
@@ -163,8 +204,7 @@ def collect(args, n_steps, policy, beta, dart_std, tracks, round_idx):
     per = int(np.ceil(n_steps / args.workers))
     jobs = [(w, per, policy, beta, dart_std, tracks, args.seed * 100000 + round_idx * 1000 + w)
             for w in range(args.workers)]
-    with mp.get_context('spawn').Pool(args.workers) as pool:
-        res = pool.map(rollout_worker, jobs)
+    res = run_pool(rollout_worker, jobs, args.workers, per * args.workers, f'collect round {round_idx}', 'steps')
     O = np.concatenate([r[0] for r in res])
     Y = np.concatenate([r[1] for r in res])
     stats = [s for r in res for s in r[2]]
@@ -195,6 +235,7 @@ def eval_worker(job):
         obs, r, term, trunc, info = env.step(act)
         done = term or trunc
     ok = bool(env.success)
+    _tick(1)
     st = np.asarray(steers) * env.max_steer
     return f'{os.path.basename(path)[:-4]}@{cap:g}/{start}', ok, float(env.elapsed), float(np.abs(np.diff(st)).mean())
 
@@ -208,8 +249,7 @@ EVAL_CAPS = tuple(c for c, _ in EVAL_SETTINGS)
 def evaluate(args, policy, tracks, mode='eval', settings=EVAL_SETTINGS):
     '''success over all runs; lap = mean 2-lap time of the first setting's runs that finished'''
     jobs = [(p, policy, mode, 7 + i, cap, start) for cap, start in settings for i, p in enumerate(sorted(tracks))]
-    with mp.get_context('spawn').Pool(min(args.workers, len(jobs))) as pool:
-        res = pool.map(eval_worker, jobs)
+    res = run_pool(eval_worker, jobs, min(args.workers, len(jobs)), len(jobs), 'eval', 'episodes')
     succ = np.mean([r[1] for r in res])
     held = [r[1] for r in res if HOLDOUT in r[0]]
     print(f'      held-out tracks ({HOLDOUT}, never trained on): success {np.mean(held)*100:.1f}% '
@@ -234,6 +274,7 @@ def train_bc(args, actor, O, Y, rms, grad_steps, lr, Nn=None):
     opt = torch.optim.Adam(actor.parameters(), lr=lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=grad_steps, eta_min=lr * 0.05)
     actor.train()
+    t0 = time.time()
     for it in range(1, grad_steps + 1):
         idx = tr[torch.randint(len(tr), (args.batch,))]
         out = actor(X[idx]).loc
@@ -249,10 +290,12 @@ def train_bc(args, actor, O, Y, rms, grad_steps, lr, Nn=None):
         torch.nn.utils.clip_grad_norm_(actor.parameters(), args.max_grad_norm)
         opt.step()
         sched.step()
-        if it % 3000 == 0 or it == grad_steps:
+        if it % 2000 == 0 or it == grad_steps:
             with torch.no_grad():
                 vl = ((actor(X[val]).loc - T[val]) ** 2 * w).mean().item()
-            print(f'    [bc] step {it}/{grad_steps} train {loss.item():.5f} val {vl:.5f}', flush=True)
+            el = time.time() - t0
+            print(f'    [bc] step {it}/{grad_steps} train {loss.item():.5f} val {vl:.5f} | '
+                  f'elapsed {_hms(el)} | ETA {_hms(el / it * (grad_steps - it))} | total {_hms(time.time() - T_START)}', flush=True)
     actor.eval()
     return vl
 
@@ -338,6 +381,7 @@ def main():
                  f"start/cap {EVAL_SETTINGS}")
     for rnd in range(start_rnd, args.dagger_iters + 1):
         Oall, Yall, Nall = np.concatenate(data_O), np.concatenate(data_Y), np.concatenate(data_N)
+        cprint(f'[round {rnd}] BC on {len(Oall)} samples -> eval ({time.strftime("%m-%d %H:%M")}, total {_hms(time.time() - T_START)})', bold=True)
         t0 = time.time()
         vl = train_bc(args, actor, Oall, Yall, rms, args.grad_steps,
                       args.lr if (rnd == 0 and not args.init) else args.lr * 0.5, Nall)
