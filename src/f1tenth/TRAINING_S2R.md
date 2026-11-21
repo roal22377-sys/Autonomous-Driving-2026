@@ -32,6 +32,8 @@
 OMP_NUM_THREADS=1 ~/venv/torch210/bin/python3 -m utils.track_gen 6 22
 
 # 1. IL (run 8 = 다음 학습 "A 방법": 512x2 신경망 + CAPS 떨림 억제, 라운드별 데이터 저장)
+#    run 8부터 11/19 실차 점검 반영 (NOTES_1119): 조향 지연 범위 0.05~0.30 s, 행동 이력 12 (obs_dim 80),
+#    왼쪽 조향 한계 0.428~0.482 rad 랜덤 (eval 0.428 = 지금 차, agent_node와 같은 잘림), 비대칭 critic 상태 15개
 OMP_NUM_THREADS=1 nohup ~/venv/torch210/bin/python3 -u train_il_s2r.py --algo_idx 8 --workers 22 \
     --hidden_dim 512 --caps_t 0.3 --caps_s 0.3 \
     --expert_steps 1.5e6 --dagger_iters 1000 --dagger_steps 8e5 --dart_std 0.08 --grad_steps 20000 \

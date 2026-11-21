@@ -356,7 +356,7 @@ class CurvaturePursuitPlanner:
         local_y = -np.sin(th) * dx + np.cos(th) * dy
         dist2 = dx * dx + dy * dy
         steer = np.arctan(self.wheelbase * 2.0 * local_y / max(dist2, 1e-6))
-        steer = float(np.clip(steer, -self.max_steer, self.max_steer))
+        steer = float(np.clip(steer, -self.max_steer, self.max_steer_left))
 
         speed = float(self.v_profile[i])
         return speed, steer
@@ -376,7 +376,7 @@ class RacelinePlanner:
     """
 
     def __init__(self, track, wb, v_min=2.0, v_max=8.0, a_lat=4.0, a_acc=3.0, a_brake=3.0,
-                 max_steer=0.497, lad_base=0.6, lad_gain=0.22, sv_max=2.65, merge_dist=0.6):
+                 max_steer=0.497, lad_base=0.6, lad_gain=0.22, sv_max=2.65, merge_dist=0.6, max_steer_left=None):
         from utils.raceline import speed_profile
         self.merge_dist = merge_dist
         line = track.raceline
@@ -386,6 +386,7 @@ class RacelinePlanner:
         self.xy, self.n = xy, xy.shape[0]
         self.ds = float(np.mean(np.linalg.norm(np.roll(xy, -1, axis=0) - xy, axis=1)))
         self.wheelbase, self.max_steer, self.sv_max = wb, max_steer, sv_max
+        self.max_steer_left = max_steer if max_steer_left is None else min(max_steer_left, max_steer)   # + = left
         self.v_min, self.v_max, self.a_acc = v_min, v_max, a_acc
         self.lad_base, self.lad_gain = lad_base, lad_gain
         self.v_profile = speed_profile(xy, v_min, v_max, a_lat, a_acc, a_brake)

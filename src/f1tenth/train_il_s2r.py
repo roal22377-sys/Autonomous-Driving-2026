@@ -131,7 +131,8 @@ def rollout_worker(job):
         obs, info = env.reset()
         # the expert respects this episode's speed cap (the policy is told the cap in its observation)
         pl = RacelinePlanner(env._env.unwrapped.track, args.length_f + args.length_r, v_min=env.min_speed, v_max=env.speed_cap,
-                             a_acc=env.params['a_max'], a_brake=env.params['a_max'], max_steer=env.max_steer, **EXPERT)
+                             a_acc=env.params['a_max'], a_brake=env.params['a_max'], max_steer=env.max_steer,
+                             max_steer_left=env.steer_left_max, **EXPERT)
         expert_drives = actor is None or np.random.rand() < beta
         noise_std = np.random.uniform(0.0, dart_std) if expert_drives else 0.0
         noise, done, steps = 0.0, False, 0
@@ -333,7 +334,7 @@ def main():
         save_round(0, O, Y, Nn)
 
     s2r = args.sim2real
-    eval_desc = (f"delay {s2r['steer_delay_nominal']} s, a_max {s2r['a_max_nominal']}, noise, "
+    eval_desc = (f"delay {s2r['steer_delay_nominal']} s, left steer {s2r.get('steer_left_max_nominal', args.max_steer)} rad, a_max {s2r['a_max_nominal']}, noise, "
                  f"start/cap {EVAL_SETTINGS}")
     for rnd in range(start_rnd, args.dagger_iters + 1):
         Oall, Yall, Nall = np.concatenate(data_O), np.concatenate(data_Y), np.concatenate(data_N)

@@ -80,6 +80,7 @@ class F1Wrapper(gym.Wrapper):
         self.s2r = dict(args.get('sim2real', None) or {})
         self.base_params = dict(self._env.unwrapped.params)
         self.steer_delay_steps, self.speed_delay_steps = 0, 0
+        self.steer_left_max = self.max_steer    # [rad] left end of the servo (sim2real.steer_left_max)
         self.track_files = None
         if sim_mode != 'ideal' and self.s2r.get('generated_tracks', False):
             from utils.track_gen import list_variants
@@ -107,7 +108,9 @@ class F1Wrapper(gym.Wrapper):
         params = dict(self.base_params)
         if self.sim_mode == 'ideal':
             self.steer_delay_steps = self.speed_delay_steps = 0
+            self.steer_left_max = self.max_steer
         else:
+            self.steer_left_max = min(self._rand('steer_left_max', self.max_steer), self.max_steer)
             self.steer_delay_steps = int(round(self._rand('steer_delay', 0.0) / self.timestep))
             self.speed_delay_steps = int(round(self._rand('speed_delay', 0.0) / self.timestep))
             params['a_max'] = self._rand('a_max', params['a_max'])
@@ -277,10 +280,11 @@ class F1Wrapper(gym.Wrapper):
         self.prev_cmd = self.last_action
         self.last_action = cmd.copy()
 
-        steer = float(cmd[0])*self.max_steer
+        # the real servo can't reach the policy's full left lock (+ = left); agent_node.py clips there
+        steer = min(float(cmd[0])*self.max_steer, self.steer_left_max)
         speed = min(float(unnormalize_speed(cmd[1], self.min_speed, self.max_speed)), self.speed_cap)
-        # history = what was actually sent (after the cap), exactly like agent_node.py
-        self.history.push([cmd[0], normalize_speed(speed, self.min_speed, self.max_speed)])
+        # history = what was actually sent (after the steering clip and speed cap), exactly like agent_node.py
+        self.history.push([steer / self.max_steer, normalize_speed(speed, self.min_speed, self.max_speed)])
         if self.steer_delay_steps > 0:
             self.steer_queue.append(steer)
             steer = self.steer_queue.popleft()
@@ -353,12 +357,12 @@ class F1Wrapper(gym.Wrapper):
             self.speed_cap = float(self.sl_cfg.get('nominal', self.max_speed))
         self.speed_cap = min(self.speed_cap, self.max_speed)
 
-    PRIV_DIM = 14
+    PRIV_DIM = 15
 
     def privileged(self):
         '''
             Simulator-only state for an asymmetric critic (PPO): never given to the actor.
-            [ey, heading error, speed, steer, yaw rate, slip, steer delay, a_max, mu, speed cap,
+            [ey, heading error, speed, steer, yaw rate, slip, steer delay, a_max, mu, speed cap, left steer limit,
              centerline curvature 1 / 3 / 6 / 10 m ahead]
         '''
         st = self.vehicle_state()
@@ -369,7 +373,7 @@ class F1Wrapper(gym.Wrapper):
         yaw_err = (float(self.yaw_frenet) + np.pi) % (2*np.pi) - np.pi
         return np.array([float(self.position_frenet[1]), yaw_err, st[3], st[2], st[5], st[6],
                          self.steer_delay_steps*self.timestep, self.params['a_max'], self.params['mu'],
-                         self.speed_cap] + curv, dtype=np.float32)
+                         self.speed_cap, self.steer_left_max] + curv, dtype=np.float32)
 
     # ---------------------------------------------------------------- expert support
     def pending_commands(self):

@@ -2,7 +2,7 @@
 map: null
 max_episode_steps: 1000   # overridden per episode when sim2real.laps_steps is on (enough steps for `laps`)
 laps: 2             # an episode succeeds after this many laps (lap time = time for all of them)
-obs_dim: 76         # must equal lidar.num_beams + (1 if speed_obs.enabled) + 2*action_history.length + (1 if speed_limit.enabled)
+obs_dim: 80         # must equal lidar.num_beams + (1 if speed_obs.enabled) + 2*action_history.length + (1 if speed_limit.enabled)
 action_dim: 2
 show_centerline: false
 
@@ -36,15 +36,21 @@ speed_limit:
   uncapped_prob: 0.25       # fraction of training episodes without a cap (= max_speed)
   nominal: 8.0              # cap used by sim_mode='eval' unless overridden
 
-# last H commands appended to the observation (utils/observation.py ActionHistory), 40 Hz -> 0.25 s
+# last H commands appended to the observation (utils/observation.py ActionHistory), 40 Hz -> 0.30 s
+# must cover the longest steer_delay below (NOTES_1119 3-1)
 action_history:
-  length: 10
+  length: 12
 
 # sim-to-real gaps measured on the car; utils/env.py applies them when sim_mode != 'ideal'
 #   train: sample each episode from the ranges, eval: fixed nominal values
 sim2real:
-  steer_delay: [0.10, 0.30]   # [s] total steering delay (servo + tire); 0.25 total reproduced the real weave
+  steer_delay: [0.05, 0.30]   # [s] total steering delay (servo + tire); 0.25 total reproduced the real weave
+                              #     not measured yet (11/19 closed-loop estimate 0.05-0.10) -> wide range
   steer_delay_nominal: 0.25   #     (the old sim's hidden 2-step buffer is gone, see base_classes.py)
+  # left end of the servo: servo = cmd + 0.558, VESC clamps at 1.0 -> cmd 0.4415 / steer_cmd_gain 1.031
+  # = 0.428 rad (right end is past max_steer). Range up to max_steer in case the linkage is re-centred.
+  steer_left_max: [0.428, 0.482]   # [rad]
+  steer_left_max_nominal: 0.428
   speed_delay: [0.0, 0.05]    # [s] speed command -> wheel speed (real ~0.03 s)
   speed_delay_nominal: 0.03
   a_max: [2.5, 3.5]           # [m/s^2] real accel p95 2.7 (VESC current limit); sim default 9.51
