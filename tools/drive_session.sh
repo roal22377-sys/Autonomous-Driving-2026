@@ -1,6 +1,10 @@
 #!/bin/bash
 # One command on the local PC for an autonomous-driving session on the car.
-#   tools/drive_session.sh            # open 5 tabs: bringup / teleop(e-stop) / bag record / cmd monitor / agent
+#   tools/drive_session.sh            # git push + car git pull (tools/deploy_car.sh), then open 6 tabs:
+#                                     #   bringup / teleop(e-stop) / bag record / live status / cmd monitor / agent
+#   tools/drive_session.sh -m "msg"   # ...commit all local changes first, then push/pull
+#   tools/drive_session.sh --no-deploy  # skip the push/pull, just open the tabs
+#   tools/drive_session.sh --finish   # stop everything, fetch the newest bag, show tools/eval_drive.py results
 #   tools/drive_session.sh --stop     # stop agent, bag (saved cleanly), bringup on the car
 #   tools/drive_session.sh --fetch    # extract the newest bag on the car -> logs/<bag>_extracted/
 #   tools/drive_session.sh --agent    # (re)start only the agent in this terminal (bringup keeps running)
@@ -17,11 +21,27 @@ if ! ssh $SSH_OPTS -o BatchMode=yes "$CAR_HOST" true; then
   echo "[error] cannot reach $CAR_HOST (car off / not on Wi-Fi?)"; exit 1
 fi
 
+DEPLOY=1 MSG=""
 case "$1" in
+  --no-deploy) DEPLOY=0; shift ;;
+  -m) [ -n "$2" ] || { echo "usage: $0 -m \"commit message\""; exit 1; }
+      MSG="$2"; shift 2 ;;
+esac
+
+case "$1" in
+  --finish)
+    "$0" --stop
+    OUT=$("$0" --fetch | tee /dev/stderr | sed -n 's/^\[done\] //p')
+    [ -n "$OUT" ] || { echo "[error] fetch failed"; exit 1; }
+    PY=python3; [ -x "$HOME/venv/torch210/bin/python" ] && PY="$HOME/venv/torch210/bin/python"
+    "$PY" "$REPO/tools/eval_drive.py" "$OUT" | tee "$OUT/eval.txt"
+    echo "[done] analysis saved to $OUT/eval.txt"
+    exit 0 ;;
   --stop)
     # SIGINT so ros2 bag closes the db cleanly; agent first so nothing drives while bringup goes down
     ssh $SSH_OPTS "$CAR_HOST" 'pkill -INT -f "[a]gent_node"; sleep 1; pkill -INT -f "[r]os2 bag record"; sleep 2;
-      pkill -INT -f "[r]os2 launch f1tenth_stack"; pkill -INT -f "[k]ey_teleop"; pkill -INT -f "[t]opic echo"; sleep 2;
+      pkill -INT -f "[r]os2 launch f1tenth_stack"; pkill -INT -f "[k]ey_teleop"; pkill -INT -f "[t]opic echo";
+      pkill -INT -f "[l]ive_status.py"; sleep 2;
       pgrep -af "[r]os2|[a]gent_node|[u]rg_node|[v]esc_" || echo "[car] all stopped"'
     exit 0 ;;
   --fetch)
@@ -41,11 +61,17 @@ case "$1" in
     read -p "Press s in the TELEOP tab first, then Enter here to start the agent: "
     exec ssh $SSH_OPTS -t "$CAR_HOST" "$CAR_ENV && ros2 run f1tenth_stack agent_node --ros-args --params-file src/f1tenth_ros/f1tenth_stack/config/agent.yaml" ;;
   "") ;;
-  *) echo "usage: $0 [--stop|--fetch|--agent]"; exit 1 ;;
+  *) echo "usage: $0 [-m msg|--no-deploy] | --finish | --stop | --fetch | --agent"; exit 1 ;;
 esac
+
 
 if ssh $SSH_OPTS "$CAR_HOST" 'pgrep -f "[r]os2 launch f1tenth_stack|[a]gent_node" >/dev/null'; then
   echo "[error] bringup/agent already running on the car. Run: $0 --stop"; exit 1
+fi
+
+if [ $DEPLOY = 1 ]; then
+  # push local commits and make the car pull, so the car drives exactly what is in the repo
+  if [ -n "$MSG" ]; then "$REPO/tools/deploy_car.sh" -m "$MSG"; else "$REPO/tools/deploy_car.sh"; fi
 fi
 
 # each tab runs a small script: ssh to the car with the env set up, run one command, keep the tab open
@@ -60,6 +86,7 @@ EOF
 mktab bringup  ""                 'ros2 launch f1tenth_stack bringup_launch.py vesc_config:=$HOME/ros2_ws/src/f1tenth_ros/f1tenth_stack/config/vesc.yaml use_agent:=false'
 mktab teleop   "sleep 4"          'ros2 run key_teleop key_teleop'
 mktab bag      "sleep 6"          'mkdir -p ~/bags && ros2 bag record -o ~/bags/run_$(date +%m%d_%H%M) /scan /odom /drive /teleop /ackermann_cmd /sensors/core'
+mktab status   "sleep 6"          'python3 tools/live_status.py'
 mktab monitor  "sleep 6"          'ros2 topic echo /ackermann_cmd'
 mktab agent    "echo 'Wait for bringup, press s in the TELEOP tab, put the car on the track,'; read -p 'then press Enter here to start the agent: '" \
                'ros2 run f1tenth_stack agent_node --ros-args --params-file src/f1tenth_ros/f1tenth_stack/config/agent.yaml'
@@ -67,7 +94,8 @@ mktab agent    "echo 'Wait for bringup, press s in the TELEOP tab, put the car o
 gnome-terminal --window --title "1 bringup"            -e "bash $TABS/bringup.sh" \
                --tab    --title "2 TELEOP s=stop r=go" -e "bash $TABS/teleop.sh" \
                --tab    --title "3 bag record"         -e "bash $TABS/bag.sh" \
-               --tab    --title "4 cmd monitor"        -e "bash $TABS/monitor.sh" \
-               --tab    --title "5 agent"              -e "bash $TABS/agent.sh" 2>/dev/null
+               --tab    --title "4 LIVE status"        -e "bash $TABS/status.sh" \
+               --tab    --title "5 cmd monitor"        -e "bash $TABS/monitor.sh" \
+               --tab    --title "6 agent"              -e "bash $TABS/agent.sh" 2>/dev/null
 
-echo "[local] opened 5 tabs. Stop everything with: $0 --stop ; fetch the log with: $0 --fetch"
+echo "[local] opened 6 tabs. When done: $0 --finish  (stop + fetch the log + analysis)"
