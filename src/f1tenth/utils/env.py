@@ -372,28 +372,44 @@ class F1Wrapper(gym.Wrapper):
         info['privileged'] = self.privileged()
         return obs, reward, terminate, truncate, info
 
-    START_MAX_HEADING = 0.35      # [rad] heading error at random starts
-    start_mode = None              # None: random offset in 'train', centerline otherwise; or 'center' / 'random'
+    # starts (11/23): real starts are on/near the centerline or the race line, so training mixes those with
+    # mildly disturbed starts (was: 100 % anywhere across the width with up to 0.35 rad heading error)
+    START_MAX_HEADING = 0.15      # [rad] heading error at random starts (was 0.35)
+    START_MAX_OFFSET = 0.5        # [m] lateral offset from the centerline at random starts (was the whole width)
+    TRAIN_START_MIX = (('center', 0.25), ('raceline', 0.25), ('random', 0.5))
+    start_mode = None              # None: TRAIN_START_MIX in 'train', centerline otherwise; or 'center' / 'raceline' / 'random'
 
     def _start_pose(self, track):
         '''
-            Start pose on a generated track. Random starts (train, or start_mode='random') put the
-            car anywhere across the drivable width with a heading error, so the policy learns to
-            merge onto the race line from far away; otherwise on the centerline, heading along it.
+            Start pose on a generated track: 'center' on the centerline heading along it, 'raceline' on the
+            race line heading along it, 'random' up to START_MAX_OFFSET off the centerline (inside the
+            drivable width) with up to START_MAX_HEADING heading error. Training draws from TRAIN_START_MIX.
         '''
         xy = np.stack([track.centerline.xs, track.centerline.ys], axis=1).astype(np.float64)
         n = len(xy)
         i = int(self.noise_rng.integers(n))
         t = xy[(i + 1) % n] - xy[i - 1]
         yaw = float(np.arctan2(t[1], t[0]))
-        mode = self.start_mode or ('random' if self.sim_mode == 'train' else 'center')
+        mode = self.start_mode
+        if mode is None:
+            if self.sim_mode == 'train':
+                names, p = zip(*self.TRAIN_START_MIX)
+                mode = names[int(self.noise_rng.choice(len(names), p=np.asarray(p) / np.sum(p)))]
+            else:
+                mode = 'center'
         x, y, th = xy[i, 0], xy[i, 1], yaw
-        if mode == 'random' and hasattr(track, 'w_left'):
+        if mode == 'raceline' and track.raceline is not None:
+            rl = np.stack([track.raceline.xs, track.raceline.ys], axis=1).astype(np.float64)
+            j = int(np.argmin(np.sum((rl - xy[i]) ** 2, axis=1)))
+            tr = rl[(j + 1) % len(rl)] - rl[j - 1]
+            x, y, th = rl[j, 0], rl[j, 1], float(np.arctan2(tr[1], tr[0]))
+        elif mode == 'random' and hasattr(track, 'w_left'):
             dh = float(self.noise_rng.uniform(-self.START_MAX_HEADING, self.START_MAX_HEADING))
             # keep the 0.30 x 0.60 body clear of the wall it points at: half width 0.15 + 0.15, plus
             # the sideways reach of the front corner (~0.8 m ahead incl. the first moments of driving)
             margin = 0.3 + 0.8*abs(np.sin(dh))
-            lo, hi = -(float(track.w_right[i]) - margin), float(track.w_left[i]) - margin
+            lo = max(-(float(track.w_right[i]) - margin), -self.START_MAX_OFFSET)
+            hi = min(float(track.w_left[i]) - margin, self.START_MAX_OFFSET)
             off = float(self.noise_rng.uniform(lo, hi)) if hi > lo else 0.0
             x, y = x - off*np.sin(yaw), y + off*np.cos(yaw)
             th = yaw + dh

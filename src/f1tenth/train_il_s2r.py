@@ -58,6 +58,16 @@ EXPERT_GRIP_SHARE = 0.6
 # ... and never drives faster than its commanded steering allows at this share of the grip (merging after a
 # start or a disturbance). 11/23, expert only, 2 laps: 94.7 % -> 100 % on the eval tracks, open-space 87.5 % -> 97.7 %
 EXPERT_STEER_GRIP_SHARE = 0.7
+# 11/23 comparisons (expert alone, 2 laps; eval / open-space / worst / 2-lap time):
+#   'cap'  100 / 97.7 %, but taught "slow down and steer hard" in DAgger states (IL run 9: slow, jittery)
+#   'hold' 100 / 96.6 / 79.5 %, 156.4 s   <- used: no extra slow-down labels, not slower than no rule
+#   'off'  94.7 / 87.5 %, 157.1 s;  'hold_off' (only off the line) 93.9 / 87.5 %;  'start' 98.5 / 88.6 %
+#   longer look-ahead (lad_base 1.0/1.4, lad_gain 0.30/0.35, off-line +0.8 m/m) smoothed the labels but cut corners:
+#   eval 67-98 %, open-space 52-91 %, 3-5 s slower -> lad_base 0.6, lad_gain 0.22 kept
+EXPERT_STEER_SPEED_MODE = 'hold'    # utils/rule_based.py RacelinePlanner steer_speed_mode: 'cap' | 'hold' | 'hold_off' | 'start' | 'off'
+EXPERT_LAD_OFF_GAIN = 0.0           # look-ahead + this x (distance from the race line, <= 1 m)
+EXPERT_MU = None                    # None: the episode's true friction; a number: plan speeds with this mu always
+                                    # (0.45 fixed: open-space 100 % but 2.5 s slower over 2 laps -> not used)
 
 
 def expert_kwargs(env):
@@ -66,10 +76,11 @@ def expert_kwargs(env):
         braking at EXPERT_GRIP_SHARE of mu * g (braking into a corner unloads the rear tires and spun
         the car with a fixed 3 m/s^2), acceleration up to the motor limit a_max
     '''
-    grip = float(env.params['mu']) * 9.81
+    grip = float(EXPERT_MU if EXPERT_MU else env.params['mu']) * 9.81
     a_max = float(env.params['a_max'])
     return dict(EXPERT, a_lat=EXPERT_GRIP_SHARE * grip, a_acc=a_max, a_brake=min(a_max, EXPERT_GRIP_SHARE * grip),
-                a_lat_steer=EXPERT_STEER_GRIP_SHARE * grip)
+                a_lat_steer=EXPERT_STEER_GRIP_SHARE * grip, steer_speed_mode=EXPERT_STEER_SPEED_MODE,
+                lad_off_gain=EXPERT_LAD_OFF_GAIN)
 STEER_LOSS_WEIGHT = 2.0         # steering errors matter more than speed errors
 
 
@@ -93,8 +104,9 @@ def get_args(argv=None):
     p.add_argument('--dagger_iters', type=int, default=20,
                    help='maximum DAgger rounds; the early stop below usually ends the run sooner')
     # early stop (11/23): stop when the best score has not improved noticeably for `patience` rounds in a row
-    p.add_argument('--patience', type=int, default=2, help='rounds in a row without a noticeable improvement')
-    p.add_argument('--min_rounds', type=int, default=3, help='never stop before this round')
+    # 11/23: run 9 stopped after round 5 while the score still swung +-8 points between rounds -> more patience
+    p.add_argument('--patience', type=int, default=3, help='rounds in a row without a noticeable improvement')
+    p.add_argument('--min_rounds', type=int, default=5, help='never stop before this round')
     p.add_argument('--min_gain', type=float, default=0.01, help='score gain that counts as an improvement (0.01 = 1 %p)')
     p.add_argument('--lap_gain', type=float, default=0.01,
                    help='at an equal score: paired 2-lap time gain that counts as an improvement (0.01 = 1 %% faster)')
@@ -109,7 +121,7 @@ def get_args(argv=None):
     p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--hidden_dim', type=int, default=512, help='actor width (2 hidden layers); run 7 used 256')
     p.add_argument('--eval_tracks', type=int, default=44)
-    p.add_argument('--max_data', type=float, default=4e6,      # 15 GB WSL PC (11/23); 8e6 needs ~23 GB
+    p.add_argument('--max_data', type=float, default=8e6,      # float16 observations (11/23): 8e6 fits the 15 GB WSL PC
                    help='keep at most this many samples (oldest DAgger rounds dropped, expert round kept)')
     p.add_argument('--min_beta', type=float, default=0.1, help='expert-driven episode fraction never below this')
     p.add_argument('--init', default=None, help='start from this model (e.g. imitation/7): its actor + normalizer, '
@@ -120,6 +132,9 @@ def get_args(argv=None):
     p.add_argument('--caps_t', type=float, default=0.3, help='temporal smoothness weight (0 = off)')
     p.add_argument('--caps_s', type=float, default=0.3, help='spatial smoothness weight (0 = off)')
     p.add_argument('--caps_sigma', type=float, default=0.05, help='spatial noise std in normalized obs units')
+    p.add_argument('--hist_noise', type=float, default=0.0,
+                   help='gaussian noise (normalized obs units) on the action-history inputs during BC: the student\'s '
+                        'own jittery commands are in its input, noise keeps it from copying them (11/23)')
     a = p.parse_args(argv)
     if a.task_config:
         # workers call get_args([]) again; the environment variable carries the choice to them
@@ -284,8 +299,9 @@ def eval_worker(job):
 # (speed cap [m/s], start): uncapped from the centerline (lap time), uncapped and car-practice cap
 # from random starts anywhere across the track with a heading error (merging onto the race line)
 # the cap is an upper limit: within it the policy picks its own speed (0.5-8 m/s) for every track and corner.
-# 8 = no limit (lap time is compared there), 5 = the car's agent.yaml speed_limit these days (was 3 up to run 8)
-EVAL_SETTINGS = ((8.0, 'center'), (8.0, 'random'), (5.0, 'random'))
+# 8 = no limit (lap time is compared there), 5 = the car's agent.yaml speed_limit these days (was 3 up to run 8).
+# Starts like the car's (11/23): centerline, and one mildly disturbed start (utils/env.py START_MAX_*)
+EVAL_SETTINGS = ((8.0, 'center'), (5.0, 'center'), (8.0, 'random'))
 EVAL_CAPS = tuple(c for c, _ in EVAL_SETTINGS)
 
 
@@ -342,9 +358,11 @@ def train_bc(args, actor, O, Y, rms, grad_steps, lr, Nn=None):
     torch.set_num_threads(args.bc_threads)
     # normalize in chunks straight into float32: rms.normalize on everything at once makes a float64 copy
     # (6.8 GB at 10.7M samples; IL run 8 was OOM-killed at 20.8 of 23 GB)
-    X = torch.empty((len(O), O.shape[1]), dtype=torch.float32)
+    # float16 storage (11/23): half the memory, so twice the data fits (normalized values, ~1e-3 resolution);
+    # every batch is cast back to float32
+    X = torch.empty((len(O), O.shape[1]), dtype=torch.float16)
     for i in range(0, len(O), 500_000):
-        X[i:i + 500_000] = torch.as_tensor(rms.normalize(O[i:i + 500_000]), dtype=torch.float32)
+        X[i:i + 500_000] = torch.as_tensor(rms.normalize(O[i:i + 500_000].astype(np.float32)), dtype=torch.float16)
     T = torch.as_tensor(Y, dtype=torch.float32)
     n = len(X)
     perm = torch.randperm(n)
@@ -353,20 +371,28 @@ def train_bc(args, actor, O, Y, rms, grad_steps, lr, Nn=None):
     # samples whose next sample is the next step of the same episode (CAPS temporal term)
     nxt = torch.as_tensor(np.where(Nn[:-1])[0]) if (Nn is not None and args.caps_t > 0) else None
     w = torch.tensor([STEER_LOSS_WEIGHT, 1.0])
+    from utils.observation import get_obs_config
+    oc = get_obs_config(args)
+    h0 = oc['lidar']['num_beams'] + (1 if oc['speed']['enabled'] else 0)
+    hist = slice(h0, h0 + 2 * oc['history']['length'])          # action-history columns of the observation
     opt = torch.optim.Adam(actor.parameters(), lr=lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=grad_steps, eta_min=lr * 0.05)
     actor.train()
     t0 = time.time()
     for it in range(1, grad_steps + 1):
         idx = tr[torch.randint(len(tr), (args.batch,))]
-        out = actor(X[idx]).loc
-        loss = ((out - T[idx]) ** 2 * w).mean()
+        xb = X[idx].float()
+        if args.hist_noise > 0:
+            xb[:, hist] += args.hist_noise * torch.randn_like(xb[:, hist])
+        out = actor(xb).loc
+        loss = ((out - T[idx]) ** 2 * w).mean()     # MSE: run 9 already steered too little where large steering
+                                                    # was needed; a Huber loss would weaken exactly those labels
         if args.caps_s > 0:
-            noisy = actor(X[idx] + args.caps_sigma * torch.randn_like(X[idx])).loc
+            noisy = actor(xb + args.caps_sigma * torch.randn_like(xb)).loc
             loss = loss + args.caps_s * ((noisy - out) ** 2).mean()
         if nxt is not None:
             j = nxt[torch.randint(len(nxt), (args.batch // 2,))]
-            loss = loss + args.caps_t * ((actor(X[j + 1]).loc - actor(X[j]).loc) ** 2).mean()
+            loss = loss + args.caps_t * ((actor(X[j + 1].float()).loc - actor(X[j].float()).loc) ** 2).mean()
         opt.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(actor.parameters(), args.max_grad_norm)
@@ -374,7 +400,7 @@ def train_bc(args, actor, O, Y, rms, grad_steps, lr, Nn=None):
         sched.step()
         if it % 2000 == 0 or it == grad_steps:
             with torch.no_grad():
-                vl = ((actor(X[val]).loc - T[val]) ** 2 * w).mean().item()
+                vl = ((actor(X[val].float()).loc - T[val]) ** 2 * w).mean().item()      # MSE, comparable to earlier runs
             el = time.time() - t0
             print(f'    [bc] step {it}/{grad_steps} train {loss.item():.5f} val {vl:.5f} | '
                   f'elapsed {_hms(el)} | ETA {_hms(el / it * (grad_steps - it))} | total {_hms(time.time() - T_START)}', flush=True)
@@ -433,7 +459,7 @@ def main():
     os.makedirs(data_dir, exist_ok=True)
 
     def save_round(k, O, Y, Nn):
-        np.savez(f'{data_dir}/round{k:03d}.npz', O=O, Y=Y, N=Nn)
+        np.savez(f'{data_dir}/round{k:03d}.npz', O=O.astype(np.float16), Y=Y, N=Nn)
 
     start_rnd = 0
     if args.resume and sorted(glob.glob(f'{data_dir}/round*.npz')):
@@ -442,7 +468,7 @@ def main():
         data_O, data_Y, data_N = [], [], []
         for f in files:
             z = np.load(f)
-            data_O.append(z['O']); data_Y.append(z['Y']); data_N.append(z['N'])
+            data_O.append(z['O'].astype(np.float16)); data_Y.append(z['Y']); data_N.append(z['N'])
         ck = torch.load(sorted(glob.glob(f'{args.save_dir}/checkpoint/model_round*.pt'))[-1])
         actor.load_state_dict(ck['actor']); rms.mean, rms.var = ck['obs_mean'], ck['obs_var']
         if os.path.isfile(f'{args.save_dir}/train_log.pkl'):
@@ -466,6 +492,7 @@ def main():
                f'({time.time()-t0:.0f}s)', color='yellow')
         if not args.init:
             rms.update(O)
+        O = O.astype(np.float16)            # kept as float16 (memory), see train_bc
         data_O, data_Y, data_N = [O], [Y], [Nn]
         save_round(0, O, Y, Nn)
 
@@ -526,6 +553,7 @@ def main():
         beta = max(0.5 ** (rnd + 1), args.min_beta)
         t0 = time.time()
         O, Y, stats, Nn = collect(args, args.dagger_steps, policy, beta, args.dart_std, train_tracks, rnd + 1)
+        O = O.astype(np.float16)
         save_round(rnd + 1, O, Y, Nn)
         stu = [s for s in stats if not s[0]]
         cprint(f'[dagger {rnd+1}] beta {beta:.2f}: {len(O)} steps, student 2-lap success '

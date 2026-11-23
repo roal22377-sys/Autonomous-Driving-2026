@@ -377,7 +377,7 @@ class RacelinePlanner:
 
     def __init__(self, track, wb, v_min=2.0, v_max=8.0, a_lat=4.0, a_acc=3.0, a_brake=3.0,
                  max_steer=0.497, lad_base=0.6, lad_gain=0.22, sv_max=2.65, merge_dist=0.6, max_steer_left=None,
-                 merge_speed=2.0, a_lat_steer=None):
+                 merge_speed=2.0, a_lat_steer=None, steer_speed_mode='cap', lad_off_gain=0.0):
         from utils.raceline import speed_profile
         self.merge_dist = merge_dist
         # far from the line the expert slows towards this, not towards v_min (with min_speed 0.5 it
@@ -388,6 +388,18 @@ class RacelinePlanner:
         # (after a start, a disturbance) it steers much harder than the line's curvature, and without this
         # it accelerated to 7 m/s mid-turn and slid into the wall (11/23: 2-lap success 94.7 % -> 100 %)
         self.a_lat_steer = a_lat_steer
+        # 'cap':  speed <= what the commanded steering allows (11/23 first version; in DAgger states it taught
+        #         "slow down and steer hard" while the student weaved -> slow, jittery IL run 9)
+        # 'hold': while the steering is beyond that, do not command more than the current speed (no
+        #         accelerating mid-turn while merging), but never slow down because of the steering
+        # 'start': 'cap' only until the car is on the race line for the first time after the start
+        #         (within START_MERGE_DIST and START_MERGE_YAW), then off: the 11/23 failure was the merge
+        #         after a start; later corrections (DAgger states) get no steering-based slow-down
+        # 'hold_off': 'hold' only while the car is off the race line (> OFF_LINE_DIST): on the line the speed
+        #         table alone decides (corner exits accelerate freely), off it no accelerating mid-turn
+        # 'off':  no steering-based limit
+        self.steer_speed_mode = steer_speed_mode if a_lat_steer else 'off'
+        self.merged = False
         line = track.raceline
         xy = np.stack([line.xs, line.ys]).T.astype(np.float64)
         if np.linalg.norm(xy[0] - xy[-1]) < 1e-3:
@@ -398,11 +410,19 @@ class RacelinePlanner:
         self.max_steer_left = max_steer if max_steer_left is None else min(max_steer_left, max_steer)   # + = left
         self.v_min, self.v_max, self.a_acc = v_min, v_max, a_acc
         self.lad_base, self.lad_gain = lad_base, lad_gain
+        # look-ahead grows with the distance from the race line (11/23): on the line nothing changes, off it
+        # (DAgger states, disturbances) the correction is gentler instead of a sharp steer back
+        self.lad_off_gain = lad_off_gain
         self.v_profile = speed_profile(xy, v_min, v_max, a_lat, a_acc, a_brake)
         self.last_index = None
 
+    OFF_LINE_DIST = 0.3         # [m]   'hold_off' mode: farther than this from the race line = off the line
+    START_MERGE_DIST = 0.2      # [m]   'start' mode: on the line ...
+    START_MERGE_YAW = 0.15      # [rad] ... and heading along it
+
     def reset(self):
         self.last_index = None
+        self.merged = False
 
     def _nearest_index(self, pos):
         if self.last_index is None:
@@ -434,7 +454,8 @@ class RacelinePlanner:
         x, y, th, v = self.predict(state, steer_queue, speed_queue, dt)
         pos = np.array([x, y])
         i = self._nearest_index(pos)
-        lad = self.lad_base + self.lad_gain * max(v, self.v_min)
+        e_line = float(np.linalg.norm(self.xy[i] - pos))
+        lad = self.lad_base + self.lad_gain * max(v, self.v_min) + self.lad_off_gain * min(e_line, 1.0)
         target = self.xy[(i + int(round(lad / self.ds))) % self.n]
         dx, dy = target - pos
         local_y = -np.sin(th) * dx + np.cos(th) * dy
@@ -446,7 +467,18 @@ class RacelinePlanner:
         e = float(np.linalg.norm(self.xy[i] - pos))
         mv = min(max(self.merge_speed, self.v_min), speed)
         speed = min(speed, mv + (speed - mv) * max(0.0, 1.0 - e / self.merge_dist))
-        if self.a_lat_steer:
-            v_turn = np.sqrt(self.a_lat_steer * self.wheelbase / max(np.tan(abs(steer)), 1e-3))
-            speed = min(speed, max(float(v_turn), self.v_min))
+        if self.steer_speed_mode == 'start' and not self.merged:
+            t = self.xy[(i + 1) % self.n] - self.xy[i - 1]
+            yaw_err = abs((np.arctan2(t[1], t[0]) - th + np.pi) % (2 * np.pi) - np.pi)
+            self.merged = e < self.START_MERGE_DIST and yaw_err < self.START_MERGE_YAW
+        mode = 'off' if (self.steer_speed_mode == 'start' and self.merged) else \
+            ('cap' if self.steer_speed_mode == 'start' else self.steer_speed_mode)
+        if mode == 'hold_off':
+            mode = 'hold' if e > self.OFF_LINE_DIST else 'off'
+        if mode != 'off':
+            v_turn = max(float(np.sqrt(self.a_lat_steer * self.wheelbase / max(np.tan(abs(steer)), 1e-3))), self.v_min)
+            if mode == 'cap':
+                speed = min(speed, v_turn)
+            elif speed > v_turn:                    # 'hold': no acceleration beyond the turn limit
+                speed = min(speed, max(v_turn, float(state[3])))
         return speed, steer
