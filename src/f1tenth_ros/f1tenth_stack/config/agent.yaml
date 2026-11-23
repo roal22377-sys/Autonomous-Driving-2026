@@ -7,3 +7,5 @@ agent_node:
     odom_topic: odom
     speed_limit: 5.0    # [m/s] cap on commanded speed (practice); 0.0 = no cap (model max_speed). Policy range 2.0-cap
     speed_min: 0.0      # [m/s] low-speed remap; 0.0 = off. 0.5 failed on 11/23: below ~1.5 m/s the VESC cannot start the motor (30 A spikes, fault 4)
+    steer_gain_left: 1.35   # extra steering per side (1.0 = off); 11/23 log: car turned 0.74 (left) / 0.89 (right) of the sim
+    steer_gain_right: 1.12

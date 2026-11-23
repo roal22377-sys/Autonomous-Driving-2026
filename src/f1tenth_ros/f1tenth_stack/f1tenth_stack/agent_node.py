@@ -67,6 +67,12 @@ class AgentNode(Node):
     # [min_speed, speed_limit] is stretched to [speed_min, speed_limit] on the car, and /odom is mapped
     # back the other way, so the policy keeps seeing the speeds it was trained on. <= 0 disables.
     self.declare_parameter('speed_min', 0.0)
+    # extra steering on the car, per side (1.0 = as calibrated). The real car turns less than the sim
+    # for the same command (11/23 log: left 0.74, right 0.89 of the sim's yaw rate), so the command is
+    # multiplied by these before the servo clip. The action history gets the command divided back, so
+    # the policy still sees the steering it asked for.
+    self.declare_parameter('steer_gain_left', 1.0)
+    self.declare_parameter('steer_gain_right', 1.0)
     # servo calibration, to clip steering to what the servo can reach (relative to ~/ros2_ws like sim_path)
     self.declare_parameter('vesc_config', 'src/f1tenth_ros/f1tenth_stack/config/vesc.yaml')
 
@@ -75,6 +81,10 @@ class AgentNode(Node):
     self.odom_topic = self.get_parameter('odom_topic').value
     self.speed_limit = float(self.get_parameter('speed_limit').value)
     self.speed_min = float(self.get_parameter('speed_min').value)
+    self.gain_left = float(self.get_parameter('steer_gain_left').value)
+    self.gain_right = float(self.get_parameter('steer_gain_right').value)
+    if (self.gain_left, self.gain_right) != (1.0, 1.0):
+      self.get_logger().warn(f'[drive] STEER GAIN on: left x{self.gain_left:.2f}, right x{self.gain_right:.2f}')
     if self.speed_limit > 0:
       self.get_logger().info(f'[drive] speed limited to {self.speed_limit} m/s')
 
@@ -189,8 +199,10 @@ class AgentNode(Node):
     # transform action
     # policy angle [rad] -> servo command: calibration says command = angle * steer_cmd_gain
     action[0] *= self.args.max_steer * float(self.args.get('steer_cmd_gain', 1.0))
-    # the servo can't go past these (left end is short of the policy's range with offset 0.558)
-    action[0] = np.clip(action[0], self.steer_min, self.steer_max)
+    # per-side extra steering (steer_gain_left/right), then the servo limits
+    # (the left end is short of the policy's range with offset 0.558)
+    side_gain = self.gain_left if action[0] > 0 else self.gain_right
+    action[0] = np.clip(action[0] * side_gain, self.steer_min, self.steer_max)
     action[1] = unnormalize_speed(action[1], self.args.min_speed, self.args.max_speed)
     if self.speed_limit > 0:
       # cap after unnormalizing, so the model's output mapping stays as trained
@@ -204,7 +216,7 @@ class AgentNode(Node):
     self.drive_pub.publish(msg)
 
     # remember what was actually sent (after the steering clip and speed cap), normalized like the policy output
-    self.history.push([action[0] / (self.args.max_steer * float(self.args.get('steer_cmd_gain', 1.0))),
+    self.history.push([action[0] / side_gain / (self.args.max_steer * float(self.args.get('steer_cmd_gain', 1.0))),
                        normalize_speed(action[1], self.args.min_speed, self.args.max_speed)])
 
   def policy_to_car_speed(self, v):
