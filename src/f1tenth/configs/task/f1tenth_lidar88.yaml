@@ -1,0 +1,100 @@
+# Lidar variant (11/23): identical to configs/task/f1tenth.yaml except lidar zones (88 non-uniform bins) and obs_dim.
+# Dense where the track is read: ahead (far corners, the end wall of a dead end) and the front diagonals
+# (where the real corner exit opens vs. the edge of a dead-end bay); coarse behind.
+# Keep the rest in sync with f1tenth.yaml (diff the two before a run).
+# Use: train_il_s2r.py --task_config configs/task/f1tenth_lidar88.yaml
+# base
+map: null
+max_episode_steps: 1000   # overridden per episode when sim2real.laps_steps is on (enough steps for `laps`)
+laps: 2             # an episode succeeds after this many laps (lap time = time for all of them)
+obs_dim: 114        # must equal lidar.num_beams + (1 if speed_obs.enabled) + 2*action_history.length + (1 if speed_limit.enabled)
+action_dim: 2
+show_centerline: false
+
+# lidar preprocessing (utils/lidar.py), shared by sim env.py and real agent_node.py
+lidar:
+  num_beams: 88       # = number of bins the zones below give
+  # |angle| 0-20 deg: 1.25 deg bins (0.17 m wide at 8 m), 20-60: 2.5 deg, 60-100: 5 deg, 100-135: 8.75 deg
+  zones: [[20, 1.25], [60, 2.5], [100, 5.0], [135, 8.75]]
+  max_range: 10.0     # [m] clip; real Hokuyo UST-10LX max is 10 m (sim default is 30 m)
+  min_valid: 0.05     # [m] readings below this, and NaN/inf, are invalid -> max_range
+  pooling: min        # min | mean | median over each bin
+  # non-uniform bins instead of num_beams equal ones (utils/lidar.py), dense ahead for high speed:
+  #   zones: [[30, 2.5], [90, 5.0], [135, 7.5]]   # with num_beams: 60 (and obs_dim + 6)
+  # sim-only noise, measured on the real Hokuyo (logs/run_1117_14*); env.py scales them per episode
+  noise_std: 0.008        # [m] gaussian range noise (real: 0.005-0.008)
+  dropout_prob: 0.003     # invalid returns (real: 0-0.25 %)
+  spike_short_prob: 0.0005  # isolated short returns (real: 0.02-0.06 %)
+  spike_long_prob: 0.001    # isolated long returns (real: 0.02-0.09 %)
+  rotation_deg: 1.0       # per-episode mount yaw error, uniform +-
+
+# vehicle speed input, appended after lidar (utils/observation.py)
+#   sim: linear_vels_x / real: /odom twist.linear.x from vesc_to_odom_node
+speed_obs:
+  enabled: true
+  clip: [0.0, 9.0]          # [m/s] reading is clipped to this range (> max_speed)
+  noise_std: 0.06           # [m/s] gaussian noise on the reading (real odom: 0.057 high-freq)
+  scale_range: [0.95, 1.05] # per-episode reading scale error (odom calibration after speed_to_erpm_gain tuning)
+
+# speed limit as a policy input: the car usually runs with agent.yaml speed_limit (2-3 m/s), so the
+# policy is trained with a random per-episode cap and told the cap -> one model for any limit.
+# The cap is applied to the sent command exactly like agent_node.py does.
+speed_limit:
+  enabled: true
+  range: [2.0, 8.0]         # [m/s] per-episode cap during training (uniform); car practice uses 2-3
+  uncapped_prob: 0.25       # fraction of training episodes without a cap (= max_speed)
+  nominal: 8.0              # cap used by sim_mode='eval' unless overridden
+
+# last H commands appended to the observation (utils/observation.py ActionHistory), 40 Hz -> 0.30 s
+# must cover the longest steer_delay below (NOTES_1119 3-1)
+action_history:
+  length: 12
+
+# sim-to-real gaps measured on the car; utils/env.py applies them when sim_mode != 'ideal'
+#   train: sample each episode from the ranges, eval: fixed nominal values
+sim2real:
+  steer_delay: [0.05, 0.20]   # [s] total steering delay (servo + tire); 11/23: lidar yaw vs command best at
+  steer_delay_nominal: 0.10   #     0.10 s (cross-correlation), tire fit best at 0.05-0.10 s (was [0.05, 0.30], 0.25)
+  # 11/23: full lock measured the same on both sides (max_steer below), so no extra left clip any more
+  steer_left_max: [0.41, 0.41]     # [rad]
+  steer_left_max_nominal: 0.41
+  # real wheel angle / commanded angle, per side, below full lock: the servo linkage is not linear and
+  # left mid-range commands turned less (11/23: left ~0.75-0.8, right ~1.0 of the full-lock-based map)
+  steer_scale_left: [0.75, 1.05]
+  steer_scale_left_nominal: 0.85
+  steer_scale_right: [0.85, 1.05]
+  steer_scale_right_nominal: 1.0
+  speed_delay: [0.0, 0.05]    # [s] speed command -> wheel speed (real ~0.03 s)
+  speed_delay_nominal: 0.03
+  a_max: [2.5, 3.5]           # [m/s^2] real accel p95 2.7 (VESC current limit); sim default 9.51
+  a_max_nominal: 3.0
+  mu_scale: [0.8, 1.25]       # tire friction scale around dynamic.yaml mu (0.4-0.62: fit 0.41-0.44, peaks seen ~0.6)
+  noise_scale: [0.5, 2.0]     # per-episode multiplier on the lidar noise above
+  generated_tracks: true      # random width / open-side pockets / both directions (utils/track_gen.py)
+  laps_steps: true            # max_episode_steps = enough for `laps` at 1.6 m/s
+
+# env configs
+timestep: 0.025
+min_speed: 0.5     # [m/s] lowest speed the policy can command (was 2.0 up to IL run 8)
+# the VESC cannot start the motor from rest with a small command (11/23: 0.5-1.5 m/s from standstill
+# -> 30 A spikes, fault 4), so while the car is (almost) stopped a small command is raised to `speed`.
+# Applied identically in utils/env.py and agent_node.py (utils/observation.py apply_start_kick); the
+# action history stores the kicked value.
+start_kick:
+  speed: 2.0        # [m/s] command used to get rolling
+  below: 0.3        # [m/s] measured speed under which the car counts as stopped
+max_speed: 8.0     # [m/s] policy speed range is [min_speed, max_speed]; VESC speed_max 30000 ERPM ~ 8.6 m/s
+max_steer: 0.41     # [rad] true wheel angle at full lock, both sides: outer front tire circle 2.0 m (11/23 tape)
+                    #   R = sqrt(1.0^2 - 0.34^2) - 0.15 = 0.79 m, atan(0.34 / 0.79) = 0.41 (was 0.482 from 11/16)
+# real car: command = angle * gain, per side, so policy full lock = each side's hardware limit
+# (left: servo 1.0 = command 0.4415, right: servo 0.06 = mechanical stop = command -0.497); agent_node only
+steer_cmd_gain_left: 1.077     # 0.4415 / 0.41
+steer_cmd_gain_right: 1.212    # 0.497 / 0.41
+steer_cmd_gain: 1.031          # old single gain, used only when the per-side ones are missing (models up to IL run 8)
+control_input: ["speed", "steering_angle"]
+observation_config: {"type": "original"}
+reset_config: {"type": "cl_random_static"}
+
+# etc
+num_agents: 1
+ego_idx: 0

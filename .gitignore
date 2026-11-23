@@ -27,4 +27,5 @@ file/
 logs/
 # generated training tracks / expert data (regenerable)
 src/f1tenth/installation/maps_gen*/
+src/f1tenth/installation/maps_open_test/
 src/f1tenth/expert_data*.pkl

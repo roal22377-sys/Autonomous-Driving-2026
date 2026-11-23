@@ -1,28 +1,41 @@
 '''
     PPO fine-tuning of the sim2real IL policy for lap time, run from src/f1tenth:
 
-        python -u train_ppo_s2r.py --il imitation/7 --algo_idx 1 --workers 22
+        python -u train_ppo_s2r.py --il imitation/9 --algo_idx 1 --workers 22             # recommended
+        python -u train_ppo_s2r.py --il imitation/9 --algo_idx 0 --workers 22 --baseline  # old settings
 
-    - starts from the IL actor (results/<il>/checkpoint/model.pt) and its obs normalizer (frozen)
+    - starts from the IL actor (results/<il>/checkpoint/model.pt) and its obs normalizer (frozen),
+      on the IL model's own task config (lidar layout, obs_dim, steering calibration)
     - same simulator as IL training: sim_mode='train' (delay, accel limit, friction, noise,
       generated tracks both directions, 2-lap episodes)
-    - reward (utils/env.py): progress along the track (-> lap time), collision penalty,
-      small steering-rate penalty (weaving is slow and fragile on the car)
+    - reward (utils/env.py calc_reward, NOTES_1119_sim2real_rl.md section 4):
+          10 * progress [m] - time cost per step       -> with fixed-distance episodes = minimum lap time
+          - 200 on a crash, - steering-rate penalty    -> weaving is slow and fragile on the car
+          - wall-margin and grip-limit penalties       -> safety margin on the real car
+          + optional small bonus for beating the expert-pace lap estimate
+    - returns are normalized (running std of the discounted return), so the critic learns targets of
+      order 1 instead of hundreds
     - asymmetric actor-critic: the critic also sees simulator-only state (utils/env.py
-      F1Wrapper.privileged: lateral error, heading error, true speed/steer/yaw rate/slip, this
-      episode's delay / a_max / friction / speed cap, upcoming curvature). The value estimate gets
-      much better, the actor (what runs on the car) still sees only lidar + speed + history + cap
-    - critic warm-up with the actor frozen, then PPO (clip + KL early stop) with a
-      behavior-cloning term towards the IL policy whose weight decays (keeps it from collapsing)
+      F1Wrapper.privileged). The actor (what runs on the car) sees only lidar + speed + history + cap
+    - critic warm-up with the actor frozen until the critic explains the returns (explained variance),
+      then PPO (clip + KL early stop) with a behavior-cloning term towards the IL policy whose weight
+      decays, and is raised again if the evaluation success drops below the IL policy's
+    - separate, decaying exploration noise for steering (small: steering noise under delay = crashes)
+      and speed; actor learning rate decays linearly
     - GAE that bootstraps from the true final observation on time-limit truncation
-    - the policy is saved only if it finishes at least as many evaluation laps as the IL policy
-      AND is faster; otherwise the IL policy stays the deployed one
-    Output: results/ppo_s2r/<algo_idx>/ (same layout as the other algorithms)
+    - model selection: saved only if it finishes at least as many evaluation runs as the best model so
+      far, is faster on the runs both finished (paired), and does not finish fewer worst-case runs
+      (longest delay, lowest grip) than the IL policy, and does not finish fewer 2-lap runs than the IL
+      policy on the open-space test tracks (eval_open_space.py: a wide dead-end bay at every corner,
+      where the 11/23 car drove in and hit the end wall). Otherwise the IL policy stays the deployed one
+    - --baseline reproduces the settings before 11/23 (first run of NOTES section 6 step 3), to compare
+    Output: results/ppo_s2r/<algo_idx>/ (same layout as the other algorithms), train_log.pkl per update
 '''
 import argparse
 import os
 import sys
 import time
+import glob
 import pickle
 import functools
 from shutil import copyfile
@@ -36,20 +49,24 @@ import gymnasium as gym
 from easydict import EasyDict
 
 import train_il_s2r as IL
-from utils.track_gen import variant_map
+from utils.track_gen import variant_map, require_fresh_variants
 from utils.env import F1Wrapper
 from utils.vectorize import RunningMeanStd
 from utils.color import cprint
-from algorithm.common.models import Critic
+from eval_open_space import TEST_DIR as OPEN_TEST_DIR
+from algorithm.common.models import Critic, LOG_STD_MIN
 
-PROGRESS_COEFF = 10.0     # per meter of progress
-COLLISION_COST = 200.0    # > value of the rest of the episode, so crashing never pays
-STEER_RATE_COST = 5.0     # per (change of normalized steering)^2
+REWARD_KEYS = ('forward_reward', 'collision_cost', 'steer_cost', 'time_cost', 'wall_cost', 'lat_cost', 'lap_bonus')
+
+# settings before 11/23, for the baseline run (--baseline)
+BASELINE = dict(ret_norm=0, time_cost=0.0, steer_rate_cost=5.0, wall_cost=0.0, lat_cost=0.0, lap_bonus=0.0,
+                log_std_steer=-2.0, log_std_speed=-2.0, log_std_decay=0.0, uncapped_prob=0.25,
+                lr_end=5e-5, max_kl=0.02, bc_end=0.05, warmup_ev=-1e9, bc_adapt=0, worst_eval=0)
 
 
 def get_args():
     p = argparse.ArgumentParser()
-    p.add_argument('--il', default='imitation/7')
+    p.add_argument('--il', required=True, help='IL model to start from, e.g. imitation/9')
     p.add_argument('--name', default='ppo_s2r')
     p.add_argument('--algo_idx', type=int, default=1)
     p.add_argument('--seed', type=int, default=1)
@@ -58,35 +75,99 @@ def get_args():
     p.add_argument('--n_steps', type=int, default=44000, help='rollout steps per update (all envs)')
     p.add_argument('--minibatch', type=int, default=2048)
     p.add_argument('--epochs', type=int, default=8)
-    p.add_argument('--lr', type=float, default=5e-5)
+    p.add_argument('--lr', type=float, default=5e-5, help='actor learning rate at the start')
+    p.add_argument('--lr_end', type=float, default=1e-5, help='... decayed linearly to this')
+    p.add_argument('--critic_lr', type=float, default=3e-4)
     p.add_argument('--gamma', type=float, default=0.995)
     p.add_argument('--gae', type=float, default=0.95)
     p.add_argument('--clip', type=float, default=0.15)
-    p.add_argument('--max_kl', type=float, default=0.02)
-    p.add_argument('--log_std', type=float, default=-2.0)
-    p.add_argument('--critic_warmup', type=int, default=3, help='updates with the actor frozen')
+    p.add_argument('--max_kl', type=float, default=0.015)
+    # exploration noise (log std of the gaussian around the actor mean), per action, decayed linearly
+    p.add_argument('--log_std_steer', type=float, default=-2.5)
+    p.add_argument('--log_std_speed', type=float, default=-1.5)
+    p.add_argument('--log_std_decay', type=float, default=0.5, help='both log stds go down by this by the end')
+    # critic warm-up: actor frozen for at least critic_warmup updates and until explained variance >= warmup_ev
+    p.add_argument('--critic_warmup', type=int, default=3)
+    p.add_argument('--warmup_ev', type=float, default=0.6)
+    p.add_argument('--max_warmup', type=int, default=20, help='start the actor after this many updates anyway')
+    # behavior cloning towards the IL actor
     p.add_argument('--bc_start', type=float, default=1.0)
-    p.add_argument('--bc_end', type=float, default=0.05)
+    p.add_argument('--bc_end', type=float, default=0.02)
+    p.add_argument('--bc_adapt', type=int, default=1, help='double the BC weight when eval success drops below IL')
+    # reward (utils/env.py calc_reward)
+    p.add_argument('--ret_norm', type=int, default=1, help='scale rewards by the running std of the discounted return')
+    p.add_argument('--progress_coeff', type=float, default=10.0)
+    p.add_argument('--collision_cost', type=float, default=200.0)
+    p.add_argument('--steer_rate_cost', type=float, default=3.0)
+    p.add_argument('--time_cost', type=float, default=0.1)
+    p.add_argument('--wall_cost', type=float, default=5.0)
+    p.add_argument('--wall_margin', type=float, default=0.30)
+    p.add_argument('--lat_cost', type=float, default=2.0)
+    p.add_argument('--lat_grip_share', type=float, default=0.8)
+    p.add_argument('--lap_bonus', type=float, default=0.0, help='per second faster than the expert-pace lap (try 2)')
+    p.add_argument('--uncapped_prob', type=float, default=0.5,
+                   help='share of training episodes without a speed cap (a capped car gets no speed signal)')
+    # evaluation / model selection
     p.add_argument('--eval_every', type=int, default=10, help='updates between evaluations')
     p.add_argument('--eval_tracks', type=int, default=44)
+    p.add_argument('--worst_eval', type=int, default=1, help='also evaluate at the worst-case sim2real settings')
+    p.add_argument('--open_eval', type=int, default=1,
+                   help='also require no loss on the open-space test tracks (python -u eval_open_space.py --make)')
+    p.add_argument('--open_level', default='big', help='eval_open_space.py level used for model selection')
+    p.add_argument('--open_caps', nargs='+', type=float, default=[5.0, 8.0], help='speed caps for that check')
+    p.add_argument('--baseline', action='store_true', help='settings before 11/23 (see BASELINE)')
     a = p.parse_args()
+    if a.baseline:
+        vars(a).update(BASELINE)
     # use the IL model's own task config (lidar layout, obs_dim, steering calibration), not today's default
     il_task = f'results/{a.il}/backup/f1tenth.yaml'
-    if os.path.exists(il_task):
-        os.environ['F1_TASK_CONFIG'] = il_task
+    if not os.path.exists(il_task):
+        raise FileNotFoundError(f'{il_task} missing: the IL model must come with its task config')
+    os.environ['F1_TASK_CONFIG'] = il_task
     args = IL.get_args([])
     args.update(vars(a))
     args.save_dir = f'results/{args.name}/{args.algo_idx}'
+    # time cost must stay below the progress reward at the slowest speed, or crashing pays (NOTES section 4)
+    slowest = args.progress_coeff * args.min_speed * args.timestep
+    if args.time_cost >= slowest:
+        raise ValueError(f'--time_cost {args.time_cost} >= progress at min_speed ({slowest:.3f}/step): '
+                         'driving slowly would cost more than crashing')
     return args
 
 
-def make_env(seed):
+def env_config(args):
+    '''the reward / training settings every worker applies to its env (spawned workers do not see args)'''
+    return dict(PROGRESS_COEFF=args.progress_coeff, COLLISION_COST=args.collision_cost,
+                STEER_RATE_COST=args.steer_rate_cost, TIME_COST=args.time_cost, WALL_COST=args.wall_cost,
+                WALL_MARGIN=args.wall_margin, LAT_COST=args.lat_cost, LAT_GRIP_SHARE=args.lat_grip_share,
+                LAP_BONUS=args.lap_bonus, uncapped_prob=args.uncapped_prob)
+
+
+def make_env(seed, cfg):
     args = IL.get_args([])
     args.seed = seed
     env = F1Wrapper(args, IL.MAPS, obs_noise=True, sim_mode='train',
                     tracks=[t for t in IL.list_variants(IL.MAPS) if IL.HOLDOUT not in t])
-    env.PROGRESS_COEFF, env.COLLISION_COST, env.STEER_RATE_COST = PROGRESS_COEFF, COLLISION_COST, STEER_RATE_COST
+    for k, v in cfg.items():
+        if k == 'uncapped_prob':
+            env.sl_cfg['uncapped_prob'] = v
+        else:
+            setattr(env, k, v)
     return env
+
+
+def paired_gain(res, ref_res, settings):
+    '''
+        mean time saved [s] (ref - candidate) over the runs of `settings` that both finished, and their
+        number. Averages over different finished tracks are not comparable; this is.
+    '''
+    tag = lambda r: r[0]
+    ok_c = {tag(r): r[2] for r in res if r[1] and any(tag(r).endswith(f'@{c:g}/{s}') for c, s in settings)}
+    ok_r = {tag(r): r[2] for r in ref_res if r[1]}
+    common = sorted(set(ok_c) & set(ok_r))
+    if not common:
+        return float('nan'), 0
+    return float(np.mean([ok_r[k] - ok_c[k] for k in common])), len(common)
 
 
 def main():
@@ -98,6 +179,11 @@ def main():
     os.makedirs(f'{args.save_dir}/checkpoint', exist_ok=True)
     for f, name in [(IL.task_config(), 'f1tenth.yaml'), ('configs/task/dynamic.yaml', 'dynamic.yaml')]:
         copyfile(f, f'{args.save_dir}/backup/{name}')
+    with open(f'{args.save_dir}/backup/ppo_args.yaml', 'w') as f:      # what this run used
+        for k, v in sorted(args.items()):
+            if isinstance(v, (int, float, str, bool)) or v is None:
+                f.write(f'{k}: {v}\n')
+    require_fresh_variants(IL.list_variants(IL.MAPS))
 
     # IL policy (actor + frozen normalizer) and a frozen copy as the BC teacher
     il_dir = f'results/{args.il}'
@@ -105,8 +191,12 @@ def main():
     rms.load(f'{il_dir}/sim2real', required=True)
     actor = IL.actor_from_state(torch.load(f'{il_dir}/checkpoint/model.pt')['actor'])
     args.hidden_dim = actor.hidden1_units          # critic gets the same width
-    with torch.no_grad():
-        actor.log_std.fill_(args.log_std)
+    std0 = np.array([args.log_std_steer, args.log_std_speed], dtype=np.float32)
+
+    def set_log_std(frac):
+        with torch.no_grad():
+            actor.log_std.copy_(torch.as_tensor(np.maximum(std0 - args.log_std_decay * frac, LOG_STD_MIN + 0.1)))
+    set_log_std(0.0)
     teacher = IL.actor_from_state(actor.state_dict())
     teacher.eval()
 
@@ -115,9 +205,10 @@ def main():
     critic = Critic(EasyDict({**args, 'obs_dim': args.obs_dim + P})).to(args.device)
     critic.initialize()
     priv_rms = RunningMeanStd('critic_priv', P)
+    ret_rms = RunningMeanStd('return', 1)
     actor_params = [p for n, p in actor.named_parameters() if 'log_std' not in n]
     opt_actor = torch.optim.Adam(actor_params, lr=args.lr)
-    opt_critic = torch.optim.Adam(critic.parameters(), lr=3e-4)
+    opt_critic = torch.optim.Adam(critic.parameters(), lr=args.critic_lr)
 
     def value(o, pr):
         x = np.concatenate([rms.normalize(o), priv_rms.normalize(pr)], axis=-1)
@@ -127,24 +218,42 @@ def main():
 
     eval_tracks = sorted([t for t in IL.list_variants(IL.MAPS) if variant_map(t) in IL.EVAL_MAPS
                           and (IL.HOLDOUT in t or os.path.basename(t)[:-4] in [m + s for m in IL.EVAL_MAPS for s in ('', '_rev')])])[:args.eval_tracks]
+    uncapped = tuple(s for s in IL.EVAL_SETTINGS if s[0] >= args.max_speed)       # lap time is compared on these
     policy = lambda: ({k: v.clone() for k, v in actor.state_dict().items()}, rms.mean.copy(), rms.var.copy())
-    il_succ, il_lap, _ = IL.evaluate(args, policy(), eval_tracks, 'eval')
-    cprint(f'[IL {args.il}] eval 2-lap success {il_succ*100:.1f}% mean uncapped 2-lap time {il_lap:.1f}s', color='cyan', bold=True)
-    best = (il_succ, il_lap)
-    log = [{'update': 0, 'step': 0, 'success': il_succ, 'lap': il_lap}]
+    il_succ, il_lap, il_res = IL.evaluate(args, policy(), eval_tracks, 'eval')
+    il_worst = IL.evaluate(args, policy(), eval_tracks, 'worst')[0] if args.worst_eval else float('nan')
+    open_tracks = sorted(glob.glob(os.path.join(OPEN_TEST_DIR, args.open_level, '*.npz')))
+    if args.open_eval and not open_tracks:
+        raise FileNotFoundError(f'no open-space test tracks in {OPEN_TEST_DIR}/{args.open_level}: '
+                                'run `python -u eval_open_space.py --make` first (or --open_eval 0)')
+    open_settings = tuple((c, 'center') for c in args.open_caps)
+    open_eval = lambda: IL.evaluate(args, policy(), open_tracks, 'eval', settings=open_settings)[0]
+    il_open = open_eval() if args.open_eval else float('nan')
+    cprint(f'[IL {args.il}] eval 2-lap success {il_succ*100:.1f}% mean uncapped 2-lap time {il_lap:.1f}s'
+           + (f' | worst-case success {il_worst*100:.1f}%' if args.worst_eval else '')
+           + (f' | open-space ({args.open_level}) 2-lap success {il_open*100:.1f}%' if args.open_eval else ''),
+           color='cyan', bold=True)
+    best = dict(succ=il_succ, res=il_res, name='IL')
+    log = [{'update': 0, 'step': 0, 'success': il_succ, 'lap': il_lap, 'worst': il_worst, 'open': il_open, 'res': il_res}]
 
     N = args.workers
     T = args.n_steps // N
-    venv = gym.vector.AsyncVectorEnv([functools.partial(make_env, args.seed * 1000 + i) for i in range(N)],
+    cfg = env_config(args)
+    venv = gym.vector.AsyncVectorEnv([functools.partial(make_env, args.seed * 1000 + i, cfg) for i in range(N)],
                                      context='spawn')
     obs, info = venv.reset(seed=args.seed)
     priv = np.stack(list(info['privileged'])).astype(np.float32)
-    ep_ret, ep_len, done_stats = np.zeros(N), np.zeros(N, int), []
+    ep_ret, ep_len, ep_speed, done_stats = np.zeros(N), np.zeros(N, int), np.zeros(N), []
+    disc_ret = np.zeros(N)                         # running discounted return, for the reward scale
     total, update = 0, 0
     n_updates = int(args.total_steps // args.n_steps)
+    actor_start = None                             # first update that trains the actor
+    bc_boost = 1.0
+    T_START = time.time()
     while update < n_updates:
         t0 = time.time()
         B = {k: [] for k in ('obs', 'priv', 'act', 'logp', 'rew', 'done', 'fail', 'nobs', 'npriv')}
+        comp = {k: 0.0 for k in REWARD_KEYS}
         for _ in range(T):
             with torch.no_grad():
                 dist = actor(torch.as_tensor(rms.normalize(obs), dtype=torch.float32))
@@ -159,33 +268,47 @@ def main():
                              for i, d in enumerate(done)])
             fail = term & ~trunc & ~succ
             next_o, next_p = nobs.copy(), npriv.copy()
+            for i in range(N):
+                src = info['final_info'][i] if done[i] else {k: info[k][i] for k in REWARD_KEYS if k in info}
+                for k in REWARD_KEYS:
+                    comp[k] += float(src.get(k, 0.0))
+            ep_speed += priv[:, 2]
             for i in np.where(done)[0]:                       # autoreset: use the real final state
                 next_o[i] = info['final_observation'][i]
                 fi = info['final_info'][i]
                 next_p[i] = fi['privileged']
-                done_stats.append((ep_ret[i] + rew[i], ep_len[i] + 1, fi.get('lap_count', 0)))
+                done_stats.append(dict(ret=ep_ret[i] + rew[i], len=ep_len[i] + 1, laps=fi.get('lap_count', 0),
+                                       crash=bool(fail[i]), success=bool(succ[i]),
+                                       speed=(ep_speed[i]) / (ep_len[i] + 1)))
+            disc_ret = disc_ret * args.gamma + rew
+            ret_rms.update(disc_ret.reshape(-1, 1))
+            disc_ret[done] = 0.0
             for k, v in (('obs', obs), ('priv', priv), ('act', a), ('logp', logp), ('rew', rew), ('done', done),
                          ('fail', fail), ('nobs', next_o), ('npriv', next_p)):
                 B[k].append(np.asarray(v))
             ep_ret = np.where(done, 0.0, ep_ret + rew)
             ep_len = np.where(done, 0, ep_len + 1)
+            ep_speed = np.where(done, 0.0, ep_speed)
             obs, priv = nobs, npriv
             total += N
         B = {k: np.stack(v) for k, v in B.items()}                 # (T, N, ...)
         priv_rms.update(B['priv'].reshape(-1, P))
         t_roll = time.time() - t0
+        r_scale = float(np.sqrt(ret_rms.var[0] + 1e-8)) if args.ret_norm else 1.0
+        rew_n = B['rew'] / r_scale
 
-        # ---- GAE with the asymmetric critic
+        # ---- GAE with the asymmetric critic (on normalized rewards)
         with torch.no_grad():
             V = value(B['obs'], B['priv']).numpy()
             V_next = value(B['nobs'], B['npriv']).numpy()
         adv = np.zeros((T, N), dtype=np.float32)
         last = np.zeros(N, dtype=np.float32)
         for t in reversed(range(T)):
-            delta = B['rew'][t] + args.gamma * (1.0 - B['fail'][t]) * V_next[t] - V[t]
+            delta = rew_n[t] + args.gamma * (1.0 - B['fail'][t]) * V_next[t] - V[t]
             last = delta + args.gamma * args.gae * (1.0 - B['done'][t]) * last
             adv[t] = last
         ret = adv + V
+        ev = float(1.0 - np.var(ret - V) / (np.var(ret) + 1e-8))      # before this update: how well it predicts
         flat = lambda x: torch.as_tensor(x.reshape(T * N, *x.shape[2:]), dtype=torch.float32)
         S = flat(rms.normalize(B['obs']))
         C = flat(np.concatenate([rms.normalize(B['obs']), priv_rms.normalize(B['priv'])], axis=-1))
@@ -193,14 +316,21 @@ def main():
         ADV = flat(adv)
         ADV = (ADV - ADV.mean()) / (ADV.std() + 1e-8)
 
-        # ---- update
+        # ---- schedules
         update += 1
-        warm = update <= args.critic_warmup
-        frac = min(1.0, max(0.0, (update - args.critic_warmup) / max(1, n_updates - args.critic_warmup)))
-        bc_w = args.bc_start * (args.bc_end / args.bc_start) ** frac
+        if actor_start is None and update > args.critic_warmup and (ev >= args.warmup_ev or update > args.max_warmup):
+            actor_start = update
+        warm = actor_start is None
+        frac = 0.0 if warm else min(1.0, (update - actor_start) / max(1, n_updates - actor_start))
+        bc_w = min(args.bc_start, args.bc_start * (args.bc_end / args.bc_start) ** frac * bc_boost)
+        lr = args.lr + (args.lr_end - args.lr) * frac
+        for g in opt_actor.param_groups:
+            g['lr'] = lr
+
+        # ---- update (the noise schedule moves after it: the ratios must use the std the rollout used)
         with torch.no_grad():
             old_dist = actor(S)
-        kl = 0.0
+        kl, clip_frac, n_mb = 0.0, 0.0, 0
         for ep in range(args.epochs):
             perm = torch.randperm(T * N)
             for i in range(0, T * N, args.minibatch):
@@ -217,6 +347,8 @@ def main():
                 pg = -torch.min(ratio * ADV[idx], torch.clamp(ratio, 1 - args.clip, 1 + args.clip) * ADV[idx]).mean()
                 with torch.no_grad():
                     t_mean = teacher(S[idx]).loc
+                    clip_frac += float(((ratio - 1).abs() > args.clip).float().mean())
+                    n_mb += 1
                 bc = ((d.loc - t_mean) ** 2).mean()
                 opt_actor.zero_grad()
                 (pg + bc_w * bc).backward()
@@ -227,36 +359,62 @@ def main():
                     kl = torch.distributions.kl_divergence(old_dist, actor(S)).sum(-1).mean().item()
                 if kl > args.max_kl:
                     break
+        clip_frac = clip_frac / max(1, n_mb)
+        set_log_std(frac)                          # exploration noise for the next rollout
+
+        # ---- log
         recent = done_stats[-200:]
-        mr = np.mean([d[0] for d in recent]) if recent else float('nan')
-        ml = np.mean([d[2] for d in recent]) if recent else float('nan')
-        print(f'[update {update}/{n_updates}] steps {total} | {"critic warm-up" if warm else f"kl {kl:.4f} bc_w {bc_w:.3f}"} '
-              f'| critic {closs.item():.3f} | recent episodes: return {mr:.0f}, laps {ml:.2f} '
-              f'| rollout {t_roll:.0f}s update {time.time()-t0-t_roll:.0f}s', flush=True)
+        mean = lambda k: float(np.mean([d[k] for d in recent])) if recent else float('nan')
+        steps_b = T * N
+        rc = {k: comp[k] / steps_b for k in REWARD_KEYS}
+        std = np.exp(actor.log_std.detach().numpy())
+        row = dict(update=update, step=total, warm=warm, ev=ev, kl=kl, clip_frac=clip_frac, bc_w=bc_w, lr=lr,
+                   std_steer=float(std[0]), std_speed=float(std[1]), critic_loss=float(closs.item()), ret_scale=r_scale,
+                   ep_return=mean('ret'), ep_laps=mean('laps'), crash_rate=mean('crash'), success_rate=mean('success'),
+                   ep_speed=mean('speed'), reward_per_step=rc)
+        log.append(row)
+        print(f'[update {update}/{n_updates}] steps {total} | '
+              + ('critic warm-up' if warm else f'kl {kl:.4f} clip {clip_frac:.2f} bc_w {bc_w:.3f} lr {lr:.1e}')
+              + f' | EV {ev:.2f} | std steer {std[0]:.3f} speed {std[1]:.3f} | ret scale {r_scale:.1f}'
+              + f' | episodes: crash {row["crash_rate"]*100:.0f}% success {row["success_rate"]*100:.0f}%'
+              + f' laps {row["ep_laps"]:.2f} speed {row["ep_speed"]:.2f} m/s'
+              + f' | per step: prog {rc["forward_reward"]:.2f} time -{rc["time_cost"]:.2f} steer -{rc["steer_cost"]:.3f}'
+              + f' wall -{rc["wall_cost"]:.3f} lat -{rc["lat_cost"]:.3f} crash -{rc["collision_cost"]:.2f}'
+              + f' | rollout {t_roll:.0f}s update {time.time()-t0-t_roll:.0f}s (total {IL._hms(time.time()-T_START)})',
+              flush=True)
 
         if (update % args.eval_every == 0 or update == n_updates) and not warm:
             succ, lap, res = IL.evaluate(args, policy(), eval_tracks, 'eval')
-            # strictly better: more evaluation runs finished, or as many and faster
-            better = succ > best[0] + 1e-9 or (abs(succ - best[0]) < 1e-9 and np.isfinite(lap)
-                                               and (not np.isfinite(best[1]) or lap < best[1]))
-            cprint(f'[eval @ update {update}] 2-lap success {succ*100:.1f}% mean uncapped 2-lap time {lap:.1f}s '
-                   f'(best so far {best[0]*100:.1f}% / {best[1]:.1f}s){"  -> saved" if better else ""}',
-                   color='green' if better else 'cyan', bold=True)
-            log.append({'update': update, 'step': total, 'success': succ, 'lap': lap, 'res': res})
+            gain, n_common = paired_gain(res, best['res'], uncapped)
+            worst = IL.evaluate(args, policy(), eval_tracks, 'worst')[0] if args.worst_eval else float('nan')
+            worst_ok = (not args.worst_eval) or worst >= il_worst - 1e-9
+            op = open_eval() if args.open_eval else float('nan')
+            open_ok = (not args.open_eval) or op >= il_open - 1e-9
+            better = worst_ok and open_ok and (succ > best['succ'] + 1e-9 or
+                                   (succ >= best['succ'] - 1e-9 and np.isfinite(gain) and gain > 0))
+            cprint(f'[eval @ update {update}] 2-lap success {succ*100:.1f}% (best {best["name"]} {best["succ"]*100:.1f}%) '
+                   f'| vs best on {n_common} runs both finished: {gain:+.2f} s faster'
+                   + (f' | worst-case success {worst*100:.1f}% (IL {il_worst*100:.1f}%)' if args.worst_eval else '')
+                   + (f' | open-space {op*100:.1f}% (IL {il_open*100:.1f}%)' if args.open_eval else '')
+                   + ('  -> saved' if better else ''), color='green' if better else 'cyan', bold=True)
+            row.update(eval_success=succ, eval_lap=lap, paired_gain=gain, worst=worst, open=op, res=res, saved=better)
+            if args.bc_adapt:
+                # keep the policy near IL while it is worse than IL; relax again once it recovers
+                bc_boost = min(bc_boost * 2.0, 64.0) if succ < il_succ - 0.02 else max(1.0, bc_boost / 2.0)
             torch.save({'actor': actor.state_dict(), 'critic': critic.state_dict()},
                        f'{args.save_dir}/checkpoint/model_{total}.pt')
             if better:
-                best = (succ, lap)
+                best = dict(succ=succ, res=res, name=f'update {update}')
                 os.makedirs(f'{args.save_dir}/sim2real', exist_ok=True)
                 torch.save(actor, f'{args.save_dir}/sim2real/actor.pt')
                 rms.save(f'{args.save_dir}/sim2real')
                 rms.save(args.save_dir)
                 RunningMeanStd('agent_reward', 1).save(f'{args.save_dir}/sim2real')
                 torch.save({'actor': actor.state_dict(), 'critic': critic.state_dict()}, f'{args.save_dir}/checkpoint/model.pt')
-            with open(f'{args.save_dir}/train_log.pkl', 'wb') as f:
-                pickle.dump(log, f)
+        with open(f'{args.save_dir}/train_log.pkl', 'wb') as f:
+            pickle.dump(log, f)
     venv.close()
-    cprint(f'[done] IL {il_succ*100:.1f}% / {il_lap:.1f}s -> best PPO {best[0]*100:.1f}% / {best[1]:.1f}s '
+    cprint(f'[done] IL {il_succ*100:.1f}% / {il_lap:.1f}s -> best: {best["name"]} {best["succ"]*100:.1f}% '
            f'({"PPO improved on IL" if os.path.isfile(f"{args.save_dir}/sim2real/actor.pt") else "no improvement: keep deploying the IL policy"})', bold=True)
 
 

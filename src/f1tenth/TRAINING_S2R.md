@@ -23,9 +23,54 @@
 | 속도 상한 | 학습 때 에피소드마다 2~8 m/s 무작위 (25%는 상한 없음). 실차 `speed_limit`을 정책이 앎 | `f1tenth.yaml` `speed_limit` |
 | 에피소드 | 2바퀴 완주 = 성공, 스텝 수는 트랙 길이로 자동 | `f110_env.py`, `env.py` |
 | IL | DART(0.08) → DAgger 3회, 조향 가중 MSE, cosine lr, 평가 트랙 분리(`_w105`) | `train_il_s2r.py` |
-| PPO | IL 초기화, 비대칭 critic(시뮬레이터 정답 상태 14개), critic 먼저 학습, IL 쪽 BC 항 감소, 진행거리 보상 + 충돌 −200 + 조향 급변 벌점, IL보다 좋을 때만 저장 | `train_ppo_s2r.py` |
+| PPO | IL 초기화, 비대칭 critic(시뮬레이터 정답 상태 15개), critic 먼저 학습(EV ≥ 0.6까지), IL 쪽 BC 항 감소(완주율 떨어지면 다시 올림), return 정규화, 진행거리 − 시간 벌점(= 랩 타임 최소화) + 충돌 −200 + 조향 급변·벽 여유·접지 한계 벌점, 조향/속도 노이즈 분리, 짝지은 랩 타임 + 최악 조건 완주율 + 열린 공간 시험 트랙 2랩 완주율(IL보다 낮으면 저장 안 함)로 모델 선택 | `train_ppo_s2r.py` |
+| 트랙 버전 | 트랙 파일마다 생성기 서명 저장. 생성기가 바뀌면 다시 실행할 때 옛 파일만 새로 만들고, IL/PPO는 옛 트랙이면 시작을 거부 | `utils/track_gen.py` |
+| 코너 run-off 크기 | 11/23 실차(넓은 막다른 공간으로 직진해 벽 충돌) 대응. 길이 2~5 m → **2~7 m**, 트랙보다 넓은 폭 0~1 m → **0~2.5 m** (run 8이 4~7 m 공간에서 27개 중 13개 트랙 충돌) | `utils/track_gen.py` |
+| 열린 공간 점검 | 모든 코너에 막다른 공간(run-off)이 있는 시험 트랙(같은 트랙의 run-off 없는 대조군 포함)에서 2랩, 그 안으로 들어가 박는지 집계 | `eval_open_space.py` |
 
-## 실행 (src/f1tenth에서)
+## 실행: 11/23 보정 반영 IL run 9/10 → PPO (src/f1tenth에서)
+
+11/23에 보정값(`max_steer` 0.41, 좌우 게인, 지연 0.05~0.20 s, μ 0.5), 정책 속도 범위(`min_speed` 0.5),
+expert, 트랙 생성기(코너 run-off, 사각 alcove, 벽 요철)가 바뀌었다. run 8 모델과 데이터는 행동의 의미가 달라
+쓸 수 없으므로 `--init` 없이 처음부터 학습한다.
+
+run 9는 라이다 88칸(`configs/task/f1tenth_lidar88.yaml`, 관측 114): 정면 ±20° 1.25°, 20~60° 2.5°, 60~100° 5°,
+100~135° 8.75°. 8 m 앞에서 칸 폭이 0.70 m(54칸) → 0.17 m라 멀리 있는 코너, 막다른 공간의 끝 벽과 코너 출구를
+더 정확히 구분한다. 최대 거리는 10 m 그대로. 54칸(`f1tenth.yaml`)과 60칸(`f1tenth_lidar60.yaml`)은 비교용으로 남긴다.
+학습 PC(15 GB WSL)에 맞춰 `--max_data` 기본값을 4e6으로 낮췄다(8e6은 약 23 GB 필요). workers는 32스레드 기준 28.
+
+```bash
+# 0. 트랙: 생성기가 바뀐 파일만 다시 만든다 (전체 약 1~3분). 상태만 보려면 --check
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -m utils.track_gen 6 28
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py --make --workers 28   # 열린 공간 시험 트랙
+
+# 1. IL run 9 (라이다 88칸). 비교가 필요하면 끝난 뒤 다른 --task_config로 run 10
+OMP_NUM_THREADS=1 nohup ~/venv/f1tenth/bin/python -u train_il_s2r.py --algo_idx 9 --workers 28 \
+    --task_config configs/task/f1tenth_lidar88.yaml \
+    --hidden_dim 512 --caps_t 0.3 --caps_s 0.3 --max_data 4e6 \
+    --expert_steps 1.5e6 --dagger_iters 1000 --dagger_steps 8e5 --dart_std 0.08 --grad_steps 20000 \
+    > results/imitation_9_train.log 2>&1 &
+
+# 2. 평가: 일반 트랙 + 열린 공간 시험 트랙 (expert와 비교)
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u evaluate_s2r.py imitation/9 --workers 28
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py expert imitation/9 --workers 28
+
+# 3. PPO (2번의 eval_open_space.py --make 필요: 모델 선택에 big 시험 트랙 2랩 완주율을 씀)
+#    기준선(11/23 이전 설정) 1회 → 추천 설정. 이후 옵션을 하나씩 바꿔 비교 (seed 2~3개)
+#    PPO는 IL 모델의 backup/f1tenth.yaml(88칸)을 그대로 쓴다
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u train_ppo_s2r.py --il imitation/9 --algo_idx 0 --workers 28 --baseline
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u train_ppo_s2r.py --il imitation/9 --algo_idx 1 --workers 28
+#    하나씩 끄고 비교: --ret_norm 0 / --time_cost 0 / --log_std_steer -2 --log_std_speed -2 --uncapped_prob 0.25
+#                      / --wall_cost 0 --lat_cost 0,  랩 보너스는 --lap_bonus 2 로 켬
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u evaluate_s2r.py imitation/9 ppo_s2r/0 ppo_s2r/1 --workers 28
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py expert imitation/9 ppo_s2r/1 --workers 28
+```
+
+- PPO 로그(업데이트마다): explained variance, clip 비율, KL, 조향/속도 std, return 스케일, 충돌률, 평균 속도,
+  보상 항목별 스텝당 값. `results/ppo_s2r/<idx>/train_log.pkl`, 사용한 설정은 `backup/ppo_args.yaml`.
+- 새 모델을 차에 올릴 때 `agent.yaml`의 `steer_gain_left/right`는 1.0부터 (1.35/1.12는 run 8용 보정).
+
+## 예전 실행 기록 (run 8, 11/21)
 
 ```bash
 # 0. 트랙 생성 (한 번, 약 3분)

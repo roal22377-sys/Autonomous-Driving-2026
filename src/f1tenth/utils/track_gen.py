@@ -20,10 +20,17 @@
 
     Variants are generated once (python -m utils.track_gen ...) into installation/maps_gen/
     and loaded per episode by utils/env.py.
+
+    Every file stores a signature of the generator (its code + settings, see generator_signature()).
+    Re-running the generator regenerates the files whose signature differs (made by an older
+    generator) and skips the up-to-date ones, so an interrupted run resumes and a changed
+    generator never leaves old tracks behind. The training scripts refuse to start on stale tracks.
 '''
 
 import os
 import glob
+import hashlib
+import inspect
 import numpy as np
 from scipy.spatial import cKDTree
 
@@ -31,7 +38,8 @@ from utils.raceline import resample_closed, tangents_normals, curvature, min_cur
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAP_DIR = os.path.join(HERE, '..', 'installation', 'maps')
-GEN_DIR = os.path.join(HERE, '..', 'installation', 'maps_gen')
+# F1_TRACK_DIR overrides it (experiments with another track set; workers inherit the variable)
+GEN_DIR = os.environ.get('F1_TRACK_DIR', os.path.join(HERE, '..', 'installation', 'maps_gen'))
 
 RESOLUTION = 0.08          # [m/cell], originals use ~0.085
 CAR_HALF_WIDTH = 0.15         # real car is 0.30 m wide, 0.60 m long
@@ -45,8 +53,9 @@ LAP_TIME_LIMITS = dict(v_min=0.5, v_max=8.0, a_lat=3.5, a_acc=3.0, a_brake=3.0)
 RECT_POCKET_PROB = 0.5     # share of pockets that are sharp rectangular alcoves instead of smooth bumps
 RUNOFF_PROB = 0.5          # chance that a corner gets a straight-ahead dead-end bay at its entry
 RUNOFF_MIN_CURV = 1 / 5.0  # [1/m] corners tighter than radius 5 m
-RUNOFF_LEN = (2.0, 5.0)    # [m] bay length from the corner entry
-RUNOFF_EXTRA_W = (0.0, 1.0)  # [m] bay wider than the track on the outside
+RUNOFF_LEN = (2.0, 7.0)    # [m] bay length from the corner entry (11/23: was 2-5; a 4-7 m bay
+                           #     made IL run 8 drive in on 13 of 27 tracks it otherwise finished)
+RUNOFF_EXTRA_W = (0.0, 2.5)  # [m] bay wider than the track on the outside (was 0-1): the wider, the more it looks like the road
 WALL_ROUGH_STD = 0.05      # [m] wall waviness
 WALL_ROUGH_CORR = 0.6      # [m] its correlation length
 
@@ -258,10 +267,65 @@ def rasterize(center, wl, wr, runoffs=()):
     return occ, (xmin, ymin)
 
 
+GEN_SETTINGS = ('RESOLUTION', 'CAR_HALF_WIDTH', 'RACELINE_MARGIN', 'DENSE_DS', 'OPT_DS', 'LAP_TIME_LIMITS',
+                'RECT_POCKET_PROB', 'RUNOFF_PROB', 'RUNOFF_MIN_CURV', 'RUNOFF_LEN', 'RUNOFF_EXTRA_W',
+                'WALL_ROUGH_STD', 'WALL_ROUGH_CORR')
+_SIG = None
+
+
+def generator_signature():
+    '''
+        short hash of everything that shapes a variant: the generator functions' code, the race line
+        code (utils/raceline.py) and the settings above. Comments elsewhere in this file and the
+        __main__ block do not count, so editing them does not force a regeneration.
+    '''
+    global _SIG
+    if _SIG is None:
+        from utils import raceline
+        h = hashlib.sha1()
+        for fn in (load_centerline, _smooth_noise, _self_clearance, make_variant, _corner_runoffs, rasterize):
+            h.update(inspect.getsource(fn).encode())
+        h.update(inspect.getsource(raceline).encode())
+        h.update(repr([(k, globals()[k]) for k in GEN_SETTINGS]).encode())
+        _SIG = h.hexdigest()[:12]
+    return _SIG
+
+
+def file_signature(path):
+    '''generator signature stored in a variant file ('' for files from before signatures, or unreadable)'''
+    try:
+        with np.load(path) as z:
+            return str(z['gen_sig']) if 'gen_sig' in z.files else ''
+    except Exception:
+        return ''
+
+
+def stale_variants(files=None):
+    '''variant files not made by the current generator (None = all files in GEN_DIR)'''
+    files = list_variants() if files is None else files
+    sig = generator_signature()
+    return [f for f in files if file_signature(f) != sig]
+
+
+def require_fresh_variants(files):
+    '''raise if any of the files was made by an older generator (training on old geometry by mistake)'''
+    if not files:
+        raise FileNotFoundError(f'no generated tracks in {GEN_DIR}: run `python -m utils.track_gen 6 22` in src/f1tenth')
+    old = stale_variants(files)
+    if old and os.environ.get('F1_ALLOW_STALE_TRACKS') == '1':      # deliberate experiments only
+        print(f'[warning] {len(old)} of {len(files)} tracks are from another generator (F1_ALLOW_STALE_TRACKS=1)')
+    elif old:
+        raise RuntimeError(f'{len(old)} of {len(files)} generated tracks were made by an older track generator '
+                           f'(e.g. {os.path.basename(old[0])}). Regenerate them first: '
+                           f'`python -m utils.track_gen 6 22` in src/f1tenth (only the stale ones are rebuilt).')
+
+
 def save_variant(v, out_dir=GEN_DIR):
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"{v['name']}.npz")
-    np.savez_compressed(path, **{k: np.asarray(val) for k, val in v.items()})
+    tmp = path[:-4] + '.tmp.npz'        # write then rename: an interrupted save never leaves a half file
+    np.savez_compressed(tmp, gen_sig=generator_signature(), **{k: np.asarray(val) for k, val in v.items()})
+    os.replace(tmp, path)
     return path
 
 
@@ -287,7 +351,7 @@ def to_track(path):
 
 
 def list_variants(maps=None, gen_dir=GEN_DIR):
-    files = sorted(glob.glob(os.path.join(gen_dir, '*.npz')))
+    files = sorted(f for f in glob.glob(os.path.join(gen_dir, '*.npz')) if not f.endswith('.tmp.npz'))
     if maps is not None:
         files = [f for f in files if variant_map(f) in maps]
     return files
@@ -302,17 +366,26 @@ def _job(job):
     map_name, seed, reverse, original = job
     name = f"{map_name}{'_rev' if reverse else ''}{'' if original else f'_w{seed}'}"
     path = os.path.join(GEN_DIR, f'{name}.npz')
-    if os.path.exists(path):        # resume an interrupted generation
-        return path
-    return save_variant(make_variant(map_name, seed, reverse, original))
+    # skip only files the current generator made: resumes an interrupted run, rebuilds old geometry
+    if os.path.exists(path) and file_signature(path) == generator_signature():
+        return path, 'kept'
+    old = os.path.exists(path)
+    return save_variant(make_variant(map_name, seed, reverse, original)), ('rebuilt' if old else 'new')
 
 
 if __name__ == '__main__':
-    # python -m utils.track_gen <variants_per_map> [workers]
+    # python -m utils.track_gen <variants_per_map> [workers]     generate / bring up to date
+    # python -m utils.track_gen --check                          only report stale files
     import sys
     import multiprocessing as mp
     sys.path.insert(0, os.path.join(HERE, '..', 'installation'))
     from main_il import MAPS
+    if '--check' in sys.argv:
+        files = list_variants()
+        old = stale_variants(files)
+        print(f'generator {generator_signature()}: {len(files) - len(old)} up to date, {len(old)} stale'
+              + (f' (e.g. {os.path.basename(old[0])})' if old else ''))
+        sys.exit(1 if old or not files else 0)
     per_map = int(sys.argv[1]) if len(sys.argv) > 1 else 6
     workers = int(sys.argv[2]) if len(sys.argv) > 2 else 16
     jobs = []
@@ -320,6 +393,13 @@ if __name__ == '__main__':
         for rev in (False, True):
             jobs.append((m, 0, rev, True))                              # original geometry
             jobs += [(m, 100 + k, rev, False) for k in range(per_map)]  # randomized
+    print(f'generator signature {generator_signature()}', flush=True)
+    count = {'kept': 0, 'rebuilt': 0, 'new': 0}
     with mp.get_context('fork').Pool(workers) as p:
-        for i, path in enumerate(p.imap_unordered(_job, jobs)):
-            print(f'[{i + 1}/{len(jobs)}] {os.path.basename(path)}', flush=True)
+        for i, (path, what) in enumerate(p.imap_unordered(_job, jobs)):
+            count[what] += 1
+            print(f'[{i + 1}/{len(jobs)}] {os.path.basename(path)} ({what})', flush=True)
+    for f in glob.glob(os.path.join(GEN_DIR, '*.tmp.npz')):      # leftovers of an interrupted save
+        os.remove(f)
+    print(f'done: {count["new"]} new, {count["rebuilt"]} rebuilt (made by an older generator), '
+          f'{count["kept"]} already up to date')

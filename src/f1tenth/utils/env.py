@@ -44,6 +44,8 @@ class F1Wrapper(gym.Wrapper):
             sim_mode:  'ideal' - the plain simulator (old behaviour)
                        'train' - sim2real gaps sampled per episode from `sim2real` ranges
                        'eval'  - sim2real gaps fixed at their nominal values
+                       'worst' - every gap at the harder end of its range (longest delay, lowest
+                                 grip and acceleration, weakest steering, most noise): model selection
             tracks:    list of generated track files (utils/track_gen.py); None = from `maps`
                        when sim2real.generated_tracks is on, else the original maps
         '''
@@ -100,11 +102,17 @@ class F1Wrapper(gym.Wrapper):
         self.fixed_speed_cap = None         # set by evaluation code to force a cap
 
     # ---------------------------------------------------------------- sim2real
+    # sim_mode='worst': which end of each range is the harder one (0 = low end, 1 = high end)
+    WORST_END = {'steer_delay': 1, 'speed_delay': 1, 'a_max': 0, 'mu_scale': 0, 'noise_scale': 1,
+                 'steer_scale_left': 0, 'steer_scale_right': 0, 'steer_left_max': 0}
+
     def _rand(self, key, default):
-        '''sample a range (train) or take the nominal value (eval) of a sim2real entry.'''
+        '''sample a range (train), take its harder end (worst) or the nominal value (eval) of a sim2real entry.'''
         if self.sim_mode == 'train' and key in self.s2r:
             lo, hi = self.s2r[key]
             return float(self.noise_rng.uniform(lo, hi))
+        if self.sim_mode == 'worst' and key in self.s2r and key in self.WORST_END:
+            return float(self.s2r[key][self.WORST_END[key]])
         return float(self.s2r.get(f'{key}_nominal', default))
 
     def _apply_sim2real(self):
@@ -119,8 +127,8 @@ class F1Wrapper(gym.Wrapper):
             self.steer_delay_steps = int(round(self._rand('steer_delay', 0.0) / self.timestep))
             self.speed_delay_steps = int(round(self._rand('speed_delay', 0.0) / self.timestep))
             params['a_max'] = self._rand('a_max', params['a_max'])
-            if self.sim_mode == 'train' and 'mu_scale' in self.s2r:
-                params['mu'] = params['mu'] * float(self.noise_rng.uniform(*self.s2r['mu_scale']))
+            if self.sim_mode in ('train', 'worst') and 'mu_scale' in self.s2r:
+                params['mu'] = params['mu'] * self._rand('mu_scale', 1.0)
         self._env.unwrapped.sim.update_params(params)
         self.params = params
         self.steer_queue = deque([0.0] * self.steer_delay_steps)
@@ -194,7 +202,10 @@ class F1Wrapper(gym.Wrapper):
             # per-episode speed reading error, like an imperfect odom calibration
             self.speed_scale = self.noise_rng.uniform(*self.obs_cfg['speed']['scale_range'])
             lid = self.obs_cfg['lidar']
-            k = float(self.noise_rng.uniform(*self.s2r.get('noise_scale', [1.0, 1.0])))
+            if self.sim_mode == 'worst':
+                k = float(self.s2r.get('noise_scale', [1.0, 1.0])[self.WORST_END['noise_scale']])
+            else:
+                k = float(self.noise_rng.uniform(*self.s2r.get('noise_scale', [1.0, 1.0])))
             rot = lid.get('rotation_deg', 0.0)
             self.lidar_override = {
                 'noise_std': lid['noise_std']*k, 'dropout_prob': lid['dropout_prob']*k,
@@ -233,6 +244,8 @@ class F1Wrapper(gym.Wrapper):
         else:
             self._env.unwrapped.max_episode_steps = self.base_max_episode_steps
         self.max_episode_steps = self._env.unwrapped.max_episode_steps
+        self.ref_lap = self._reference_lap() if self.LAP_BONUS > 0 else float('nan')
+        self.min_wall, self.lat_acc = float('inf'), 0.0
         if self.show_centerline:
             self._env.unwrapped.add_render_callback(self._env.track.centerline.render_waypoints)
         self._reset_pose(obs_dict)
@@ -242,13 +255,30 @@ class F1Wrapper(gym.Wrapper):
         return obs, info
 
     # ============================ implement here ============================ #
-    # TODO
-    # You need to implement your own reward function.
+    # Reward (PPO only; IL ignores it). The extra terms default to 0 here and are set by
+    # train_ppo_s2r.py (NOTES_1119_sim2real_rl.md section 4).
     PROGRESS_COEFF = 10.0     # reward per meter of centerline progress (8 m/s * 0.025 s -> ~2.0/step)
     COLLISION_COST = 10.0
     STEER_RATE_COST = 0.0     # per (change of normalized steering command)^2; PPO fine-tuning sets it
+    TIME_COST = 0.0           # per step. The laps are a fixed distance, so progress - time = minimum lap
+                              # time. Keep it < PROGRESS_COEFF * min_speed * timestep, or crawling pays less than crashing
+    WALL_COST = 0.0           # per m the closest lidar return is inside WALL_MARGIN (safety margin on the car)
+    WALL_MARGIN = 0.30        # [m] from the lidar; the car body is 0.15 m to each side of it
+    LAT_COST = 0.0            # per m/s^2 of lateral acceleration above LAT_GRIP_SHARE * mu * g
+    LAT_GRIP_SHARE = 0.8
+    LAP_BONUS = 0.0           # per second a completed lap beats the expert-pace estimate (_reference_lap)
 
-    def calc_reward(self, action=None):
+    def _reference_lap(self):
+        '''lap time of this track's race line at the expert's pace (train_il_s2r.EXPERT_GRIP_SHARE of grip)'''
+        from utils.raceline import speed_profile, lap_time
+        rl = self._env.unwrapped.track.raceline
+        xy = np.stack([rl.xs, rl.ys], axis=1).astype(np.float64)
+        grip = 0.6 * float(self.params['mu']) * 9.81
+        a_max = float(self.params['a_max'])
+        v = speed_profile(xy, self.min_speed, self.speed_cap, grip, a_max, min(a_max, grip))
+        return lap_time(xy, v)
+
+    def calc_reward(self, action=None, lap_done=None):
         # forward reward: progress along the centerline (frenet s) this step [m].
         # Rewards speed, not mere survival; driving backwards gives a negative reward.
         forward_reward = self.PROGRESS_COEFF*float(self.delta_s)
@@ -261,11 +291,22 @@ class F1Wrapper(gym.Wrapper):
         if action is not None and self.STEER_RATE_COST > 0:
             steer_cost = self.STEER_RATE_COST*float(action[0] - self.prev_cmd[0])**2
 
+        time_cost = self.TIME_COST
+        wall_cost = self.WALL_COST * max(0.0, self.WALL_MARGIN - self.min_wall)
+        lat_cost = self.LAT_COST * max(0.0, abs(self.lat_acc) - self.LAT_GRIP_SHARE * float(self.params['mu']) * 9.81)
+        lap_bonus = 0.0
+        if lap_done is not None and self.LAP_BONUS > 0 and np.isfinite(self.ref_lap):
+            lap_bonus = self.LAP_BONUS * max(0.0, self.ref_lap - lap_done)
+
         # final reward
-        reward = forward_reward - collision_cost - steer_cost
+        reward = forward_reward - collision_cost - steer_cost - time_cost - wall_cost - lat_cost + lap_bonus
         reward_dict = {'forward_reward': forward_reward,
                        'collision_cost': collision_cost,
-                       'steer_cost': steer_cost}
+                       'steer_cost': steer_cost,
+                       'time_cost': time_cost,
+                       'wall_cost': wall_cost,
+                       'lat_cost': lat_cost,
+                       'lap_bonus': lap_bonus}
         return reward, reward_dict
     # ======================================================================== #
 
@@ -305,18 +346,24 @@ class F1Wrapper(gym.Wrapper):
         obs_dict, _, terminate, truncate, info = self._env.step(_action)
         self._step_pose(obs_dict)
         self.elapsed += self.timestep
+        lap_done = None
         if self.progress_laps:
             length = float(self._env.track.centerline.spline.s[-1])
             self.progress += float(self.delta_s)
             if self.progress >= (len(self.lap_times) + 1) * length:
+                lap_done = self.elapsed - (self.lap_times[-1] if self.lap_times else 0.0)
                 self.lap_times.append(self.elapsed)
             if self.progress >= self.laps * length and not self.collision:
                 self.success, terminate = True, True
         else:
             self.success = bool(self._env.unwrapped.toggle_list[0] >= 2 * self.laps)
             self.lap_times = list(self._env.unwrapped.lap_split_times)
+        # for the reward: closest wall seen by the (noise-free) lidar, true lateral acceleration
+        self.min_wall = float(np.min(np.asarray(obs_dict['scans'][0])))
+        st = self.vehicle_state()
+        self.lat_acc = float(st[3] * st[5])
         obs = self.getObs(obs_dict)
-        reward, reward_dict = self.calc_reward(cmd)
+        reward, reward_dict = self.calc_reward(cmd, lap_done)
         info['obs_dict'] = obs_dict
         info.update(reward_dict)
         info['lap_count'] = len(self.lap_times)

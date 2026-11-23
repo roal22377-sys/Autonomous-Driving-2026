@@ -39,7 +39,7 @@ from ruamel.yaml import YAML
 
 from utils.env import F1Wrapper, normalize_speed
 from utils.rule_based import RacelinePlanner
-from utils.track_gen import list_variants, variant_map
+from utils.track_gen import list_variants, variant_map, require_fresh_variants
 from utils.vectorize import RunningMeanStd
 from utils.color import cprint
 
@@ -92,7 +92,7 @@ def get_args(argv=None):
     p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--hidden_dim', type=int, default=512, help='actor width (2 hidden layers); run 7 used 256')
     p.add_argument('--eval_tracks', type=int, default=44)
-    p.add_argument('--max_data', type=float, default=8e6,
+    p.add_argument('--max_data', type=float, default=4e6,      # 15 GB WSL PC (11/23); 8e6 needs ~23 GB
                    help='keep at most this many samples (oldest DAgger rounds dropped, expert round kept)')
     p.add_argument('--min_beta', type=float, default=0.1, help='expert-driven episode fraction never below this')
     p.add_argument('--init', default=None, help='start from this model (e.g. imitation/7): its actor + normalizer, '
@@ -354,6 +354,7 @@ def main():
         copyfile(f, f'{args.save_dir}/backup/{name}')
 
     all_tracks = list_variants(MAPS)
+    require_fresh_variants(all_tracks)          # never train on tracks from an older generator
     train_tracks = [t for t in all_tracks if HOLDOUT not in t]
     eval_tracks = sorted([t for t in all_tracks if variant_map(t) in EVAL_MAPS
                           and (HOLDOUT in t or os.path.basename(t)[:-4] in [m + s for m in EVAL_MAPS for s in ('', '_rev')])])
