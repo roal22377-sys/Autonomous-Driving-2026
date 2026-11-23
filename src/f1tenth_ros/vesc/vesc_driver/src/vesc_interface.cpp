@@ -54,7 +54,7 @@ public:
   serial_driver_{new drivers::serial_driver::SerialDriver(*owned_ctx)}
   {}
 
-  void serial_receive_callback(const std::vector<uint8_t> & buffer);
+  void serial_receive_callback(std::vector<uint8_t> & buffer);
   void packet_creation_thread();
   void on_configure();
   void connect(const std::string & port);
@@ -78,12 +78,24 @@ private:
   std::vector<uint8_t> buffer_;
 };
 
-void VescInterface::Impl::serial_receive_callback(const std::vector<uint8_t> & buffer)
+void VescInterface::Impl::serial_receive_callback(std::vector<uint8_t> & buffer)
 {
+  // serial_driver 1.0.0 (foxy) hands over its whole 2048-byte receive buffer without the number of
+  // bytes just read. Bytes past the new data are left over from earlier, larger reads, so old frames
+  // were parsed again and again: /sensors/core (and /odom) mixed real values with stale ones
+  // (11/23 logs: up to 90 % stale, 300-700 msg/s). Fix: zero the buffer after use, so everything
+  // after the newly read bytes is 0, and take only up to the last non-zero byte. A complete VESC
+  // frame ends with 0x03, so no complete frame is cut; a frame split across reads that happens to
+  // end in 0x00 at the split is lost and rejected by its CRC.
+  size_t n = buffer.size();
+  while (n > 0 && buffer[n - 1] == 0) {
+    --n;
+  }
   buffer_mutex_.lock(); // wait untill the current buffer read finishes
-  buffer_.reserve(buffer_.size() + buffer.size());
-  buffer_.insert(buffer_.end(), buffer.begin(), buffer.end());
+  buffer_.reserve(buffer_.size() + n);
+  buffer_.insert(buffer_.end(), buffer.begin(), buffer.begin() + n);
   buffer_mutex_.unlock();
+  std::fill(buffer.begin(), buffer.end(), 0);
 }
 
 void VescInterface::Impl::packet_creation_thread()
