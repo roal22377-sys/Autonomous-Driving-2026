@@ -52,6 +52,20 @@ EVAL_MAPS = ['Sochi', 'IMS', 'Catalunya', 'Zandvoort', 'Silverstone', 'SaoPaulo'
 HOLDOUT = '_w105'               # generated variant kept out of training
 WHEELBASE = None                # from configs/task/dynamic.yaml (length_f + length_r)
 EXPERT = {'a_lat': 3.5, 'lad_base': 0.6, 'lad_gain': 0.22, 'merge_dist': 0.6}
+# the expert corners at this share of the episode's grip (mu * g; sim tires saturate there since 11/23).
+# A fixed 3.5 m/s^2 failed on low-grip episodes (mu 0.40-0.45: 62 % 2-lap success, 11/23 check).
+EXPERT_GRIP_SHARE = 0.6
+
+
+def expert_kwargs(env):
+    '''
+        expert planner settings for this episode from the true (randomized) friction: cornering and
+        braking at EXPERT_GRIP_SHARE of mu * g (braking into a corner unloads the rear tires and spun
+        the car with a fixed 3 m/s^2), acceleration up to the motor limit a_max
+    '''
+    grip = float(env.params['mu']) * 9.81
+    a_max = float(env.params['a_max'])
+    return dict(EXPERT, a_lat=EXPERT_GRIP_SHARE * grip, a_acc=a_max, a_brake=min(a_max, EXPERT_GRIP_SHARE * grip))
 STEER_LOSS_WEIGHT = 2.0         # steering errors matter more than speed errors
 
 
@@ -182,8 +196,7 @@ def rollout_worker(job):
         obs, info = env.reset()
         # the expert respects this episode's speed cap (the policy is told the cap in its observation)
         pl = RacelinePlanner(env._env.unwrapped.track, args.length_f + args.length_r, v_min=env.min_speed, v_max=env.speed_cap,
-                             a_acc=env.params['a_max'], a_brake=env.params['a_max'], max_steer=env.max_steer,
-                             max_steer_left=env.steer_left_max, **EXPERT)
+                             max_steer=env.max_steer, max_steer_left=env.steer_left_max, **expert_kwargs(env))
         expert_drives = actor is None or np.random.rand() < beta
         noise_std = np.random.uniform(0.0, dart_std) if expert_drives else 0.0
         noise, done, steps = 0.0, False, 0

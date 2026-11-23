@@ -300,6 +300,10 @@ def variant_map(path):
 
 def _job(job):
     map_name, seed, reverse, original = job
+    name = f"{map_name}{'_rev' if reverse else ''}{'' if original else f'_w{seed}'}"
+    path = os.path.join(GEN_DIR, f'{name}.npz')
+    if os.path.exists(path):        # resume an interrupted generation
+        return path
     return save_variant(make_variant(map_name, seed, reverse, original))
 
 
