@@ -144,7 +144,8 @@ class AgentNode(Node):
     self.obs_cfg = get_obs_config(self.args)       # raises if obs_dim doesn't match
     self.use_speed = self.obs_cfg['speed']['enabled']
     lidar_cfg = self.obs_cfg['lidar']
-    self.get_logger().info(f"[obs] lidar 1080 -> {lidar_cfg['num_beams']} ({lidar_cfg['pooling']} pooling), "
+    self.get_logger().info(f"[obs] lidar 1080 -> {lidar_cfg['num_beams']} ({lidar_cfg['pooling']} pooling"
+                           f"{', zones ' + str(lidar_cfg['zones']) if lidar_cfg.get('zones') else ''}), "
                            f"max_range {lidar_cfg['max_range']} m, "
                            f"speed input: {'/' + self.odom_topic if self.use_speed else 'off'}, "
                            f"action history: {self.obs_cfg['history']['length']}, "
