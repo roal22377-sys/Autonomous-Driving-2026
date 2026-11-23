@@ -7,6 +7,7 @@
 #   tools/drive_session.sh --finish   # stop everything, fetch the newest bag, show tools/eval_drive.py results
 #   tools/drive_session.sh --circle   # same tabs, but the last one runs the circle tests (tools/circle_series.sh)
 #                                     #   instead of the agent: steering map, tire grip, true speed, low-speed hold
+#   tools/drive_session.sh --circle radius      # full lock left/right, slow circles (turning radius, tape)
 #   tools/drive_session.sh --finish --circle   # ...then stop + fetch + tools/circle_analysis.py
 #   tools/drive_session.sh --stop     # stop agent, bag (saved cleanly), bringup on the car
 #   tools/drive_session.sh --fetch    # extract the newest bag on the car -> logs/<bag>_extracted/
@@ -30,7 +31,12 @@ case "$1" in
   -m) [ -n "$2" ] || { echo "usage: $0 -m \"commit message\""; exit 1; }
       MSG="$2"; shift 2 ;;
 esac
-if [ "$1" = "--circle" ]; then CIRCLE=1; shift; fi
+CIRCLE_ARGS=""
+if [ "$1" = "--circle" ]; then
+  CIRCLE=1; shift
+  # --circle radius: full lock left + right, slow steady circles for measuring the turning radius
+  if [ "$1" = "radius" ]; then CIRCLE_ARGS="radius"; shift; fi
+fi
 
 case "$1" in
   --finish)
@@ -100,7 +106,7 @@ mktab monitor  "sleep 6"          'ros2 topic echo /ackermann_cmd'
 if [ $CIRCLE = 1 ]; then
   LAST="6 CIRCLE test"
   mktab agent  "echo 'Circle tests: wait for bringup, press r in the TELEOP tab (s = emergency stop).'; sleep 4" \
-               'tools/circle_series.sh'
+               "tools/circle_series.sh $CIRCLE_ARGS"
 else
   LAST="6 agent"
   mktab agent  "echo 'Wait for bringup, press s in the TELEOP tab, put the car on the track,'; read -p 'then press Enter here to start the agent: '" \

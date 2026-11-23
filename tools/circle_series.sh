@@ -6,6 +6,13 @@
 # Each command: dry-run (circle sizes) -> Enter = run, s = skip, q = quit.
 # The keyboard tab still overrides (s = stop). Analysis: tools/drive_session.sh --finish --circle
 STEERS=() OPTS=()
+if [ "$1" = "radius" ]; then
+  # turning-radius measurement: full lock each side, slow steady circles (~3 laps at 1.2 m/s) to mark
+  # the outer front tire track with tape. Kick 2.0 m/s for 1 s to get the motor going.
+  STEERS=(0.4415 -0.497)
+  OPTS=(--kick 2.0 --kick_time 1.0 --speeds 1.5 --hold 3 --low 1.2 --low_hold 15)
+  shift
+fi
 while [ $# -gt 0 ]; do
   if [ "$1" = "--" ]; then shift; OPTS=("$@"); break; fi
   STEERS+=("$1"); shift
