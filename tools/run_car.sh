@@ -2,7 +2,9 @@
 # Pull the latest code/params from GitHub, then start the car bringup
 # using vesc.yaml and agent.yaml straight from src/ (no colcon build needed for param changes).
 # Run from anywhere: the agent node loads the model from src/f1tenth/results relative to the repo root.
+# MODEL=il / MODEL=ilppo picks config/agent_il.yaml / agent_ilppo.yaml instead of agent.yaml.
 set -e
+AGENT_YAML="agent${MODEL:+_$MODEL}.yaml"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
@@ -14,4 +16,4 @@ fi
 
 exec ros2 launch f1tenth_stack bringup_launch.py \
   vesc_config:="$REPO/src/f1tenth_ros/f1tenth_stack/config/vesc.yaml" \
-  agent_config:="$REPO/src/f1tenth_ros/f1tenth_stack/config/agent.yaml" "$@"
+  agent_config:="$REPO/src/f1tenth_ros/f1tenth_stack/config/$AGENT_YAML" "$@"

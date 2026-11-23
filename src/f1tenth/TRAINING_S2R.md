@@ -83,6 +83,24 @@ OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py expert imitati
   보상 항목별 스텝당 값. `results/ppo_s2r/<idx>/train_log.pkl`, 사용한 설정은 `backup/ppo_args.yaml`.
 - 새 모델을 차에 올릴 때 `agent.yaml`의 `steer_gain_left/right`는 1.0부터 (1.35/1.12는 run 8용 보정).
 
+## 분석 도구 (src/f1tenth에서, 학습 없이 평가만)
+
+| 도구 | 용도 | 예 |
+|---|---|---|
+| `plot_training.py` | IL 라운드별 / PPO 업데이트별 학습 곡선 그림 + 요약 | `python plot_training.py imitation/9` → `results/imitation/9/training.png` |
+| `plot_failures.py` | 실패한 주행을 트랙 위 궤적(속도, 조향, run-off)과 시간 그래프로, 충돌 위치 분류 | `python plot_failures.py imitation/9 --tracks open:big` → `results/imitation/9/failures/` |
+| `compare_models.py` | 모델 비교 보고서: 일반 / 최악 조건 / 열린 공간 2랩 완주율, 짝지은 랩 타임, 트랙별 랩 타임 | `python -u compare_models.py imitation/9 ppo_s2r/1` → `results/reports/` |
+| `eval_open_space.py` | 막다른 공간 점검 (대조군 none / train / big) | `python -u eval_open_space.py expert imitation/9` |
+| `train_ppo_s2r.py --sim_override x.yaml` | IL을 다시 학습하지 않고 PPO 시뮬 조건만 변경 (`sim2real`, `speed_limit`의 range/uncapped_prob/nominal) | 중간 조향 원선회 결과 반영 등. 접지 μ는 `configs/task/dynamic.yaml`(IL 학습이 끝난 뒤 수정) |
+
+## 실차: IL만 / IL+PPO 버전 나눠 쓰기
+
+- `config/agent_il.yaml` = IL run 9, `config/agent_ilppo.yaml` = IL+PPO(algo_idx를 저장된 PPO 번호로). 기존 `agent.yaml`(run 8)은 그대로.
+- 둘 다 `steer_gain` 1.0, `speed_min` 0, `speed_limit` 3.0부터.
+- 선택: `MODEL=il tools/drive_session.sh` / `MODEL=ilppo tools/drive_session.sh` (`tools/run_car.sh`도 같음). MODEL 없으면 agent.yaml.
+- 학습이 끝난 모델은 `results/<model>/{sim2real,backup,README.md}`만 커밋(데이터·체크포인트 제외)하고 태그를 단다:
+  IL만 `model-il9`, IL+PPO `model-il9-ppo<번호>` → 나중에 `git checkout model-il9 -- src/f1tenth/results/imitation/9`로 언제든 복원.
+
 ## 예전 실행 기록 (run 8, 11/21)
 
 ```bash

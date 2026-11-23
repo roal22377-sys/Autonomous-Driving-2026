@@ -1,0 +1,14 @@
+# IL + PPO (PPO fine-tuned from IL run 9). Select on the car with
+#   MODEL=ilppo tools/drive_session.sh   or      MODEL=ilppo tools/run_car.sh use_agent:=true
+# Set algo_idx to the PPO run that was saved (results/ppo_s2r/<algo_idx>/sim2real) before driving.
+agent_node:
+  ros__parameters:
+    name: ppo_s2r
+    algo_idx: 1
+    scan_topic: scan
+    drive_topic: drive
+    odom_topic: odom
+    speed_limit: 3.0    # [m/s] start low, then 5.0, competition 8.0
+    speed_min: 0.0
+    steer_gain_left: 1.0
+    steer_gain_right: 1.0

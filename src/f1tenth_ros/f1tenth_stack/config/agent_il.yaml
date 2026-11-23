@@ -1,0 +1,14 @@
+# IL only (IL run 9, trained 11/23 with the 11/23 calibration, lidar 88 bins). Select on the car with
+#   MODEL=il tools/drive_session.sh      or      MODEL=il tools/run_car.sh use_agent:=true
+# agent.yaml (run 8) is left as it was.
+agent_node:
+  ros__parameters:
+    name: imitation
+    algo_idx: 9
+    scan_topic: scan
+    drive_topic: drive
+    odom_topic: odom
+    speed_limit: 3.0    # [m/s] start low, then 5.0; the policy is told the cap (trained with caps 2-8 m/s)
+    speed_min: 0.0      # off: the model drives 0.5-8 m/s itself and starts with the 2 m/s kick
+    steer_gain_left: 1.0    # off: run 9 learned the 11/23 steering (0.41 rad lock, per-side command gains)
+    steer_gain_right: 1.0

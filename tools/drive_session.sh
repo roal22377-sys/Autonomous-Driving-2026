@@ -14,10 +14,13 @@
 #   tools/drive_session.sh --stop     # stop agent, bag (saved cleanly), bringup on the car
 #   tools/drive_session.sh --fetch    # extract the newest bag on the car -> logs/<bag>_extracted/
 #   tools/drive_session.sh --agent    # (re)start only the agent in this terminal (bringup keeps running)
+#   MODEL=il tools/drive_session.sh   # IL only (config/agent_il.yaml);  MODEL=ilppo: IL + PPO (agent_ilppo.yaml)
+#                                     # without MODEL: config/agent.yaml as before
 # ros2 run uses /usr/bin/python3, so torch comes from PYTHONPATH (venv site-packages), not from activate.
 # The agent tab waits for Enter, so press 's' in the teleop tab first (holds the car stopped);
 # then 'r' = drive, 's' = stop.
 set -e
+AGENT_YAML="agent${MODEL:+_$MODEL}.yaml"
 CAR_HOST="${CAR_HOST:-jowonjun@10.106.0.73}"
 SSH_OPTS="-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
 CAR_ENV='export PYTHONPATH=$HOME/venv/torch210/lib/python3.8/site-packages:$PYTHONPATH && source ~/venv/torch210/bin/activate && cd ~/ros2_ws && source /opt/ros/foxy/setup.bash && source install/setup.bash && export ROS_DOMAIN_ID=6'
@@ -83,7 +86,7 @@ case "$1" in
       echo "[error] agent_node already running on the car"; exit 1
     fi
     read -p "Press s in the TELEOP tab first, then Enter here to start the agent: "
-    exec ssh $SSH_OPTS -t "$CAR_HOST" "$CAR_ENV && ros2 run f1tenth_stack agent_node --ros-args --params-file src/f1tenth_ros/f1tenth_stack/config/agent.yaml" ;;
+    exec ssh $SSH_OPTS -t "$CAR_HOST" "$CAR_ENV && ros2 run f1tenth_stack agent_node --ros-args --params-file src/f1tenth_ros/f1tenth_stack/config/$AGENT_YAML" ;;
   "") ;;
   *) echo "usage: $0 [-m msg|--no-deploy] [--circle [radius] | --speed [v ...]] | --finish [--circle|--speed] | --stop | --fetch | --agent"; exit 1 ;;
 esac
@@ -123,7 +126,7 @@ elif [ $CIRCLE = 1 ]; then
 else
   LAST="6 agent"
   mktab agent  "echo 'Wait for bringup, press s in the TELEOP tab, put the car on the track,'; read -p 'then press Enter here to start the agent: '" \
-               'ros2 run f1tenth_stack agent_node --ros-args --params-file src/f1tenth_ros/f1tenth_stack/config/agent.yaml'
+               "ros2 run f1tenth_stack agent_node --ros-args --params-file src/f1tenth_ros/f1tenth_stack/config/$AGENT_YAML"
 fi
 
 gnome-terminal --window --title "1 bringup"            -e "bash $TABS/bringup.sh" \

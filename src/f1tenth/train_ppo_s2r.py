@@ -124,6 +124,9 @@ def get_args():
     p.add_argument('--open_level', default='big', help='eval_open_space.py level used for model selection')
     p.add_argument('--open_caps', nargs='+', type=float, default=[5.0, 8.0], help='speed caps for that check')
     p.add_argument('--baseline', action='store_true', help='settings before 11/23 (see BASELINE)')
+    p.add_argument('--sim_override', default=None,
+                   help='yaml with `sim2real:` and/or `speed_limit:` entries that replace the IL model\'s ones for this PPO '
+                        'run (e.g. a re-measured steering scale); the merged config is the run\'s backup/f1tenth.yaml')
     # start only from a solid IL policy (11/23 decision): PPO refines it, it should not have to repair it
     p.add_argument('--min_il_success', type=float, default=0.98, help='IL 2-lap success on the eval tracks')
     p.add_argument('--min_il_open', type=float, default=0.95, help='IL 2-lap success on the open-space tracks')
@@ -135,7 +138,8 @@ def get_args():
     il_task = f'results/{a.il}/backup/f1tenth.yaml'
     if not os.path.exists(il_task):
         raise FileNotFoundError(f'{il_task} missing: the IL model must come with its task config')
-    os.environ['F1_TASK_CONFIG'] = il_task
+    os.environ['F1_TASK_CONFIG'] = merge_sim_override(il_task, a.sim_override, f'results/{a.name}/{a.algo_idx}') \
+        if a.sim_override else il_task
     args = IL.get_args([])
     args.update(vars(a))
     args.save_dir = f'results/{args.name}/{args.algo_idx}'
@@ -145,6 +149,41 @@ def get_args():
         raise ValueError(f'--time_cost {args.time_cost} >= progress at min_speed ({slowest:.3f}/step): '
                          'driving slowly would cost more than crashing')
     return args
+
+
+OVERRIDABLE = {'sim2real': None, 'speed_limit': {'range', 'uncapped_prob', 'nominal'}}
+
+
+def merge_sim_override(il_task, override, save_dir):
+    '''
+        IL task config with the simulator conditions of `override` (sim2real, speed_limit range/caps) replaced,
+        written to <save_dir>/backup/f1tenth.yaml. Everything that defines the observation or the meaning of
+        the action (lidar, obs_dim, max_steer, steering gains, speed range, history) must stay the IL model's.
+    '''
+    from ruamel.yaml import YAML
+    yaml = YAML()
+    with open(il_task) as f:
+        cfg = yaml.load(f)
+    with open(override) as f:
+        ov = yaml.load(f) or {}
+    for k, v in ov.items():
+        if k not in OVERRIDABLE:
+            raise ValueError(f'--sim_override: `{k}` cannot be changed for PPO (it is part of the IL policy\'s '
+                             f'observation/action); allowed: {sorted(OVERRIDABLE)}')
+        allowed = OVERRIDABLE[k]
+        for kk, vv in v.items():
+            if allowed is not None and kk not in allowed:
+                raise ValueError(f'--sim_override: {k}.{kk} cannot be changed (allowed: {sorted(allowed)})')
+            if kk not in cfg[k]:
+                print(f'[sim_override] note: {k}.{kk} is new (not in the IL config)')
+            print(f'[sim_override] {k}.{kk}: {cfg[k].get(kk)} -> {vv}')
+            cfg[k][kk] = vv
+    os.makedirs(f'{save_dir}/backup', exist_ok=True)
+    out = f'{save_dir}/backup/f1tenth.yaml'
+    with open(out, 'w') as f:
+        f.write(f'# IL config {il_task} with the PPO simulator override {override}\n')
+        yaml.dump(cfg, f)
+    return out
 
 
 def env_config(args):
@@ -176,7 +215,8 @@ def main():
     os.makedirs(f'{args.save_dir}/backup', exist_ok=True)
     os.makedirs(f'{args.save_dir}/checkpoint', exist_ok=True)
     for f, name in [(IL.task_config(), 'f1tenth.yaml'), ('configs/task/dynamic.yaml', 'dynamic.yaml')]:
-        copyfile(f, f'{args.save_dir}/backup/{name}')
+        if os.path.abspath(f) != os.path.abspath(f'{args.save_dir}/backup/{name}'):    # --sim_override writes it there
+            copyfile(f, f'{args.save_dir}/backup/{name}')
     with open(f'{args.save_dir}/backup/ppo_args.yaml', 'w') as f:      # what this run used
         for k, v in sorted(args.items()):
             if isinstance(v, (int, float, str, bool)) or v is None:
