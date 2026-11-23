@@ -51,15 +51,17 @@ sim2real:
   # 11/23: full lock measured the same on both sides (max_steer below), so no extra left clip any more
   steer_left_max: [0.41, 0.41]     # [rad]
   steer_left_max_nominal: 0.41
-  # real wheel angle / commanded angle, per side, below full lock: the servo linkage is not linear and
-  # left mid-range commands turned less (11/23: left ~0.75-0.8, right ~1.0 of the full-lock-based map)
-  steer_scale_left: [0.75, 1.05]
-  steer_scale_left_nominal: 0.85
+  # real wheel angle / commanded angle in the mid range (full lock stays 0.41 rad, see utils/env.py step).
+  # 11/24: symmetric. The 11/23 left 0.75-0.8 estimate came from one driving log (old calibration, tire slip
+  # mixed in) while the circle test showed both sides alike; robust to a mild nonlinearity either side.
+  steer_scale_left: [0.85, 1.05]
+  steer_scale_left_nominal: 1.0
   steer_scale_right: [0.85, 1.05]
   steer_scale_right_nominal: 1.0
   speed_delay: [0.0, 0.05]    # [s] speed command -> wheel speed (real ~0.03 s)
   speed_delay_nominal: 0.03
-  a_max: [2.5, 3.5]           # [m/s^2] real accel p95 2.7 (VESC current limit); sim default 9.51
+  a_max: [2.5, 4.5]           # [m/s^2] accel = brake limit; 11/17 log p95 2.7 was driven at <= 3 m/s (likely below the
+                              # motor limit) -> widened up until measured (tools/speed_analysis.py); sim default 9.51
   a_max_nominal: 3.0
   mu_scale: [0.8, 1.25]       # tire friction scale around dynamic.yaml mu (0.4-0.62: fit 0.41-0.44, peaks seen ~0.6)
   noise_scale: [0.5, 2.0]     # per-episode multiplier on the lidar noise above

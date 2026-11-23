@@ -108,8 +108,8 @@ def get_args(argv=None):
     p.add_argument('--patience', type=int, default=3, help='rounds in a row without a noticeable improvement')
     p.add_argument('--min_rounds', type=int, default=5, help='never stop before this round')
     p.add_argument('--min_gain', type=float, default=0.01, help='score gain that counts as an improvement (0.01 = 1 %p)')
-    p.add_argument('--lap_gain', type=float, default=0.01,
-                   help='at an equal score: paired 2-lap time gain that counts as an improvement (0.01 = 1 %% faster)')
+    p.add_argument('--jitter_gain', type=float, default=0.10,
+                   help='at about the same score: this much less steering jitter counts as an improvement (0.10 = 10 %%)')
     # open-space check in the round score (eval_open_space.py test tracks: a wide dead-end bay at every corner)
     p.add_argument('--open_eval', type=int, default=1, help='score = mean of eval and open-space 2-lap success')
     p.add_argument('--open_level', default='big')
@@ -129,7 +129,8 @@ def get_args(argv=None):
     p.add_argument('--resume', action='store_true', help='reload the data saved in <save_dir>/data and continue')
     # CAPS (Mysore et al. 2021) smoothness regularization: removes high-frequency steering jitter without
     # adding delay. temporal: pi(s_t) ~ pi(s_t+1); spatial: pi(s) ~ pi(s + noise)
-    p.add_argument('--caps_t', type=float, default=0.3, help='temporal smoothness weight (0 = off)')
+    p.add_argument('--caps_t', type=float, default=0.5, help='temporal smoothness weight (0 = off); 0.5 since 11/24 '
+                                                              '(run 8-10: 0.3, straight-line weaving)')
     p.add_argument('--caps_s', type=float, default=0.3, help='spatial smoothness weight (0 = off)')
     p.add_argument('--caps_sigma', type=float, default=0.05, help='spatial noise std in normalized obs units')
     p.add_argument('--hist_noise', type=float, default=0.0,
@@ -335,21 +336,33 @@ def paired_gain(res, ref_res, settings, relative=False):
 UNCAPPED = tuple(s for s in EVAL_SETTINGS if s[0] >= 8.0)
 
 
+def round_jitter(res):
+    '''mean |steering change| per step over the evaluation runs [rad] (eval_worker's 4th field)'''
+    return float(np.mean([r[3] for r in res])) if res else float('nan')
+
+
+SCORE_TIE = 0.005       # scores within 0.5 %p count as equal (evaluation noise)
+
+
 def judge_round(entry, best, args):
     '''
-        (better, noticeable, text) for a round against the best round so far.
-        better:     higher score, or the same score and faster on the runs both finished -> saved as best
-        noticeable: score + min_gain, or the same score and lap_gain faster -> resets the early-stop count
+        (better, noticeable, text) for a round against the best round so far. IL aims at stable driving
+        (11/24): between rounds of about the same score the smoother one (less steering jitter) wins; lap time
+        is left to PPO.
+        better:     score higher by SCORE_TIE, or about the same score and less jitter -> saved as best
+        noticeable: score + min_gain, or about the same score and jitter_gain less jitter -> resets the early stop
     '''
     if best is None:
         return True, True, 'first round'
     ds = entry['score'] - best['score']
+    j, jb = entry.get('jitter', round_jitter(entry['res'])), best.get('jitter', round_jitter(best['res']))
+    smoother = np.isfinite(j) and np.isfinite(jb) and j < jb
+    better = ds > SCORE_TIE or (ds >= -SCORE_TIE and smoother)
+    noticeable = ds >= args.min_gain - 1e-9 or (ds >= -SCORE_TIE and np.isfinite(j) and np.isfinite(jb)
+                                                 and j <= (1.0 - args.jitter_gain) * jb)
     g, n = paired_gain(entry['res'], best['res'], UNCAPPED, relative=True)
-    faster = np.isfinite(g) and g > 0
-    better = ds > 1e-9 or (abs(ds) <= 1e-9 and faster)
-    noticeable = ds >= args.min_gain - 1e-9 or (ds >= -1e-9 and np.isfinite(g) and g >= args.lap_gain)
-    text = (f"score {ds*100:+.1f}%p vs best (round {best['round']}), "
-            f"{g*100:+.1f}% faster on {n} uncapped runs both finished" if n else f"score {ds*100:+.1f}%p vs best")
+    text = (f"score {ds*100:+.1f}%p vs best (round {best['round']}), steering jitter {j:.4f} vs {jb:.4f} rad"
+            + (f", {g*100:+.1f}% faster on {n} uncapped runs both finished" if n else ''))
     return better, noticeable, text
 
 
@@ -529,7 +542,8 @@ def main():
         for r in res:
             if not r[1]:
                 print(f'      fail {r[0]:28s} {r[2]:6.1f}s')
-        entry = {'round': rnd, 'data': n_data, 'val': vl, 'success': succ, 'lap': lap, 'open': op, 'score': score, 'res': res}
+        entry = {'round': rnd, 'data': n_data, 'val': vl, 'success': succ, 'lap': lap, 'open': op, 'score': score,
+                 'jitter': round_jitter(res), 'res': res}
         log.append(entry)
         better, noticeable, why = judge_round(entry, best, args)
         stale = 0 if noticeable else stale + 1
@@ -546,7 +560,7 @@ def main():
             break
         if rnd >= args.min_rounds and stale >= args.patience:
             cprint(f'[stop] early stop after round {rnd}: {args.patience} rounds in a row without a noticeable improvement '
-                   f'(score +{args.min_gain*100:g}%p or {args.lap_gain*100:g}% faster). Best is round {best["round"]} '
+                   f'(score +{args.min_gain*100:g}%p or {args.jitter_gain*100:g}% less jitter). Best is round {best["round"]} '
                    f'(score {best["score"]*100:.1f}) -> {args.save_dir}/sim2real', bold=True)
             break
         # DAgger: the student drives (expert drives a fraction beta of the episodes), expert labels

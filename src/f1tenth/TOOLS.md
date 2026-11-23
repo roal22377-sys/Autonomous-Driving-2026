@@ -46,11 +46,10 @@ IL은 학습 데이터(400만 샘플, 약 2.2 GB)를 추가로 씁니다. CPU �
 ## 2. IL 학습 — `train_il_s2r.py`
 
 ```bash
-OMP_NUM_THREADS=1 nohup $PY -u train_il_s2r.py --algo_idx 9 \
-    --task_config configs/task/f1tenth_lidar88.yaml \
-    --hidden_dim 512 --caps_t 0.3 --caps_s 0.3 \
+OMP_NUM_THREADS=1 nohup $PY -u train_il_s2r.py --algo_idx 11 \
+    --task_config configs/task/f1tenth_lidar88.yaml --hidden_dim 512 \
     --expert_steps 1.5e6 --dagger_steps 8e5 --dart_std 0.08 --grad_steps 20000 \
-    > results/imitation_9_train.log 2>&1 &
+    > results/imitation_11_train.log 2>&1 &
 tail -f results/imitation_9_train.log           # 진행 보기 (Ctrl+C는 보기만 멈춤, 학습은 계속)
 ```
 
@@ -66,7 +65,7 @@ tail -f results/imitation_9_train.log           # 진행 보기 (Ctrl+C는 보�
 ## 3. PPO 학습 — `train_ppo_s2r.py`
 
 ```bash
-OMP_NUM_THREADS=1 nohup $PY -u train_ppo_s2r.py --il imitation/9 --algo_idx 1 \
+OMP_NUM_THREADS=1 nohup $PY -u train_ppo_s2r.py --il imitation/11 --algo_idx 1 \
     > results/ppo_1_train.log 2>&1 &
 ```
 
@@ -108,7 +107,7 @@ OMP_NUM_THREADS=1 nohup $PY -u train_ppo_s2r.py --il imitation/9 --algo_idx 1 \
 ### 4-1. 학습 곡선 — `plot_training.py`
 
 ```bash
-$PY plot_training.py imitation/9            # -> results/imitation/9/training.png + 라운드별 요약 출력
+$PY plot_training.py imitation/11            # -> results/imitation/11/training.png + 라운드별 요약 출력
 $PY plot_training.py ppo_s2r/1 ppo_s2r/2    # 여러 개 (각자 그림)
 ```
 
@@ -120,9 +119,9 @@ $PY plot_training.py ppo_s2r/1 ppo_s2r/2    # 여러 개 (각자 그림)
 ### 4-2. 실패 장면 — `plot_failures.py`
 
 ```bash
-$PY plot_failures.py imitation/9                         # IL 평가 트랙 x 평가 조건 3개 (132회)
-$PY plot_failures.py imitation/9 --tracks open:big       # 큰 막다른 공간 시험 트랙 (상한 8, 5)
-$PY plot_failures.py imitation/9 --tracks 'installation/maps_gen/Sochi*.npz' --caps 5
+$PY plot_failures.py imitation/11                         # IL 평가 트랙 x 평가 조건 3개 (132회)
+$PY plot_failures.py imitation/11 --tracks open:big       # 큰 막다른 공간 시험 트랙 (상한 8, 5)
+$PY plot_failures.py imitation/11 --tracks 'installation/maps_gen/Sochi*.npz' --caps 5
 $PY plot_failures.py ppo_s2r/1 --all --max_plots 10      # 완주한 주행도 그림
 ```
 
@@ -135,9 +134,9 @@ $PY plot_failures.py ppo_s2r/1 --all --max_plots 10      # 완주한 주행도 �
 ### 4-3. 모델 비교 보고서 — `compare_models.py`
 
 ```bash
-$PY -u compare_models.py imitation/9 ppo_s2r/1             # 첫 번째가 기준
-$PY -u compare_models.py expert imitation/9 ppo_s2r/1      # expert도 함께 (상한선 확인)
-$PY -u compare_models.py expert imitation/9 --quick --max_tracks 6   # 1랩, 몇 개만 (빠른 확인, 1분 이내)
+$PY -u compare_models.py imitation/11 ppo_s2r/1             # 첫 번째가 기준
+$PY -u compare_models.py expert imitation/11 ppo_s2r/1      # expert도 함께 (상한선 확인)
+$PY -u compare_models.py expert imitation/11 --quick --max_tracks 6   # 1랩, 몇 개만 (빠른 확인, 1분 이내)
 ```
 
 - 항목: 일반 트랙(평가 조건 3개), 최악 조건(지연 0.2 s, μ 0.4 등, 상한 8), 막다른 공간 트랙(상한 8, 5). 모두 2랩.
@@ -149,8 +148,8 @@ $PY -u compare_models.py expert imitation/9 --quick --max_tracks 6   # 1랩, 몇
 ### 4-4. 막다른 공간 점검 — `eval_open_space.py`
 
 ```bash
-$PY -u eval_open_space.py expert imitation/9                       # 대조군 none / train / big, 상한 5·8, 2랩
-$PY -u eval_open_space.py imitation/9 --levels none big --caps 5
+$PY -u eval_open_space.py expert imitation/11                       # 대조군 none / train / big, 상한 5·8, 2랩
+$PY -u eval_open_space.py imitation/11 --levels none big --caps 5
 ```
 
 - 같은 트랙에서 막다른 공간만 다른 세 묶음: `none`(없음, 대조군), `train`(학습 크기 2~7 m), `big`(큰 것 4~7 m만).
@@ -160,7 +159,7 @@ $PY -u eval_open_space.py imitation/9 --levels none big --caps 5
 ### 4-5. 기본 평가 — `evaluate_s2r.py`
 
 ```bash
-$PY -u evaluate_s2r.py imitation/9 ppo_s2r/1 --workers 8
+$PY -u evaluate_s2r.py imitation/11 ppo_s2r/1 --workers 8
 ```
 
 일반 평가 트랙에서 실차 조건(`eval`)과 원래 시뮬레이터(`ideal`) 완주율과 랩 타임을 봅니다. 위 비교 보고서가 더 자세합니다.
@@ -175,19 +174,19 @@ $PY -u evaluate_s2r.py imitation/9 ppo_s2r/1 --workers 8
 
 ```bash
 cd ~/Autonomous-Driving-2026
-git add -f src/f1tenth/results/imitation/9/sim2real src/f1tenth/results/imitation/9/backup src/f1tenth/results/imitation/9/README.md
-git commit -m "IL run 9 model" && git tag model-il9 && git push && git push --tags
-# PPO도 같은 방식: results/ppo_s2r/<번호>/{sim2real,backup}, 태그 model-il9-ppo<번호>
+git add -f src/f1tenth/results/imitation/11/sim2real src/f1tenth/results/imitation/11/backup src/f1tenth/results/imitation/11/README.md
+git commit -m "IL run 11 model" && git tag model-il11 && git push && git push --tags
+# PPO도 같은 방식: results/ppo_s2r/<번호>/{sim2real,backup}, 태그 model-il11-ppo<번호>
 ```
 
-나중에 특정 버전으로 되돌리기: `git checkout model-il9 -- src/f1tenth/results/imitation/9`
+나중에 특정 버전으로 되돌리기: `git checkout model-il11 -- src/f1tenth/results/imitation/11`
 
 ### 차에서 모델 고르기
 
 | 실행 | 쓰는 설정 | 모델 |
 |---|---|---|
 | `tools/drive_session.sh` | `config/agent.yaml` | 지금까지 쓰던 것 (run 8) |
-| `MODEL=il tools/drive_session.sh` | `config/agent_il.yaml` | IL만 (run 9) |
+| `MODEL=il tools/drive_session.sh` | `config/agent_il.yaml` | IL만 (run 11) |
 | `MODEL=ilppo tools/drive_session.sh` | `config/agent_ilppo.yaml` | IL + PPO (`algo_idx`를 저장된 PPO 번호로 맞출 것) |
 
 `tools/run_car.sh`도 같습니다(`MODEL=il tools/run_car.sh use_agent:=true`).
@@ -214,7 +213,7 @@ git commit -m "IL run 9 model" && git tag model-il9 && git push && git push --ta
 | 위치 | 내용 |
 |---|---|
 | `configs/task/f1tenth.yaml` | 기본 설정 (LiDAR 54칸) |
-| `configs/task/f1tenth_lidar88.yaml` | run 9 설정 (LiDAR 88칸). LiDAR 외에는 기본 설정과 같게 유지 |
+| `configs/task/f1tenth_lidar88.yaml` | run 9~11 설정 (LiDAR 88칸). LiDAR 외에는 기본 설정과 같게 유지 |
 | `configs/task/dynamic.yaml` | 차량 물리 (접지 μ 등) |
 | `installation/maps_gen/` | 학습 트랙 (생성, git 제외) |
 | `installation/maps_open_test/` | 막다른 공간 시험 트랙 (생성, git 제외) |

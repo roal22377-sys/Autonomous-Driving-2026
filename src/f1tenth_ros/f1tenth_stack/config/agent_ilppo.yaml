@@ -1,4 +1,4 @@
-# IL + PPO (PPO fine-tuned from IL run 9). Select on the car with
+# IL + PPO (PPO fine-tuned from IL run 11). Select on the car with
 #   MODEL=ilppo tools/drive_session.sh   or      MODEL=ilppo tools/run_car.sh use_agent:=true
 # Set algo_idx to the PPO run that was saved (results/ppo_s2r/<algo_idx>/sim2real) before driving.
 agent_node:

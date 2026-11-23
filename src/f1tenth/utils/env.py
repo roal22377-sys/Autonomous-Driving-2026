@@ -333,8 +333,12 @@ class F1Wrapper(gym.Wrapper):
         speed = apply_start_kick(speed, float(self.vehicle_state()[3]), self.kick_cfg)
         # history = what was actually sent (after the steering clip and speed cap), exactly like agent_node.py
         self.history.push([steer / self.max_steer, normalize_speed(speed, self.min_speed, self.max_speed)])
-        # the real linkage turns the wheels less than commanded below full lock (per side, sim2real.steer_scale_*)
-        steer = float(np.clip(steer * self.steer_scale[0 if steer > 0 else 1], -self.max_steer, self.max_steer))
+        # steering linkage nonlinearity below full lock (per side, sim2real.steer_scale_*): the mid-range wheel angle
+        # is `scale` x the command, blending to exactly the command at full lock (11/23 circle test: full lock is
+        # 0.41 rad on both sides). Until 11/24 the scale was applied at full lock too (left max 0.35 rad at 0.85).
+        x = min(abs(steer) / self.max_steer, 1.0)
+        k = self.steer_scale[0 if steer > 0 else 1]
+        steer = float(np.clip(steer * (k + (1.0 - k) * x * x), -self.max_steer, self.max_steer))
         if self.steer_delay_steps > 0:
             self.steer_queue.append(steer)
             steer = self.steer_queue.popleft()

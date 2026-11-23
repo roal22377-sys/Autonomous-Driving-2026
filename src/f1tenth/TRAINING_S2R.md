@@ -30,13 +30,13 @@
 | 코너 run-off 크기 | 11/23 실차(넓은 막다른 공간으로 직진해 벽 충돌) 대응. 길이 2~5 m → **2~7 m**, 트랙보다 넓은 폭 0~1 m → **0~2.5 m** (run 8이 4~7 m 공간에서 27개 중 13개 트랙 충돌) | `utils/track_gen.py` |
 | 열린 공간 점검 | 모든 코너에 막다른 공간(run-off)이 있는 시험 트랙(같은 트랙의 run-off 없는 대조군 포함)에서 2랩, 그 안으로 들어가 박는지 집계 | `eval_open_space.py` |
 
-## 실행: 11/23 보정 반영 IL run 9/10 → PPO (src/f1tenth에서)
+## 실행: 11/23~24 보정 반영 IL run 11 → PPO (src/f1tenth에서)
 
 11/23에 보정값(`max_steer` 0.41, 좌우 게인, 지연 0.05~0.20 s, μ 0.5), 정책 속도 범위(`min_speed` 0.5),
 expert, 트랙 생성기(코너 run-off, 사각 alcove, 벽 요철)가 바뀌었다. run 8 모델과 데이터는 행동의 의미가 달라
 쓸 수 없으므로 `--init` 없이 처음부터 학습한다.
 
-run 9는 라이다 88칸(`configs/task/f1tenth_lidar88.yaml`, 관측 114): 정면 ±20° 1.25°, 20~60° 2.5°, 60~100° 5°,
+run 9부터 라이다 88칸(`configs/task/f1tenth_lidar88.yaml`, 관측 114): 정면 ±20° 1.25°, 20~60° 2.5°, 60~100° 5°,
 100~135° 8.75°. 8 m 앞에서 칸 폭이 0.70 m(54칸) → 0.17 m라 멀리 있는 코너, 막다른 공간의 끝 벽과 코너 출구를
 더 정확히 구분한다. 최대 거리는 10 m 그대로. 54칸(`f1tenth.yaml`)과 60칸(`f1tenth_lidar60.yaml`)은 비교용으로 남긴다.
 학습 PC(i9-14900KF, WSL 메모리 15.5 GB + 스왑 4 GB)에 맞춤: `--max_data` 4e6(8e6은 약 23 GB 필요),
@@ -51,30 +51,29 @@ expert(11/23): 명령한 조향으로 도는 데 필요한 횡가속이 접지�
 OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -m utils.track_gen 6 20
 OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py --make --workers 20   # 열린 공간 시험 트랙
 
-# 1. IL run 9 (라이다 88칸). 비교가 필요하면 끝난 뒤 다른 --task_config로 run 10
+# 1. IL run 11 (라이다 88칸)
 #    라운드마다: 일반 평가(상한 8 중앙/8 랜덤/5 랜덤 출발, 2랩) + 열린 공간 big 트랙(상한 8·5, 2랩)
 #    점수 = 두 완주율의 평균. 최고 점수 라운드를 저장(같으면 짝지은 랩 타임이 빠른 쪽).
 #    조기 종료: 라운드 3 이후 점수 +1%p 또는(같은 점수에서) 랩 타임 1% 단축이 2라운드 연속 없으면 멈춤, 최대 20라운드
-OMP_NUM_THREADS=1 nohup ~/venv/f1tenth/bin/python -u train_il_s2r.py --algo_idx 9 --workers 20 \
-    --task_config configs/task/f1tenth_lidar88.yaml \
-    --hidden_dim 512 --caps_t 0.3 --caps_s 0.3 --max_data 4e6 \
+OMP_NUM_THREADS=1 nohup ~/venv/f1tenth/bin/python -u train_il_s2r.py --algo_idx 11 --workers 20 \
+    --task_config configs/task/f1tenth_lidar88.yaml --hidden_dim 512 \
     --expert_steps 1.5e6 --dagger_steps 8e5 --dart_std 0.08 --grad_steps 20000 \
-    > results/imitation_9_train.log 2>&1 &
+    > results/imitation_11_train.log 2>&1 &
 
 # 2. 평가: 일반 트랙 + 열린 공간 시험 트랙 (expert와 비교)
-OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u evaluate_s2r.py imitation/9 --workers 20
-OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py expert imitation/9 --workers 20
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u evaluate_s2r.py imitation/11 --workers 20
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py expert imitation/11 --workers 20
 
 # 3. PPO (2번의 eval_open_space.py --make 필요: 모델 선택에 big 시험 트랙 2랩 완주율을 씀)
 #    기준선(11/23 이전 설정) 1회 → 추천 설정. 이후 옵션을 하나씩 바꿔 비교 (seed 2~3개)
 #    PPO는 IL 모델의 backup/f1tenth.yaml(88칸)을 그대로 쓴다
-OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u train_ppo_s2r.py --il imitation/9 --algo_idx 0 --baseline
-OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u train_ppo_s2r.py --il imitation/9 --algo_idx 1
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u train_ppo_s2r.py --il imitation/11 --algo_idx 0 --baseline
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u train_ppo_s2r.py --il imitation/11 --algo_idx 1
 #    멈췄으면 같은 명령에 --resume (5 업데이트마다 checkpoint/resume.pt 저장)
 #    하나씩 끄고 비교: --ret_norm 0 / --time_cost 0 / --log_std_steer -2 --log_std_speed -2 --uncapped_prob 0.25
 #                      / --wall_cost 0 --lat_cost 0,  랩 보너스는 --lap_bonus 2 로 켬
-OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u evaluate_s2r.py imitation/9 ppo_s2r/0 ppo_s2r/1 --workers 20
-OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py expert imitation/9 ppo_s2r/1 --workers 20
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u evaluate_s2r.py imitation/11 ppo_s2r/0 ppo_s2r/1 --workers 20
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py expert imitation/11 ppo_s2r/1 --workers 20
 ```
 
 - PPO 자원(이 PC): 롤아웃 프로세스 `--workers 16` + 평가 프로세스 `--eval_workers 8`. 롤아웃 프로세스는 평가 중에도
@@ -89,10 +88,10 @@ OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py expert imitati
 
 | 도구 | 용도 | 예 |
 |---|---|---|
-| `plot_training.py` | IL 라운드별 / PPO 업데이트별 학습 곡선 그림 + 요약 | `python plot_training.py imitation/9` → `results/imitation/9/training.png` |
-| `plot_failures.py` | 실패한 주행을 트랙 위 궤적(속도, 조향, run-off)과 시간 그래프로, 충돌 위치 분류 | `python plot_failures.py imitation/9 --tracks open:big` → `results/imitation/9/failures/` |
-| `compare_models.py` | 모델 비교 보고서: 일반 / 최악 조건 / 열린 공간 2랩 완주율, 짝지은 랩 타임, 트랙별 랩 타임 | `python -u compare_models.py imitation/9 ppo_s2r/1` → `results/reports/` |
-| `eval_open_space.py` | 막다른 공간 점검 (대조군 none / train / big) | `python -u eval_open_space.py expert imitation/9` |
+| `plot_training.py` | IL 라운드별 / PPO 업데이트별 학습 곡선 그림 + 요약 | `python plot_training.py imitation/11` → `results/imitation/11/training.png` |
+| `plot_failures.py` | 실패한 주행을 트랙 위 궤적(속도, 조향, run-off)과 시간 그래프로, 충돌 위치 분류 | `python plot_failures.py imitation/11 --tracks open:big` → `results/imitation/11/failures/` |
+| `compare_models.py` | 모델 비교 보고서: 일반 / 최악 조건 / 열린 공간 2랩 완주율, 짝지은 랩 타임, 트랙별 랩 타임 | `python -u compare_models.py imitation/11 ppo_s2r/1` → `results/reports/` |
+| `eval_open_space.py` | 막다른 공간 점검 (대조군 none / train / big) | `python -u eval_open_space.py expert imitation/11` |
 | `train_ppo_s2r.py --sim_override x.yaml` | IL을 다시 학습하지 않고 PPO 시뮬 조건만 변경 (`sim2real`, `speed_limit`의 range/uncapped_prob/nominal) | 중간 조향 원선회 결과 반영 등. 접지 μ는 `configs/task/dynamic.yaml`(IL 학습이 끝난 뒤 수정) |
 
 ## 실차: IL만 / IL+PPO 버전 나눠 쓰기
@@ -101,7 +100,7 @@ OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py expert imitati
 - 둘 다 `steer_gain` 1.0, `speed_min` 0, `speed_limit` 3.0부터.
 - 선택: `MODEL=il tools/drive_session.sh` / `MODEL=ilppo tools/drive_session.sh` (`tools/run_car.sh`도 같음). MODEL 없으면 agent.yaml.
 - 학습이 끝난 모델은 `results/<model>/{sim2real,backup,README.md}`만 커밋(데이터·체크포인트 제외)하고 태그를 단다:
-  IL만 `model-il9`, IL+PPO `model-il9-ppo<번호>` → 나중에 `git checkout model-il9 -- src/f1tenth/results/imitation/9`로 언제든 복원.
+  IL만 `model-il11`, IL+PPO `model-il11-ppo<번호>` → 나중에 `git checkout model-il11 -- src/f1tenth/results/imitation/11`로 언제든 복원.
 
 ## 예전 실행 기록 (run 8, 11/21)
 
@@ -128,6 +127,29 @@ OMP_NUM_THREADS=1 ~/venv/torch210/bin/python3 -u evaluate_s2r.py imitation/6 imi
 기준 (IL run 6, 실차 조건): 상한 없음 0%, 3 m/s 33% 완주 (트랙 3개 샘플). 원래 시뮬레이터에서는 100%.
 
 ## 결과 기록
+
+### IL run 9 (11/23, 88칸, 감속 규칙 'cap') — 라운드 5에서 조기 종료, 최고 라운드 3
+| 라운드 | 일반 2랩 | 막다른 공간 2랩 | 점수 | 조향 떨림 | 2랩 시간 |
+|---|---|---|---|---|---|
+| 0 | 10.6% | 8.0% | 9.3 | 0.005 | 104 s |
+| 3 (저장) | 73.5% | 43.2% | 58.3 | 0.029 | 218 s |
+| 5 | 72.0% | 33.0% | 52.5 | 0.028 | 199 s |
+
+원인 분석(데이터·expert 평가만): expert의 "꺾는 만큼 감속" 규칙이 정책 주행 상태 정답의 34 %를 감속으로 만들어
+느려짐(정답 속도 4.0 → 2.9 m/s). 정책은 큰 조향이 필요한 곳에서 필요한 조향의 35~60 %만 꺾고(주 실패 원인),
+직진 근처에서는 잡음처럼 떨림(방향 일치 64 %). 학습/검증 오차가 같이 높음 = 정답을 관측으로 맞추기 어려움
+(조향 지연·μ 숨은 정보는 그중 13 %; 레이스 라인 위치를 정책이 볼 수 없는 것이 큰 부분으로 추정).
+CAPS·과거 명령 잡음·신경망 폭 1024는 짧은 BC 확인에서 효과 없음.
+
+### IL run 10 (11/23~24) — 라운드 4에서 중단
+감속 규칙 'hold', 출발 현실화로 라운드 3 일반 82.6 % / 막다른 공간 39.8 % (run 9보다 일반 +9 %p, 떨림 0.023).
+중단 이유: 시뮬레이터 조향 버그 발견 — steer_scale을 최대 조향에도 곱해서 왼쪽 최대가 0.35 rad(실차 0.41)였고,
+정책이 "왼쪽을 더 꺾는" 습관을 배우고 있었음. 11/24 수정: 최대 조향은 좌우 0.41 그대로, 중간 영역만 대칭 0.85~1.05.
+
+### IL run 11 (11/24) 설정
+run 10 + 조향 수정, a_max 2.5~4.5(측정 전까지), CAPS temporal 0.5, 점수가 비슷하면 떨림이 적은 라운드 선택.
+expert(혼자 2랩, 고친 조향): 일반 100 %, 막다른 공간 96.6 %, 최악 조건 87.9 % / 80.7 %.
+
 
 ### IL run 7 (256x2, CAPS 없음, 2026-11-17) — 라운드 3에서 중단
 실차 조건 평가 (지연 0.25 s, a_max 3, 노이즈 / 44 트랙 x 3 조건, 2바퀴)
