@@ -70,6 +70,10 @@ def get_args():
     p.add_argument('--eval_every', type=int, default=10, help='updates between evaluations')
     p.add_argument('--eval_tracks', type=int, default=44)
     a = p.parse_args()
+    # use the IL model's own task config (lidar layout, obs_dim, steering calibration), not today's default
+    il_task = f'results/{a.il}/backup/f1tenth.yaml'
+    if os.path.exists(il_task):
+        os.environ['F1_TASK_CONFIG'] = il_task
     args = IL.get_args([])
     args.update(vars(a))
     args.save_dir = f'results/{args.name}/{args.algo_idx}'
@@ -92,8 +96,8 @@ def main():
     torch.set_num_threads(min(8, args.workers))
     os.makedirs(f'{args.save_dir}/backup', exist_ok=True)
     os.makedirs(f'{args.save_dir}/checkpoint', exist_ok=True)
-    for f in ['configs/task/f1tenth.yaml', 'configs/task/dynamic.yaml']:
-        copyfile(f, f'{args.save_dir}/backup/{os.path.basename(f)}')
+    for f, name in [(IL.task_config(), 'f1tenth.yaml'), ('configs/task/dynamic.yaml', 'dynamic.yaml')]:
+        copyfile(f, f'{args.save_dir}/backup/{name}')
 
     # IL policy (actor + frozen normalizer) and a frozen copy as the BC teacher
     il_dir = f'results/{args.il}'

@@ -3,7 +3,9 @@ integrator: rk4
 model: st
 
 # dynmaic configs
-mu: 1.0489
+mu: 0.5         # friction: peak lateral accel ~ mu*g (saturating tires, dynamic_models.py). 11/23 fit to real
+                #   driving (tools/fit_tires.py): 0.41-0.44; real logs briefly reached 5-6 m/s^2 -> 0.5 nominal
+                #   (was 1.0489, which with the old linear tires had no grip limit at all)
 C_Sf: 4.718
 C_Sr: 5.4562
 # measured on the car (2026-11-17): wheelbase 0.34, front axle -> front bumper 0.10,

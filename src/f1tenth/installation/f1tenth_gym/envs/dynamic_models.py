@@ -252,6 +252,20 @@ def vehicle_dynamics_ks(
     return f
 
 
+# rear tires hold a little more than the front: at the limit the car pushes wide (understeer) like the
+# real car on 11/23 (circles grew), instead of spinning; with equal limits front and rear saturate together
+# and any transient spins the sim car.
+REAR_GRIP_RATIO = 1.15
+
+
+@njit(cache=True)
+def tire_force(f_linear, f_max):
+    """lateral tire force: linear for small slip, smoothly limited to +-f_max (friction circle, lateral)"""
+    if f_max <= 1e-9:
+        return 0.0
+    return f_max * np.tanh(f_linear / f_max)
+
+
 @njit(cache=True)
 def vehicle_dynamics_st(
     x,
@@ -361,7 +375,19 @@ def vehicle_dynamics_st(
             ]
         )
     else:
-        # system dynamics
+        # system dynamics, written with axle forces. With the tanh below removed this is exactly the
+        # CommonRoad single-track model (linear tires: F_y = mu * C_S * F_z * slip angle), which has no
+        # grip limit at all: the sim car could corner at any lateral acceleration (the policy asked for
+        # 9-16 m/s^2; the real tires top out at ~4-6, 11/23 logs). Now each axle's lateral force
+        # saturates smoothly at mu * F_z, so mu is the friction coefficient (peak lateral accel ~ mu*g)
+        # and C_Sf / C_Sr set the initial slope, as before.
+        lwb = lf + lr
+        F_zf = m * (g * lr - ACCL * h) / lwb
+        F_zr = m * (g * lf + ACCL * h) / lwb
+        alpha_f = DELTA - BETA - lf * PSI_DOT / V
+        alpha_r = -BETA + lr * PSI_DOT / V
+        F_yf = tire_force(mu * C_Sf * F_zf * alpha_f, mu * F_zf)
+        F_yr = tire_force(mu * C_Sr * F_zr * alpha_r, REAR_GRIP_RATIO * mu * F_zr)
         f = np.array(
             [
                 V * np.cos(PSI + BETA),  # X_DOT
@@ -369,31 +395,8 @@ def vehicle_dynamics_st(
                 STEER_VEL,  # DELTA_DOT
                 ACCL,  # V_DOT
                 PSI_DOT,  # PSI_DOT
-                ((mu * m) / (I * (lf + lr)))
-                * (
-                    lf * C_Sf * (g * lr - ACCL * h) * DELTA
-                    + (
-                        lr * C_Sr * (g * lf + ACCL * h)
-                        - lf * C_Sf * (g * lr - ACCL * h)
-                    )
-                    * BETA
-                    - (
-                        lf * lf * C_Sf * (g * lr - ACCL * h)
-                        + lr * lr * C_Sr * (g * lf + ACCL * h)
-                    )
-                    * (PSI_DOT / V)
-                ),  # PSI_DOT_DOT
-                (mu / (V * (lr + lf)))
-                * (
-                    C_Sf * (g * lr - ACCL * h) * DELTA
-                    - (C_Sr * (g * lf + ACCL * h) + C_Sf * (g * lr - ACCL * h)) * BETA
-                    + (
-                        C_Sr * (g * lf + ACCL * h) * lr
-                        - C_Sf * (g * lr - ACCL * h) * lf
-                    )
-                    * (PSI_DOT / V)
-                )
-                - PSI_DOT,  # BETA_DOT
+                (lf * F_yf - lr * F_yr) / I,  # PSI_DOT_DOT
+                (F_yf + F_yr) / (m * V) - PSI_DOT,  # BETA_DOT
             ]
         )
 

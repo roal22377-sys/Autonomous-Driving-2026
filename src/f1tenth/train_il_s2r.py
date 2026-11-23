@@ -51,12 +51,20 @@ EVAL_MAPS = ['Sochi', 'IMS', 'Catalunya', 'Zandvoort', 'Silverstone', 'SaoPaulo'
              'YasMarina', 'MoscowRaceway', 'Shanghai', 'MexicoCity', 'Montreal']
 HOLDOUT = '_w105'               # generated variant kept out of training
 WHEELBASE = None                # from configs/task/dynamic.yaml (length_f + length_r)
-EXPERT = {'a_lat': 4.0, 'lad_base': 0.6, 'lad_gain': 0.22, 'merge_dist': 0.6}
+EXPERT = {'a_lat': 3.5, 'lad_base': 0.6, 'lad_gain': 0.22, 'merge_dist': 0.6}
 STEER_LOSS_WEIGHT = 2.0         # steering errors matter more than speed errors
+
+
+def task_config():
+    '''task yaml in use: --task_config (via F1_TASK_CONFIG, also seen by workers) or the default'''
+    return os.environ.get('F1_TASK_CONFIG', 'configs/task/f1tenth.yaml')
 
 
 def get_args(argv=None):
     p = argparse.ArgumentParser()
+    p.add_argument('--task_config', default=None,
+                   help='task yaml instead of configs/task/f1tenth.yaml (e.g. configs/task/f1tenth_lidar60.yaml '
+                        'for the lidar A/B); saved as backup/f1tenth.yaml so agent_node reads it')
     p.add_argument('--name', default='imitation')
     p.add_argument('--algo_idx', type=int, default=7)
     p.add_argument('--seed', type=int, default=1)
@@ -70,7 +78,7 @@ def get_args(argv=None):
     p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--hidden_dim', type=int, default=512, help='actor width (2 hidden layers); run 7 used 256')
     p.add_argument('--eval_tracks', type=int, default=44)
-    p.add_argument('--max_data', type=float, default=1.2e7,
+    p.add_argument('--max_data', type=float, default=8e6,
                    help='keep at most this many samples (oldest DAgger rounds dropped, expert round kept)')
     p.add_argument('--min_beta', type=float, default=0.1, help='expert-driven episode fraction never below this')
     p.add_argument('--init', default=None, help='start from this model (e.g. imitation/7): its actor + normalizer, '
@@ -82,8 +90,11 @@ def get_args(argv=None):
     p.add_argument('--caps_s', type=float, default=0.3, help='spatial smoothness weight (0 = off)')
     p.add_argument('--caps_sigma', type=float, default=0.05, help='spatial noise std in normalized obs units')
     a = p.parse_args(argv)
+    if a.task_config:
+        # workers call get_args([]) again; the environment variable carries the choice to them
+        os.environ['F1_TASK_CONFIG'] = a.task_config
     args = EasyDict(vars(a))
-    for f in ['configs/task/f1tenth.yaml', 'configs/task/dynamic.yaml', 'configs/algorithm/imitation.yaml']:
+    for f in [task_config(), 'configs/task/dynamic.yaml', 'configs/algorithm/imitation.yaml']:
         with open(f) as fh:
             for k, v in EasyDict(YAML().load(fh)).items():
                 if k not in ('lr', 'hidden_dim'):
@@ -262,7 +273,11 @@ def evaluate(args, policy, tracks, mode='eval', settings=EVAL_SETTINGS):
 # ------------------------------------------------------------------ behavior cloning
 def train_bc(args, actor, O, Y, rms, grad_steps, lr, Nn=None):
     torch.set_num_threads(args.workers)
-    X = torch.as_tensor(rms.normalize(O), dtype=torch.float32)
+    # normalize in chunks straight into float32: rms.normalize on everything at once makes a float64 copy
+    # (6.8 GB at 10.7M samples; IL run 8 was OOM-killed at 20.8 of 23 GB)
+    X = torch.empty((len(O), O.shape[1]), dtype=torch.float32)
+    for i in range(0, len(O), 500_000):
+        X[i:i + 500_000] = torch.as_tensor(rms.normalize(O[i:i + 500_000]), dtype=torch.float32)
     T = torch.as_tensor(Y, dtype=torch.float32)
     n = len(X)
     perm = torch.randperm(n)
@@ -321,8 +336,9 @@ def main():
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     os.makedirs(f'{args.save_dir}/backup', exist_ok=True)
-    for f in ['configs/task/f1tenth.yaml', 'configs/task/dynamic.yaml', 'configs/algorithm/imitation.yaml']:
-        copyfile(f, f'{args.save_dir}/backup/{os.path.basename(f)}')
+    for f, name in [(task_config(), 'f1tenth.yaml'), ('configs/task/dynamic.yaml', 'dynamic.yaml'),
+                    ('configs/algorithm/imitation.yaml', 'imitation.yaml')]:
+        copyfile(f, f'{args.save_dir}/backup/{name}')
 
     all_tracks = list_variants(MAPS)
     train_tracks = [t for t in all_tracks if HOLDOUT not in t]

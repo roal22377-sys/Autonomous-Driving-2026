@@ -141,6 +141,11 @@ class AgentNode(Node):
       f1tenth.yaml, so the real car builds observations exactly like in training.
     '''
     self.obs_dim = self.args.obs_dim
+    # policy angle [rad] -> servo command, per side (models from 11/23 on); older models: one gain
+    g = float(self.args.get('steer_cmd_gain', 1.0))
+    self.cmd_gain = (float(self.args.get('steer_cmd_gain_left', g)), float(self.args.get('steer_cmd_gain_right', g)))
+    self.get_logger().info(f'[drive] max_steer {self.args.max_steer} rad, command gain left {self.cmd_gain[0]:.3f} '
+                           f'right {self.cmd_gain[1]:.3f}')
     # start kick from the model's config (same as the sim); models without it (up to IL run 8) get none
     self.kick_cfg = get_kick_config(self.args)
     if self.kick_cfg:
@@ -204,7 +209,8 @@ class AgentNode(Node):
     
     # transform action
     # policy angle [rad] -> servo command: calibration says command = angle * steer_cmd_gain
-    action[0] *= self.args.max_steer * float(self.args.get('steer_cmd_gain', 1.0))
+    cmd_gain = self.cmd_gain[0] if action[0] > 0 else self.cmd_gain[1]
+    action[0] *= self.args.max_steer * cmd_gain
     # per-side extra steering (steer_gain_left/right), then the servo limits
     # (the left end is short of the policy's range with offset 0.558)
     side_gain = self.gain_left if action[0] > 0 else self.gain_right
@@ -224,7 +230,7 @@ class AgentNode(Node):
     self.drive_pub.publish(msg)
 
     # remember what was actually sent (after the steering clip and speed cap), normalized like the policy output
-    self.history.push([action[0] / side_gain / (self.args.max_steer * float(self.args.get('steer_cmd_gain', 1.0))),
+    self.history.push([action[0] / side_gain / (self.args.max_steer * cmd_gain),
                        normalize_speed(action[1], self.args.min_speed, self.args.max_speed)])
 
   def policy_to_car_speed(self, v):

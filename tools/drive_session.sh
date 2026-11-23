@@ -9,6 +9,8 @@
 #                                     #   instead of the agent: steering map, tire grip, true speed, low-speed hold
 #   tools/drive_session.sh --circle radius      # full lock left/right, slow circles (turning radius, tape)
 #   tools/drive_session.sh --finish --circle   # ...then stop + fetch + tools/circle_analysis.py
+#   tools/drive_session.sh --speed [2 3 4]      # last tab runs straight speed tests toward a wall (tools/speed_series.sh)
+#   tools/drive_session.sh --finish --speed    # ...then stop + fetch + tools/speed_analysis.py (speed_to_erpm_gain)
 #   tools/drive_session.sh --stop     # stop agent, bag (saved cleanly), bringup on the car
 #   tools/drive_session.sh --fetch    # extract the newest bag on the car -> logs/<bag>_extracted/
 #   tools/drive_session.sh --agent    # (re)start only the agent in this terminal (bringup keeps running)
@@ -31,7 +33,11 @@ case "$1" in
   -m) [ -n "$2" ] || { echo "usage: $0 -m \"commit message\""; exit 1; }
       MSG="$2"; shift 2 ;;
 esac
-CIRCLE_ARGS=""
+CIRCLE_ARGS="" SPEED=0 SPEED_ARGS=""
+if [ "$1" = "--speed" ]; then
+  SPEED=1; shift
+  while [[ "$1" =~ ^[0-9.]+$ ]]; do SPEED_ARGS="$SPEED_ARGS $1"; shift; done
+fi
 if [ "$1" = "--circle" ]; then
   CIRCLE=1; shift
   # --circle radius: full lock left + right, slow steady circles for measuring the turning radius
@@ -47,6 +53,9 @@ case "$1" in
     if [ "$2" = "--circle" ]; then
       "$PY" "$REPO/tools/circle_analysis.py" "$OUT" | tee "$OUT/circle.txt"
       echo "[done] analysis saved to $OUT/circle.txt"
+    elif [ "$2" = "--speed" ]; then
+      "$PY" "$REPO/tools/speed_analysis.py" "$OUT" | tee "$OUT/speed.txt"
+      echo "[done] analysis saved to $OUT/speed.txt"
     else
       "$PY" "$REPO/tools/eval_drive.py" "$OUT" | tee "$OUT/eval.txt"
       echo "[done] analysis saved to $OUT/eval.txt"
@@ -54,7 +63,7 @@ case "$1" in
     exit 0 ;;
   --stop)
     # SIGINT so ros2 bag closes the db cleanly; agent first so nothing drives while bringup goes down
-    ssh $SSH_OPTS "$CAR_HOST" 'pkill -INT -f "[a]gent_node"; pkill -INT -f "[c]ircle_test.py"; pkill -f "[c]ircle_series.sh"; sleep 1; pkill -INT -f "[r]os2 bag record"; sleep 2;
+    ssh $SSH_OPTS "$CAR_HOST" 'pkill -INT -f "[a]gent_node"; pkill -INT -f "[c]ircle_test.py"; pkill -f "[c]ircle_series.sh"; pkill -INT -f "[s]peed_test.py"; pkill -f "[s]peed_series.sh"; sleep 1; pkill -INT -f "[r]os2 bag record"; sleep 2;
       pkill -INT -f "[r]os2 launch f1tenth_stack"; pkill -INT -f "[k]ey_teleop"; pkill -INT -f "[t]opic echo";
       pkill -INT -f "[l]ive_status.py"; sleep 2;
       pgrep -af "[r]os2|[a]gent_node|[u]rg_node|[v]esc_" || echo "[car] all stopped"'
@@ -76,7 +85,7 @@ case "$1" in
     read -p "Press s in the TELEOP tab first, then Enter here to start the agent: "
     exec ssh $SSH_OPTS -t "$CAR_HOST" "$CAR_ENV && ros2 run f1tenth_stack agent_node --ros-args --params-file src/f1tenth_ros/f1tenth_stack/config/agent.yaml" ;;
   "") ;;
-  *) echo "usage: $0 [-m msg|--no-deploy] [--circle] | --finish [--circle] | --stop | --fetch | --agent"; exit 1 ;;
+  *) echo "usage: $0 [-m msg|--no-deploy] [--circle [radius] | --speed [v ...]] | --finish [--circle|--speed] | --stop | --fetch | --agent"; exit 1 ;;
 esac
 
 
@@ -103,7 +112,11 @@ mktab teleop   "sleep 4"          'ros2 run key_teleop key_teleop'
 mktab bag      "sleep 6"          'mkdir -p ~/bags && ros2 bag record -o ~/bags/run_$(date +%m%d_%H%M) /scan /odom /drive /teleop /ackermann_cmd /sensors/core'
 mktab status   "sleep 6"          'python3 tools/live_status.py'
 mktab monitor  "sleep 6"          'ros2 topic echo /ackermann_cmd'
-if [ $CIRCLE = 1 ]; then
+if [ $SPEED = 1 ]; then
+  LAST="6 SPEED test"
+  mktab agent  "echo 'Speed tests: wait for bringup, press r in the TELEOP tab (s = emergency stop).'; sleep 4" \
+               "tools/speed_series.sh $SPEED_ARGS"
+elif [ $CIRCLE = 1 ]; then
   LAST="6 CIRCLE test"
   mktab agent  "echo 'Circle tests: wait for bringup, press r in the TELEOP tab (s = emergency stop).'; sleep 4" \
                "tools/circle_series.sh $CIRCLE_ARGS"
@@ -120,7 +133,9 @@ gnome-terminal --window --title "1 bringup"            -e "bash $TABS/bringup.sh
                --tab    --title "5 cmd monitor"        -e "bash $TABS/monitor.sh" \
                --tab    --title "$LAST"                -e "bash $TABS/agent.sh" 2>/dev/null
 
-if [ $CIRCLE = 1 ]; then
+if [ $SPEED = 1 ]; then
+  echo "[local] opened 6 tabs (speed test). When done: $0 --finish --speed"
+elif [ $CIRCLE = 1 ]; then
   echo "[local] opened 6 tabs (circle test). When done: $0 --finish --circle"
 else
   echo "[local] opened 6 tabs. When done: $0 --finish  (stop + fetch the log + analysis)"
