@@ -1,0 +1,20 @@
+# Training / evaluation environment (sim, IL, PPO, analysis tools), verified 2026-11-23 on Python 3.8.10.
+# Install with tools/setup_train_env.sh (torch comes from the CPU wheel index, see there).
+numpy==1.24.4
+scipy==1.10.1
+numba==0.58.1
+llvmlite==0.41.1
+gymnasium==0.29.1
+yamldataclassconfig==1.5.0     # 2.x breaks the gym's map loading ("It could not load track ...")
+PyYAML==6.0.3
+ruamel.yaml==0.18.16
+easydict==1.14
+pandas==2.0.3
+shapely==2.0.7
+pillow==10.4.0
+opencv-python-headless==5.1.0.95
+pygame==2.6.1
+requests==2.32.4
+matplotlib==3.7.5
+wandb==0.24.2                  # imported by main_il.py (map list), not used for logging here
+moviepy==1.0.3
