@@ -376,9 +376,13 @@ class RacelinePlanner:
     """
 
     def __init__(self, track, wb, v_min=2.0, v_max=8.0, a_lat=4.0, a_acc=3.0, a_brake=3.0,
-                 max_steer=0.497, lad_base=0.6, lad_gain=0.22, sv_max=2.65, merge_dist=0.6, max_steer_left=None):
+                 max_steer=0.497, lad_base=0.6, lad_gain=0.22, sv_max=2.65, merge_dist=0.6, max_steer_left=None,
+                 merge_speed=2.0):
         from utils.raceline import speed_profile
         self.merge_dist = merge_dist
+        # far from the line the expert slows towards this, not towards v_min (with min_speed 0.5 it
+        # would crawl back to the line at 0.5 m/s); same floor as before min_speed went below 2.0
+        self.merge_speed = merge_speed
         line = track.raceline
         xy = np.stack([line.xs, line.ys]).T.astype(np.float64)
         if np.linalg.norm(xy[0] - xy[-1]) < 1e-3:
@@ -435,5 +439,6 @@ class RacelinePlanner:
         speed = float(self.v_profile[(i + int(round(0.3 / self.ds))) % self.n])
         # far from the line (start on the centerline, after a disturbance): merge back slowly
         e = float(np.linalg.norm(self.xy[i] - pos))
-        speed = min(speed, self.v_min + (speed - self.v_min) * max(0.0, 1.0 - e / self.merge_dist))
+        mv = min(max(self.merge_speed, self.v_min), speed)
+        speed = min(speed, mv + (speed - mv) * max(0.0, 1.0 - e / self.merge_dist))
         return speed, steer

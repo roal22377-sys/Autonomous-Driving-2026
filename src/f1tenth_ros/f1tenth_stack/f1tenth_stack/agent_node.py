@@ -6,7 +6,7 @@ import time
 sim_path = 'src/f1tenth'
 sys.path.append(sim_path)
 from utils.vectorize import RunningMeanStd
-from utils.observation import get_obs_config, make_observation, ActionHistory
+from utils.observation import get_obs_config, make_observation, ActionHistory, get_kick_config, apply_start_kick
 
 import rclpy
 import rclpy.duration
@@ -141,6 +141,11 @@ class AgentNode(Node):
       f1tenth.yaml, so the real car builds observations exactly like in training.
     '''
     self.obs_dim = self.args.obs_dim
+    # start kick from the model's config (same as the sim); models without it (up to IL run 8) get none
+    self.kick_cfg = get_kick_config(self.args)
+    if self.kick_cfg:
+      self.get_logger().info(f"[drive] start kick: commands < {self.kick_cfg['speed']} m/s become "
+                             f"{self.kick_cfg['speed']} m/s while odom < {self.kick_cfg['below']} m/s")
     self.obs_cfg = get_obs_config(self.args)       # raises if obs_dim doesn't match
     self.use_speed = self.obs_cfg['speed']['enabled']
     lidar_cfg = self.obs_cfg['lidar']
@@ -208,6 +213,8 @@ class AgentNode(Node):
     if self.speed_limit > 0:
       # cap after unnormalizing, so the model's output mapping stays as trained
       action[1] = min(action[1], self.speed_limit)
+    # starting from rest: the VESC can't start the motor with a small command (same as utils/env.py)
+    action[1] = apply_start_kick(action[1], self.odom_speed, self.kick_cfg)
     
     # publish drive (low-speed mode: the car gets the stretched speed, the history keeps the policy's)
     msg = AckermannDriveStamped()

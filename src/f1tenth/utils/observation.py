@@ -48,6 +48,26 @@ def get_speed_limit_config(args):
     return {'enabled': bool(c.get('enabled', False)), 'max': float(args.get('max_speed', 8.0))}
 
 
+def get_kick_config(args):
+    '''start_kick block of configs/task/f1tenth.yaml; None if missing (older models: no kick)'''
+    c = args.get('start_kick', None)
+    if not c:
+        return None
+    return {'speed': float(c['speed']), 'below': float(c['below'])}
+
+
+def apply_start_kick(cmd_speed, measured_speed, kick):
+    '''
+        Same on sim and car: while the car is stopped (measured < kick['below']), a positive command
+        below kick['speed'] is raised to kick['speed'] so the motor starts. kick None = no change.
+    '''
+    if kick is None or measured_speed is None:
+        return cmd_speed
+    if measured_speed < kick['below'] and 0.0 < cmd_speed < kick['speed']:
+        return kick['speed']
+    return cmd_speed
+
+
 def get_obs_config(args):
     '''Lidar + speed + action history + speed limit settings; checks that args.obs_dim matches them.'''
     cfg = {'lidar': get_lidar_config(args), 'speed': get_speed_config(args), 'history': get_history_config(args),

@@ -19,7 +19,8 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
-from utils.observation import get_obs_config, make_observation, add_obs_noise, ActionHistory
+from utils.observation import get_obs_config, make_observation, add_obs_noise, ActionHistory, \
+    get_kick_config, apply_start_kick
 
 EPS = 1e-8
 MAX_TRACK_CACHE = 24
@@ -69,6 +70,7 @@ class F1Wrapper(gym.Wrapper):
 
         # for observation (lidar + speed + action history), checks obs_dim
         self.obs_cfg = get_obs_config(args)
+        self.kick_cfg = get_kick_config(args)
         self.obs_noise = obs_noise
         self.noise_rng = np.random.default_rng(args.get('seed', None))
         self.speed_scale = 1.0
@@ -283,6 +285,8 @@ class F1Wrapper(gym.Wrapper):
         # the real servo can't reach the policy's full left lock (+ = left); agent_node.py clips there
         steer = min(float(cmd[0])*self.max_steer, self.steer_left_max)
         speed = min(float(unnormalize_speed(cmd[1], self.min_speed, self.max_speed)), self.speed_cap)
+        # starting from rest: small commands are raised to the kick speed, like agent_node.py
+        speed = apply_start_kick(speed, float(self.vehicle_state()[3]), self.kick_cfg)
         # history = what was actually sent (after the steering clip and speed cap), exactly like agent_node.py
         self.history.push([steer / self.max_steer, normalize_speed(speed, self.min_speed, self.max_speed)])
         if self.steer_delay_steps > 0:

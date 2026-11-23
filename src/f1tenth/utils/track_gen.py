@@ -39,7 +39,7 @@ RACELINE_MARGIN = 0.55     # race line keeps this far from the walls: half width
 DENSE_DS = 0.1             # centerline / race line waypoint spacing used by the env and expert
 OPT_DS = 0.5               # spacing for the race line optimization
 # car limits for the lap-time refinement (same as the expert: train_il_s2r.EXPERT, a_max nominal)
-LAP_TIME_LIMITS = dict(v_min=2.0, v_max=8.0, a_lat=4.0, a_acc=3.0, a_brake=3.0)
+LAP_TIME_LIMITS = dict(v_min=0.5, v_max=8.0, a_lat=4.0, a_acc=3.0, a_brake=3.0)
 
 # dead ends (randomized variants only)
 RECT_POCKET_PROB = 0.5     # share of pockets that are sharp rectangular alcoves instead of smooth bumps

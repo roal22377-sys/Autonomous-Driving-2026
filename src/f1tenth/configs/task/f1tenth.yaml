@@ -64,7 +64,14 @@ sim2real:
 
 # env configs
 timestep: 0.025
-min_speed: 2.0     # [m/s] lowest speed the policy can command
+min_speed: 0.5     # [m/s] lowest speed the policy can command (was 2.0 up to IL run 8)
+# the VESC cannot start the motor from rest with a small command (11/23: 0.5-1.5 m/s from standstill
+# -> 30 A spikes, fault 4), so while the car is (almost) stopped a small command is raised to `speed`.
+# Applied identically in utils/env.py and agent_node.py (utils/observation.py apply_start_kick); the
+# action history stores the kicked value.
+start_kick:
+  speed: 2.0        # [m/s] command used to get rolling
+  below: 0.3        # [m/s] measured speed under which the car counts as stopped
 max_speed: 8.0     # [m/s] policy speed range is [min_speed, max_speed]; VESC speed_max 30000 ERPM ~ 8.6 m/s
 max_steer: 0.482    # [rad] true wheel angle at full lock: atan(2*0.34 / (1.00 + 0.30)), inner circle 1.0 m both sides
 steer_cmd_gain: 1.031   # real car: command = angle * gain (0.497 command gave that 1.0 m circle); agent_node only
