@@ -33,17 +33,22 @@ def scan_points(r, ang, max_r=8.0):
     return np.c_[r[m] * np.cos(ang[m]), r[m] * np.sin(ang[m])]
 
 
-def icp_yaw(A, B, iters=30):
-    '''rotation [rad] that maps scan B (later) onto scan A (earlier) = yaw change of the car'''
+def icp_pose(A, B, iters=30):
+    '''
+      rigid transform (yaw [rad], translation [m] (2,)) that maps scan B (later) onto scan A (earlier):
+      the car's yaw change and lidar displacement, in A's frame. (nan, nan) if the match fails.
+      The fraction of matched points is returned too (low = unreliable).
+    '''
     tree = cKDTree(A)
     th, tr = 0.0, np.zeros(2)
+    ok = np.zeros(len(B), bool)
     for k in range(iters):
         c, s = np.cos(th), np.sin(th)
         Bt = B @ np.array([[c, -s], [s, c]]).T + tr
         dist, j = tree.query(Bt)
         ok = dist < (0.3 if k < 10 else 0.1)
         if ok.sum() < 30:
-            return np.nan
+            return np.nan, np.full(2, np.nan), 0.0
         P, Q = Bt[ok], A[j[ok]]
         mp, mq = P.mean(0), Q.mean(0)
         U, _, Vt = np.linalg.svd((P - mp).T @ (Q - mq))
@@ -53,7 +58,12 @@ def icp_yaw(A, B, iters=30):
         c, s = np.cos(dth), np.sin(dth)
         Rd = np.array([[c, -s], [s, c]])
         tr = Rd @ tr + (mq - Rd @ mp)
-    return th
+    return th, tr, float(ok.mean())
+
+
+def icp_yaw(A, B, iters=30):
+    '''rotation [rad] that maps scan B (later) onto scan A (earlier) = yaw change of the car'''
+    return icp_pose(A, B, iters)[0]
 
 
 def segments(mask, min_len):

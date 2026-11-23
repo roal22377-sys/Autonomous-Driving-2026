@@ -8,6 +8,11 @@
     A variant = one map centerline with
       - a random, smoothly varying width (left/right independent)          -> width diversity
       - a few "pockets": short side areas much wider than the track        -> open-side readings
+        (smooth bumps or sharp rectangular alcoves)
+      - corner run-offs: a dead-end bay that continues straight ahead at a corner entry, on the
+        outside of the turn (11/23 real car: it drove straight into such wide closed areas instead
+        of turning)                                                       -> "open but closed" readings
+      - slightly rough walls (real walls read wavy by a few cm)
       - optionally the reverse driving direction                           -> both directions
       - its own minimum-curvature race line (utils/raceline.py)            -> expert follows it
     Walls are solid (everything outside the corridor is occupied). Widths are capped so the
@@ -22,7 +27,7 @@ import glob
 import numpy as np
 from scipy.spatial import cKDTree
 
-from utils.raceline import resample_closed, tangents_normals, min_curvature_line, refine_min_time
+from utils.raceline import resample_closed, tangents_normals, curvature, min_curvature_line, refine_min_time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAP_DIR = os.path.join(HERE, '..', 'installation', 'maps')
@@ -35,6 +40,15 @@ DENSE_DS = 0.1             # centerline / race line waypoint spacing used by the
 OPT_DS = 0.5               # spacing for the race line optimization
 # car limits for the lap-time refinement (same as the expert: train_il_s2r.EXPERT, a_max nominal)
 LAP_TIME_LIMITS = dict(v_min=2.0, v_max=8.0, a_lat=4.0, a_acc=3.0, a_brake=3.0)
+
+# dead ends (randomized variants only)
+RECT_POCKET_PROB = 0.5     # share of pockets that are sharp rectangular alcoves instead of smooth bumps
+RUNOFF_PROB = 0.5          # chance that a corner gets a straight-ahead dead-end bay at its entry
+RUNOFF_MIN_CURV = 1 / 5.0  # [1/m] corners tighter than radius 5 m
+RUNOFF_LEN = (2.0, 5.0)    # [m] bay length from the corner entry
+RUNOFF_EXTRA_W = (0.0, 1.0)  # [m] bay wider than the track on the outside
+WALL_ROUGH_STD = 0.05      # [m] wall waviness
+WALL_ROUGH_CORR = 0.6      # [m] its correlation length
 
 
 def load_centerline(map_name):
@@ -101,7 +115,10 @@ def make_variant(map_name, seed, reverse=False, original=False):
             depth = rng.uniform(1.0, 3.5)
             dist = np.abs(s - c)
             dist = np.minimum(dist, length - dist)
-            bump = depth * np.clip(1.0 - dist / half, 0.0, 1.0) ** 0.5
+            if rng.random() < RECT_POCKET_PROB:
+                bump = depth * (dist < half)                                   # sharp alcove
+            else:
+                bump = depth * np.clip(1.0 - dist / half, 0.0, 1.0) ** 0.5     # smooth bump
             if rng.random() < 0.5:
                 pocket_l = np.maximum(pocket_l, bump)
             else:
@@ -113,6 +130,13 @@ def make_variant(map_name, seed, reverse=False, original=False):
     wl, wr = np.minimum(wl, cap), np.minimum(wr, cap)
     wl_occ = np.minimum(wl + pocket_l, cap)
     wr_occ = np.minimum(wr + pocket_r, cap)
+    runoffs = []
+    if not original:
+        # rough walls: only ever widen the occupied boundary inwards a little or outwards a little,
+        # never into the race line margin (0.55 m) -> keep at least 0.45 m of half width
+        wl_occ = np.maximum(wl_occ + _smooth_noise(s, length, rng, WALL_ROUGH_CORR, WALL_ROUGH_STD), 0.45)
+        wr_occ = np.maximum(wr_occ + _smooth_noise(s, length, rng, WALL_ROUGH_CORR, WALL_ROUGH_STD), 0.45)
+        runoffs = _corner_runoffs(center, s, length, wl, wr, wl_occ, wr_occ, rng)
 
     # race line on the drivable corridor (pockets excluded): minimum curvature, then refined
     # for minimum lap time with the car's limits (late apexes etc., utils/raceline.py)
@@ -123,19 +147,86 @@ def make_variant(map_name, seed, reverse=False, original=False):
     line_opt, _, _ = refine_min_time(c_opt, wl[j], wr[j], RACELINE_MARGIN, off, **LAP_TIME_LIMITS)
     raceline, _ = resample_closed(line_opt, DENSE_DS)
 
-    occ, origin = rasterize(center, wl_occ, wr_occ)
+    occ, origin = rasterize(center, wl_occ, wr_occ, runoffs)
     return {
         'name': f"{map_name}{'_rev' if reverse else ''}{'' if original else f'_w{seed}'}",
         'map': map_name, 'reverse': reverse, 'original': original,
         'occupancy': occ, 'origin': np.array([origin[0], origin[1], 0.0]), 'resolution': RESOLUTION,
         'centerline': center.astype(np.float32), 'w_left': wl.astype(np.float32), 'w_right': wr.astype(np.float32),
         'raceline': raceline.astype(np.float32), 'length': length,
+        'runoffs': np.array(runoffs, dtype=np.float32).reshape(-1, 6),
     }
 
 
-def rasterize(center, wl, wr):
-    '''Occupancy grid (255 free / 0 occupied), rows = y, cols = x, like the original map images.'''
-    pad = float(max(wl.max(), wr.max())) + 1.0
+def _corner_runoffs(center, s, length, wl, wr, wl_occ, wr_occ, rng):
+    '''
+        Dead-end bays at corner entries: a rectangle that starts at the corridor where the corner
+        begins and continues straight along the incoming direction, covering the track width plus
+        some extra on the outside of the turn. Returns rows [x0, y0, yaw, length, lat_lo, lat_hi]:
+        entry point, its heading, bay length and lateral extent (+ = left) in that frame.
+        Skipped if it would come near another part of the track (no shortcuts).
+    '''
+    N = len(center)
+    t, n = tangents_normals(center)
+    kappa = np.convolve(np.r_[curvature(center)[-15:], curvature(center), curvature(center)[:15]],
+                        np.ones(31) / 31, mode='valid')                  # +-1.5 m smoothing
+    ds = length / N
+    out = []
+    # corners = local maxima of |curvature| above the threshold, at least 8 m apart
+    cand = [i for i in range(N) if abs(kappa[i]) > RUNOFF_MIN_CURV
+            and abs(kappa[i]) >= abs(kappa[(i - 1) % N]) and abs(kappa[i]) >= abs(kappa[(i + 1) % N])]
+    taken = []
+    tree = cKDTree(center)
+    reach = max(float(np.max(wl_occ)), float(np.max(wr_occ)))
+    for apex in cand:
+        if any(min(abs(apex - j), N - abs(apex - j)) * ds < 8.0 for j in taken):
+            continue
+        taken.append(apex)
+        if rng.random() > RUNOFF_PROB:
+            continue
+        # corner entry: walk back from the apex to where the curvature drops below 35 % of the apex value
+        i_e = apex
+        for k in range(1, int(6.0 / ds)):
+            j = (apex - k) % N
+            if abs(kappa[j]) < 0.35 * abs(kappa[apex]):
+                i_e = j
+                break
+        left_turn = kappa[apex] > 0
+        L = rng.uniform(*RUNOFF_LEN)
+        extra = rng.uniform(*RUNOFF_EXTRA_W)
+        lo, hi = -float(wr[i_e]), float(wl[i_e])
+        if left_turn:
+            lo -= extra             # outside of a left turn is the right side
+        else:
+            hi += extra
+        yaw = float(np.arctan2(t[i_e, 1], t[i_e, 0]))
+        x0, y0 = center[i_e]
+        # the bay must stay clear of every part of the track more than ~L + 6 m away along it
+        u = np.linspace(0, L + 1.0, 12)
+        v = np.linspace(lo, hi, 6)
+        U, V = np.meshgrid(u, v)
+        P = np.stack([x0 + U * np.cos(yaw) - V * np.sin(yaw), y0 + U * np.sin(yaw) + V * np.cos(yaw)], -1).reshape(-1, 2)
+        ok = True
+        for nb in tree.query_ball_point(P, r=reach + 0.8):
+            nb = np.asarray(nb, dtype=int)
+            if not len(nb):
+                continue
+            dsi = np.abs(s[nb] - s[i_e])
+            dsi = np.minimum(dsi, length - dsi)
+            if np.any(dsi > L + 6.0):
+                ok = False
+                break
+        if ok:
+            out.append([x0, y0, yaw, L, lo, hi])
+    return out
+
+
+def rasterize(center, wl, wr, runoffs=()):
+    '''
+        Occupancy grid (255 free / 0 occupied), rows = y, cols = x, like the original map images.
+        runoffs: extra free rectangles [x0, y0, yaw, length, lat_lo, lat_hi] (see _corner_runoffs).
+    '''
+    pad = float(max(wl.max(), wr.max())) + 1.0 + max([r[3] for r in runoffs], default=0.0)
     xmin, ymin = center.min(axis=0) - pad
     xmax, ymax = center.max(axis=0) + pad
     W = int(np.ceil((xmax - xmin) / RESOLUTION))
@@ -156,6 +247,11 @@ def rasterize(center, wl, wr):
     free = (lat <= wl[ii]) & (lat >= -wr[ii])
     idx = np.where(ok)[0][free]
     occ[idx] = 255
+    for x0, y0, yaw, L, lo, hi in runoffs:
+        rel = pts - np.array([x0, y0])
+        u = rel[:, 0] * np.cos(yaw) + rel[:, 1] * np.sin(yaw)
+        v = -rel[:, 0] * np.sin(yaw) + rel[:, 1] * np.cos(yaw)
+        occ[(u >= 0) & (u <= L) & (v >= lo) & (v <= hi)] = 255
     occ = occ.reshape(H, W)
     occ[0, :] = occ[-1, :] = 0
     occ[:, 0] = occ[:, -1] = 0
