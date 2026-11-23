@@ -63,6 +63,10 @@ class AgentNode(Node):
     self.declare_parameter('drive_topic', 'drive')
     self.declare_parameter('odom_topic', 'odom')
     self.declare_parameter('speed_limit', 0.0)     # [m/s] cap on commanded speed for practice runs; <= 0 disables
+    # [m/s] low-speed test mode (> 0 enables, needs speed_limit): the policy's capped range
+    # [min_speed, speed_limit] is stretched to [speed_min, speed_limit] on the car, and /odom is mapped
+    # back the other way, so the policy keeps seeing the speeds it was trained on. <= 0 disables.
+    self.declare_parameter('speed_min', 0.0)
     # servo calibration, to clip steering to what the servo can reach (relative to ~/ros2_ws like sim_path)
     self.declare_parameter('vesc_config', 'src/f1tenth_ros/f1tenth_stack/config/vesc.yaml')
 
@@ -70,6 +74,7 @@ class AgentNode(Node):
     self.drive_topic = self.get_parameter('drive_topic').value
     self.odom_topic = self.get_parameter('odom_topic').value
     self.speed_limit = float(self.get_parameter('speed_limit').value)
+    self.speed_min = float(self.get_parameter('speed_min').value)
     if self.speed_limit > 0:
       self.get_logger().info(f'[drive] speed limited to {self.speed_limit} m/s')
 
@@ -107,6 +112,18 @@ class AgentNode(Node):
     backup_dir = os.path.join(sim_path, f"results/{name}/{algo_idx}/backup")
     with open(f'{backup_dir}/f1tenth.yaml', 'r') as f:
       self.args = EasyDict(YAML().load(f))
+
+    # low-speed test mode: policy speed v in [min_speed, cap] <-> car speed in [speed_min, cap]
+    self.remap = None
+    if self.speed_min > 0:
+      lo, cap = float(self.args.min_speed), self.speed_limit
+      if cap > lo and 0 < self.speed_min < lo:
+        self.remap = (lo, cap, self.speed_min)
+        self.get_logger().warn(f'[drive] SPEED REMAP on: policy {lo:.2f}-{cap:.2f} m/s -> car '
+                               f'{self.speed_min:.2f}-{cap:.2f} m/s (odom mapped back for the policy)')
+      else:
+        self.get_logger().error(f'[drive] speed_min {self.speed_min} ignored: needs 0 < speed_min < model '
+                                f'min_speed {lo} < speed_limit {cap}')
 
     # observation
     '''
@@ -179,16 +196,36 @@ class AgentNode(Node):
       # cap after unnormalizing, so the model's output mapping stays as trained
       action[1] = min(action[1], self.speed_limit)
     
-    # publish drive
+    # publish drive (low-speed mode: the car gets the stretched speed, the history keeps the policy's)
     msg = AckermannDriveStamped()
     msg.header.stamp = scan_msg.header.stamp
     msg.drive.steering_angle = float(action[0])
-    msg.drive.speed = float(action[1])
+    msg.drive.speed = float(self.policy_to_car_speed(action[1]))
     self.drive_pub.publish(msg)
 
     # remember what was actually sent (after the steering clip and speed cap), normalized like the policy output
     self.history.push([action[0] / (self.args.max_steer * float(self.args.get('steer_cmd_gain', 1.0))),
                        normalize_speed(action[1], self.args.min_speed, self.args.max_speed)])
+
+  def policy_to_car_speed(self, v):
+    '''policy [min_speed, cap] -> car [speed_min, cap], linear; identity when the remap is off'''
+    if self.remap is None:
+      return v
+    lo, cap, vmin = self.remap
+    return vmin + (v - lo) * (cap - vmin) / (cap - lo)
+
+  def car_to_policy_speed(self, s):
+    '''
+      /odom speed -> the speed the policy believes it is driving. Inverse of policy_to_car_speed above
+      speed_min; below it (starting from rest) 0..speed_min maps to 0..min_speed so the reading stays
+      continuous and 0 stays 0.
+    '''
+    if self.remap is None:
+      return s
+    lo, cap, vmin = self.remap
+    if s < vmin:
+      return max(s, 0.0) * lo / vmin
+    return lo + (s - vmin) * (cap - lo) / (cap - vmin)
 
   def getObs(self, raw_scan: np.ndarray, speed=None):
     '''
@@ -196,7 +233,8 @@ class AgentNode(Node):
       speed: /odom linear.x [m/s], used only if the model has a speed input.
     '''
     # models trained with a speed-limit input are told the cap (agent.yaml speed_limit; <= 0 = none)
-    observation = make_observation(raw_scan, speed if speed is not None else 0.0, self.obs_cfg, self.history,
+    speed = self.car_to_policy_speed(speed) if speed is not None else 0.0
+    observation = make_observation(raw_scan, speed, self.obs_cfg, self.history,
                                    self.speed_limit if self.speed_limit > 0 else None)
     return observation
 

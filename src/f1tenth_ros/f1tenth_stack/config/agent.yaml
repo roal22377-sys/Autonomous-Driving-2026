@@ -1,8 +1,9 @@
 agent_node:
   ros__parameters:
     name: imitation
-    algo_idx: 6
+    algo_idx: 8
     scan_topic: scan
     drive_topic: drive
     odom_topic: odom
     speed_limit: 3.0    # [m/s] cap on commanded speed (practice); 0.0 = no cap (model max_speed)
+    speed_min: 0.5      # [m/s] low-speed test: policy 2.0-3.0 m/s stretched to 0.5-3.0 on the car; 0.0 = off
