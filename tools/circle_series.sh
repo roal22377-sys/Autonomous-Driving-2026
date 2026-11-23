@@ -10,8 +10,10 @@ while [ $# -gt 0 ]; do
   if [ "$1" = "--" ]; then shift; OPTS=("$@"); break; fi
   STEERS+=("$1"); shift
 done
-# full lock both sides (grip shows up at low speed), then mid and small (steering map)
-[ ${#STEERS[@]} -gt 0 ] || STEERS=(0.44 -0.5 0.3 -0.3 0.15 -0.15)
+# full lock both sides first (minimum turning radius + tire grip): left 0.4415 = servo 1.0 (VESC limit),
+# right -0.497 = servo 0.061 (mechanical stop). Then mid and small commands for the steering map
+# (q after the first two if only full lock is wanted).
+[ ${#STEERS[@]} -gt 0 ] || STEERS=(0.4415 -0.497 0.3 -0.3 0.15 -0.15)
 
 cd ~/ros2_ws
 for s in "${STEERS[@]}"; do

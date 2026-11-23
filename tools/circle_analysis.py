@@ -32,6 +32,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from steer_delay import scan_points, icp_pose  # noqa: E402
 
 WHEELBASE = 0.34        # [m]
+CAR_WIDTH = 0.30        # [m]
+FRONT_OVERHANG = 0.10   # [m] front axle -> front bumper
+SIM_MAX_STEER = 0.482   # [rad] sim full lock (configs/task/f1tenth.yaml max_steer)
 LIDAR_X = 0.32          # [m] rear axle -> lidar (front axle - 0.02, configs/task/dynamic.yaml)
 STEER_CMD_GAIN = 1.031  # command = wheel angle * gain (current calibration)
 VESC_GAIN = 4180.0      # speed_to_erpm_gain in vesc.yaml
@@ -134,6 +137,20 @@ def main():
         b = g.sort_values('a_y').iloc[0]
         print(f'  command {steer:+.3f}: real angle {b.angle_eff:.3f} rad ({b.angle_eff / b.angle_cmd:.2f} x calibrated '
               f'{b.angle_cmd:.3f}) at a_y {b.a_y:.1f} m/s^2, {b.v_true:.1f} m/s')
+    print('\n== turning radius (lowest lateral-accel step of each command = no tire slide)')
+    print('   rear-axle R | inner diameter (inner rear wheel) | outer diameter (outer front corner = space needed)')
+    for steer, g in ok.groupby('steer'):
+        b = g.sort_values('a_y').iloc[0]
+        inner = 2 * (b.R - CAR_WIDTH / 2)
+        outer = 2 * np.hypot(b.R + CAR_WIDTH / 2, WHEELBASE + FRONT_OVERHANG)
+        side = 'left ' if steer > 0 else 'right'
+        tire = 2 * np.hypot(b.R + CAR_WIDTH / 2, WHEELBASE)     # outer front tire, outside edge
+        print(f'  {side} {steer:+.3f}: R {b.R:.2f} m | inner {inner:.2f} m | outer {outer:.2f} m | '
+              f'outer front tire track {tire:.2f} m (tape check)   (at {b.v_true:.1f} m/s, a_y {b.a_y:.1f})')
+    R_sim = WHEELBASE / np.tan(SIM_MAX_STEER)
+    print(f'  sim full lock {SIM_MAX_STEER} rad: R {R_sim:.2f} m | inner {2 * (R_sim - CAR_WIDTH / 2):.2f} m | '
+          f'outer {2 * np.hypot(R_sim + CAR_WIDTH / 2, WHEELBASE + FRONT_OVERHANG):.2f} m')
+
     print('\n== grip: effective angle vs lateral accel (angle drops = tires sliding)')
     for steer, g in ok.groupby('steer'):
         g = g.sort_values('speed_cmd')
@@ -141,6 +158,17 @@ def main():
         line = ', '.join(f'{r.v_true:.1f}m/s a_y {r.a_y:.1f} -> {r.angle_eff / base:.2f}' for r in g.itertuples())
         print(f'  command {steer:+.3f}: {line}')
     print(f'  highest lateral accel reached: {ok.a_y.max():.1f} m/s^2 (sim: ~10 with mu 1.05)')
+    # tire limit: lateral accel on steps where the circle had clearly grown (angle < 85 % of no-slide)
+    slide = []
+    for steer, g in ok.groupby('steer'):
+        base = g.sort_values('a_y').iloc[0].angle_eff
+        slide += list(g.a_y[g.angle_eff < 0.85 * base])
+    if slide:
+        print(f'  TIRE GRIP LIMIT (steps where the tires slid): {np.median(slide):.1f} m/s^2 median, '
+              f'{np.max(slide):.1f} max  -> sim mu ~ {np.median(slide) / 9.81:.2f}')
+    else:
+        print('  tires never slid clearly: grip limit is above the highest lateral accel reached '
+              '(run faster or with more steering)')
     r = (ok.v_true / ok.v_odom).median()
     print(f'\n== speed: true / odom = {r:.3f} (median of {len(ok)} steps) -> speed_to_erpm_gain '
           f'{VESC_GAIN:.0f} -> {VESC_GAIN / r:.0f}')

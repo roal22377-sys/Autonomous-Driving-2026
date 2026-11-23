@@ -20,7 +20,7 @@
     speed_max: 30000.0
     position_min: 0.0
     position_max: 0.0
-    servo_min: 0.0
+    servo_min: 0.06   # right wheel is at its mechanical stop by servo 0.061 (11/19 check); lower only strains the servo
     servo_max: 1.0
 
 # No longer needed, all parameters are shared

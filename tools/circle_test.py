@@ -70,7 +70,7 @@ def dry_run(plan, a):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--steer', type=float, required=True,
-                   help='steering command [rad], + left / - right (servo limits: about +0.44 / -0.55)')
+                   help='steering command [rad], + left / - right (full lock: +0.4415 left, -0.497 right)')
     p.add_argument('--speeds', type=float, nargs='+', default=[2.0, 2.5, 3.0, 3.5])
     p.add_argument('--low', type=float, nargs='*', default=[1.5, 1.2, 1.0, 0.8],
                    help='low-speed hold check at the end, descending (empty to skip)')
@@ -82,6 +82,9 @@ def main():
     p.add_argument('--rate', type=float, default=50.0, help='[Hz] publish rate')
     p.add_argument('--dry_run', action='store_true')
     a = p.parse_args()
+    if not -0.497 <= a.steer <= 0.4415:
+        print(f'[warn] steering {a.steer:+.3f} is past full lock (+0.4415 left / -0.497 right); clipped')
+        a.steer = min(max(a.steer, -0.497), 0.4415)
     plan = build_plan(a)
     dry_run(plan, a)
     if a.dry_run:
