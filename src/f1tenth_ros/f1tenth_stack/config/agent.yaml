@@ -5,5 +5,5 @@ agent_node:
     scan_topic: scan
     drive_topic: drive
     odom_topic: odom
-    speed_limit: 3.0    # [m/s] cap on commanded speed (practice); 0.0 = no cap (model max_speed)
+    speed_limit: 5.0    # [m/s] cap on commanded speed (practice); 0.0 = no cap (model max_speed). Policy range 2.0-cap
     speed_min: 0.0      # [m/s] low-speed remap; 0.0 = off. 0.5 failed on 11/23: below ~1.5 m/s the VESC cannot start the motor (30 A spikes, fault 4)
