@@ -66,14 +66,19 @@ OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py expert imitati
 # 3. PPO (2번의 eval_open_space.py --make 필요: 모델 선택에 big 시험 트랙 2랩 완주율을 씀)
 #    기준선(11/23 이전 설정) 1회 → 추천 설정. 이후 옵션을 하나씩 바꿔 비교 (seed 2~3개)
 #    PPO는 IL 모델의 backup/f1tenth.yaml(88칸)을 그대로 쓴다
-OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u train_ppo_s2r.py --il imitation/9 --algo_idx 0 --workers 20 --baseline
-OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u train_ppo_s2r.py --il imitation/9 --algo_idx 1 --workers 20
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u train_ppo_s2r.py --il imitation/9 --algo_idx 0 --baseline
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u train_ppo_s2r.py --il imitation/9 --algo_idx 1
+#    멈췄으면 같은 명령에 --resume (5 업데이트마다 checkpoint/resume.pt 저장)
 #    하나씩 끄고 비교: --ret_norm 0 / --time_cost 0 / --log_std_steer -2 --log_std_speed -2 --uncapped_prob 0.25
 #                      / --wall_cost 0 --lat_cost 0,  랩 보너스는 --lap_bonus 2 로 켬
 OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u evaluate_s2r.py imitation/9 ppo_s2r/0 ppo_s2r/1 --workers 20
 OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py expert imitation/9 ppo_s2r/1 --workers 20
 ```
 
+- PPO 자원(이 PC): 롤아웃 프로세스 `--workers 16` + 평가 프로세스 `--eval_workers 8`. 롤아웃 프로세스는 평가 중에도
+  떠 있으므로 둘의 합으로 메모리를 잡는다(20+20은 15.5 GB를 넘음).
+- 보상 크기(expert 2랩에 기본 계수 적용, 11/23): 스텝당 진행 +1.37, 시간 −0.10(7.3%), 조향 급변·벽 여유·접지 한계는
+  각각 진행의 0.3% 이하. 잘 달리면 벌점이 거의 붙지 않고, 흔들리거나 무리할 때만 커진다.
 - PPO 로그(업데이트마다): explained variance, clip 비율, KL, 조향/속도 std, return 스케일, 충돌률, 평균 속도,
   보상 항목별 스텝당 값. `results/ppo_s2r/<idx>/train_log.pkl`, 사용한 설정은 `backup/ppo_args.yaml`.
 - 새 모델을 차에 올릴 때 `agent.yaml`의 `steer_gain_left/right`는 1.0부터 (1.35/1.12는 run 8용 보정).

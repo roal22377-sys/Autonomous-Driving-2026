@@ -3,6 +3,7 @@
 
         python -u train_ppo_s2r.py --il imitation/9 --algo_idx 1 --workers 22             # recommended
         python -u train_ppo_s2r.py --il imitation/9 --algo_idx 0 --workers 22 --baseline  # old settings
+        python -u train_ppo_s2r.py --il imitation/9 --algo_idx 1 --resume                  # continue a stopped run
 
     - starts from the IL actor (results/<il>/checkpoint/model.pt) and its obs normalizer (frozen),
       on the IL model's own task config (lidar layout, obs_dim, steering calibration)
@@ -70,7 +71,14 @@ def get_args():
     p.add_argument('--name', default='ppo_s2r')
     p.add_argument('--algo_idx', type=int, default=1)
     p.add_argument('--seed', type=int, default=1)
-    p.add_argument('--workers', type=int, default=22)
+    p.add_argument('--workers', type=int, default=16,
+                   help='simulation processes for rollouts (~0.4 GB each, they stay alive during evaluation)')
+    p.add_argument('--eval_workers', type=int, default=8,
+                   help='processes for evaluation, started while the rollout workers are alive: '
+                        '16 + 8 fits the 15.5 GB WSL training PC (20 + 20 would not)')
+    p.add_argument('--resume', action='store_true',
+                   help='continue from <save_dir>/checkpoint/resume.pt (same command + --resume)')
+    p.add_argument('--ckpt_every', type=int, default=5, help='updates between resume checkpoints')
     p.add_argument('--total_steps', type=float, default=6e6)
     p.add_argument('--n_steps', type=int, default=44000, help='rollout steps per update (all envs)')
     p.add_argument('--minibatch', type=int, default=2048)
@@ -210,15 +218,41 @@ def main():
                           and (IL.HOLDOUT in t or os.path.basename(t)[:-4] in [m + s for m in IL.EVAL_MAPS for s in ('', '_rev')])])[:args.eval_tracks]
     uncapped = tuple(s for s in IL.EVAL_SETTINGS if s[0] >= args.max_speed)       # lap time is compared on these
     policy = lambda: ({k: v.clone() for k, v in actor.state_dict().items()}, rms.mean.copy(), rms.var.copy())
-    il_succ, il_lap, il_res = IL.evaluate(args, policy(), eval_tracks, 'eval')
-    il_worst = IL.evaluate(args, policy(), eval_tracks, 'worst')[0] if args.worst_eval else float('nan')
+    eval_args = EasyDict(args)
+    eval_args.workers = args.eval_workers         # evaluation pool size (the rollout workers stay alive meanwhile)
     open_tracks = sorted(glob.glob(os.path.join(OPEN_TEST_DIR, args.open_level, '*.npz')))
     if args.open_eval and not open_tracks:
         raise FileNotFoundError(f'no open-space test tracks in {OPEN_TEST_DIR}/{args.open_level}: '
                                 'run `python -u eval_open_space.py --make` first (or --open_eval 0)')
     open_settings = tuple((c, 'center') for c in args.open_caps)
-    open_eval = lambda: IL.evaluate(args, policy(), open_tracks, 'eval', settings=open_settings)[0]
-    il_open = open_eval() if args.open_eval else float('nan')
+    open_eval = lambda: IL.evaluate(eval_args, policy(), open_tracks, 'eval', settings=open_settings)[0]
+
+    resume_path = f'{args.save_dir}/checkpoint/resume.pt'
+    state = None
+    if args.resume:
+        if not os.path.isfile(resume_path):
+            raise FileNotFoundError(f'{resume_path} missing: nothing to resume (run without --resume to start)')
+        state = torch.load(resume_path, map_location='cpu', weights_only=False)
+        changed = {k: (state['args'].get(k), v) for k, v in args.items()
+                   if k not in ('resume', 'device') and isinstance(v, (int, float, str, bool)) and state['args'].get(k) != v}
+        if changed:
+            cprint(f'[resume] settings differ from the stopped run (old, now): {changed}', color='yellow', bold=True)
+        actor.load_state_dict(state['actor'])
+        critic.load_state_dict(state['critic'])
+        opt_actor.load_state_dict(state['opt_actor'])
+        opt_critic.load_state_dict(state['opt_critic'])
+        for r, key in ((priv_rms, 'priv_rms'), (ret_rms, 'ret_rms')):
+            r.mean, r.var, r.count = state[key]
+        il_succ, il_lap, il_res, il_worst, il_open = (state['il'][k] for k in ('succ', 'lap', 'res', 'worst', 'open'))
+        best, log = state['best'], state['log']
+        np.random.set_state(state['np_rng'])
+        torch.set_rng_state(state['torch_rng'])
+        cprint(f'[resume] continuing after update {state["update"]} ({state["total"]} steps), best so far: {best["name"]}',
+               color='green', bold=True)
+    else:
+        il_succ, il_lap, il_res = IL.evaluate(eval_args, policy(), eval_tracks, 'eval')
+        il_worst = IL.evaluate(eval_args, policy(), eval_tracks, 'worst')[0] if args.worst_eval else float('nan')
+        il_open = open_eval() if args.open_eval else float('nan')
     cprint(f'[IL {args.il}] eval 2-lap success {il_succ*100:.1f}% mean uncapped 2-lap time {il_lap:.1f}s'
            + (f' | worst-case success {il_worst*100:.1f}%' if args.worst_eval else '')
            + (f' | open-space ({args.open_level}) 2-lap success {il_open*100:.1f}%' if args.open_eval else ''),
@@ -226,11 +260,12 @@ def main():
     low = [f'eval {il_succ*100:.1f}% < {args.min_il_success*100:g}%'] if il_succ < args.min_il_success - 1e-9 else []
     if args.open_eval and il_open < args.min_il_open - 1e-9:
         low.append(f'open-space {il_open*100:.1f}% < {args.min_il_open*100:g}%')
-    if low and not args.force_start:
+    if low and not args.force_start and state is None:
         raise SystemExit(f'[stop] IL policy {args.il} is not solid enough for PPO ({", ".join(low)}). '
                          'Train IL further, or pass --force_start.')
-    best = dict(succ=il_succ, res=il_res, name='IL')
-    log = [{'update': 0, 'step': 0, 'success': il_succ, 'lap': il_lap, 'worst': il_worst, 'open': il_open, 'res': il_res}]
+    if state is None:
+        best = dict(succ=il_succ, res=il_res, name='IL')
+        log = [{'update': 0, 'step': 0, 'success': il_succ, 'lap': il_lap, 'worst': il_worst, 'open': il_open, 'res': il_res}]
 
     N = args.workers
     T = args.n_steps // N
@@ -245,6 +280,23 @@ def main():
     n_updates = int(args.total_steps // args.n_steps)
     actor_start = None                             # first update that trains the actor
     bc_boost = 1.0
+    if state is not None:
+        total, update, actor_start, bc_boost = state['total'], state['update'], state['actor_start'], state['bc_boost']
+        done_stats = state['done_stats']
+        if actor_start is not None:
+            set_log_std(min(1.0, (update - actor_start) / max(1, n_updates - actor_start)))
+
+    def save_state():
+        '''everything needed to continue this run (--resume); written atomically'''
+        st = dict(args={k: v for k, v in args.items() if isinstance(v, (int, float, str, bool)) or v is None},
+                  actor=actor.state_dict(), critic=critic.state_dict(),
+                  opt_actor=opt_actor.state_dict(), opt_critic=opt_critic.state_dict(),
+                  priv_rms=(priv_rms.mean, priv_rms.var, priv_rms.count), ret_rms=(ret_rms.mean, ret_rms.var, ret_rms.count),
+                  il=dict(succ=il_succ, lap=il_lap, res=il_res, worst=il_worst, open=il_open),
+                  best=best, log=log, update=update, total=total, actor_start=actor_start, bc_boost=bc_boost,
+                  done_stats=done_stats[-200:], np_rng=np.random.get_state(), torch_rng=torch.get_rng_state())
+        torch.save(st, resume_path + '.tmp')
+        os.replace(resume_path + '.tmp', resume_path)
     T_START = time.time()
     while update < n_updates:
         t0 = time.time()
@@ -380,9 +432,9 @@ def main():
               flush=True)
 
         if (update % args.eval_every == 0 or update == n_updates) and not warm:
-            succ, lap, res = IL.evaluate(args, policy(), eval_tracks, 'eval')
+            succ, lap, res = IL.evaluate(eval_args, policy(), eval_tracks, 'eval')
             gain, n_common = IL.paired_gain(res, best['res'], uncapped)
-            worst = IL.evaluate(args, policy(), eval_tracks, 'worst')[0] if args.worst_eval else float('nan')
+            worst = IL.evaluate(eval_args, policy(), eval_tracks, 'worst')[0] if args.worst_eval else float('nan')
             worst_ok = (not args.worst_eval) or worst >= il_worst - 1e-9
             op = open_eval() if args.open_eval else float('nan')
             open_ok = (not args.open_eval) or op >= il_open - 1e-9
@@ -409,6 +461,8 @@ def main():
                 torch.save({'actor': actor.state_dict(), 'critic': critic.state_dict()}, f'{args.save_dir}/checkpoint/model.pt')
         with open(f'{args.save_dir}/train_log.pkl', 'wb') as f:
             pickle.dump(log, f)
+        if update % args.ckpt_every == 0 or update == n_updates or 'eval_success' in row:
+            save_state()
     venv.close()
     cprint(f'[done] IL {il_succ*100:.1f}% / {il_lap:.1f}s -> best: {best["name"]} {best["succ"]*100:.1f}% '
            f'({"PPO improved on IL" if os.path.isfile(f"{args.save_dir}/sim2real/actor.pt") else "no improvement: keep deploying the IL policy"})', bold=True)
