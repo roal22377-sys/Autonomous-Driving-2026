@@ -81,6 +81,8 @@ def main():
     p.add_argument('--stop_dist', type=float, default=0.6, help='[m] emergency stop distance ahead')
     p.add_argument('--rate', type=float, default=50.0, help='[Hz] publish rate')
     p.add_argument('--dry_run', action='store_true')
+    p.add_argument('--no_prompt', action='store_true',
+                   help='start right after /odom and /scan are up (3 s countdown), no Enter (circle_series.sh asked already)')
     a = p.parse_args()
     if not -0.497 <= a.steer <= 0.4415:
         print(f'[warn] steering {a.steer:+.3f} is past full lock (+0.4415 left / -0.497 right); clipped')
@@ -138,12 +140,14 @@ def main():
                 print('[error] no /odom or /scan for 10 s. Is bringup running?')
                 return
         print(f'[ready] free space ahead {state["front"]:.1f} m. In the keyboard tab press r (release), not s.')
-        print('Put the car in the middle of the free area, then press Enter to start (Ctrl+C = stop) ',
-              end='', flush=True)
-        while not select.select([sys.stdin], [], [], 1.0 / a.rate)[0]:
-            send(0.0, 0.0)
-            rclpy.spin_once(node, timeout_sec=0.0)
-        sys.stdin.readline()
+        if not a.no_prompt:
+            print('Put the car in the middle of the free area, then press Enter to start (Ctrl+C = stop) ',
+                  end='', flush=True)
+            while not select.select([sys.stdin], [], [], 1.0 / a.rate)[0]:
+                send(0.0, 0.0)
+                rclpy.spin_once(node, timeout_sec=0.0)
+            sys.stdin.readline()
+        print('[start] driving in 3 s')
         t_cd = time.monotonic() + 3.0
         for i in (3, 2, 1):
             print(f'  {i}...')

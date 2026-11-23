@@ -20,11 +20,13 @@ for s in "${STEERS[@]}"; do
   echo
   echo "================ steering $s ================"
   python3 tools/circle_test.py --steer "$s" --dry_run "${OPTS[@]}"
-  read -p "Enter = run, s = skip, q = quit: " ans
+  if awk "BEGIN{exit !($s > 0)}"; then dir="LEFT turn"; else dir="RIGHT turn"; fi
+  echo ">>> $dir, steering $s. Put the car in the middle of the free area, TELEOP tab: r (released)."
+  read -p ">>> Enter = drive now (3 s countdown), s = skip, q = quit: " ans
   case "$ans" in
     q) break ;;
     s) continue ;;
   esac
-  python3 tools/circle_test.py --steer "$s" "${OPTS[@]}" || true
+  python3 tools/circle_test.py --steer "$s" --no_prompt "${OPTS[@]}" || true
 done
 echo "[done] circle series finished. On the PC: tools/drive_session.sh --finish --circle"
