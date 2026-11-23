@@ -2,6 +2,7 @@
 
 다른 PC에서도 그대로 따라 할 수 있게 정리한 문서입니다(2026-11-23 기준).
 학습 절차와 설정의 이유는 [`TRAINING_S2R.md`](TRAINING_S2R.md)를 보세요.
+IL 방법 정리는 [`IL_METHODS_1124.md`](IL_METHODS_1124.md), PPO 보상과 계획은 [`PPO_PLAN_1124.md`](PPO_PLAN_1124.md)에 있습니다.
 
 - 모든 명령은 **`src/f1tenth` 폴더에서** 실행합니다(설정 파일과 `results/`를 상대 경로로 찾습니다).
 - 앞에 `OMP_NUM_THREADS=1`을 붙입니다. 프로세스 여러 개가 각자 스레드를 늘려 CPU를 서로 뺏는 것을 막습니다.
