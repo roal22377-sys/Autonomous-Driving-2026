@@ -36,9 +36,9 @@ class KeyToAck(Node):
   def _process_key_vel(self, msg):
     self.speed_queue.append(msg.linear.x)
     if msg.angular.z >= EPS:
-      self.steering_queue.append(0.497)
+      self.steering_queue.append(0.6)    # past both ends: vesc_driver clamps to servo_max 1.0 (left) / servo_min 0.06 (right) = full lock
     elif msg.angular.z <= -EPS:
-      self.steering_queue.append(-0.497)
+      self.steering_queue.append(-0.6)
     else:
       self.steering_queue.append(0.0)  
 
