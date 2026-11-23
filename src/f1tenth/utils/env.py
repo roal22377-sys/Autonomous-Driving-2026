@@ -23,7 +23,7 @@ from utils.observation import get_obs_config, make_observation, add_obs_noise, A
     get_kick_config, apply_start_kick
 
 EPS = 1e-8
-MAX_TRACK_CACHE = 24
+MAX_TRACK_CACHE = 4       # tracks kept per process (~6 MB each, reloading one takes ~0.07 s); was 24 (+0.15 GB per worker)
 
 def unnormalize_speed(value, minimum, maximum):
     temp_a = (maximum - minimum)/2.0

@@ -55,6 +55,9 @@ EXPERT = {'a_lat': 3.5, 'lad_base': 0.6, 'lad_gain': 0.22, 'merge_dist': 0.6}
 # the expert corners at this share of the episode's grip (mu * g; sim tires saturate there since 11/23).
 # A fixed 3.5 m/s^2 failed on low-grip episodes (mu 0.40-0.45: 62 % 2-lap success, 11/23 check).
 EXPERT_GRIP_SHARE = 0.6
+# ... and never drives faster than its commanded steering allows at this share of the grip (merging after a
+# start or a disturbance). 11/23, expert only, 2 laps: 94.7 % -> 100 % on the eval tracks, open-space 87.5 % -> 97.7 %
+EXPERT_STEER_GRIP_SHARE = 0.7
 
 
 def expert_kwargs(env):
@@ -65,7 +68,8 @@ def expert_kwargs(env):
     '''
     grip = float(env.params['mu']) * 9.81
     a_max = float(env.params['a_max'])
-    return dict(EXPERT, a_lat=EXPERT_GRIP_SHARE * grip, a_acc=a_max, a_brake=min(a_max, EXPERT_GRIP_SHARE * grip))
+    return dict(EXPERT, a_lat=EXPERT_GRIP_SHARE * grip, a_acc=a_max, a_brake=min(a_max, EXPERT_GRIP_SHARE * grip),
+                a_lat_steer=EXPERT_STEER_GRIP_SHARE * grip)
 STEER_LOSS_WEIGHT = 2.0         # steering errors matter more than speed errors
 
 
@@ -82,9 +86,22 @@ def get_args(argv=None):
     p.add_argument('--name', default='imitation')
     p.add_argument('--algo_idx', type=int, default=7)
     p.add_argument('--seed', type=int, default=1)
-    p.add_argument('--workers', type=int, default=22)
+    p.add_argument('--workers', type=int, default=20,
+                   help='simulation processes (~0.4 GB each): 20 workers peaked at 9.1 GB + data 2.2 GB on the 15.5 GB WSL PC')
+    p.add_argument('--bc_threads', type=int, default=16, help='torch threads for BC (WSL sees 16 cores x 2)')
     p.add_argument('--expert_steps', type=float, default=1.2e6, help='DART expert rollout steps')
-    p.add_argument('--dagger_iters', type=int, default=3)
+    p.add_argument('--dagger_iters', type=int, default=20,
+                   help='maximum DAgger rounds; the early stop below usually ends the run sooner')
+    # early stop (11/23): stop when the best score has not improved noticeably for `patience` rounds in a row
+    p.add_argument('--patience', type=int, default=2, help='rounds in a row without a noticeable improvement')
+    p.add_argument('--min_rounds', type=int, default=3, help='never stop before this round')
+    p.add_argument('--min_gain', type=float, default=0.01, help='score gain that counts as an improvement (0.01 = 1 %p)')
+    p.add_argument('--lap_gain', type=float, default=0.01,
+                   help='at an equal score: paired 2-lap time gain that counts as an improvement (0.01 = 1 %% faster)')
+    # open-space check in the round score (eval_open_space.py test tracks: a wide dead-end bay at every corner)
+    p.add_argument('--open_eval', type=int, default=1, help='score = mean of eval and open-space 2-lap success')
+    p.add_argument('--open_level', default='big')
+    p.add_argument('--open_caps', nargs='+', type=float, default=[8.0, 5.0], help='speed caps of the open-space runs')
     p.add_argument('--dagger_steps', type=float, default=6e5, help='steps per DAgger iteration')
     p.add_argument('--dart_std', type=float, default=0.15)
     p.add_argument('--grad_steps', type=int, default=15000, help='gradient steps after each data round')
@@ -266,7 +283,9 @@ def eval_worker(job):
 
 # (speed cap [m/s], start): uncapped from the centerline (lap time), uncapped and car-practice cap
 # from random starts anywhere across the track with a heading error (merging onto the race line)
-EVAL_SETTINGS = ((8.0, 'center'), (8.0, 'random'), (3.0, 'random'))
+# the cap is an upper limit: within it the policy picks its own speed (0.5-8 m/s) for every track and corner.
+# 8 = no limit (lap time is compared there), 5 = the car's agent.yaml speed_limit these days (was 3 up to run 8)
+EVAL_SETTINGS = ((8.0, 'center'), (8.0, 'random'), (5.0, 'random'))
 EVAL_CAPS = tuple(c for c, _ in EVAL_SETTINGS)
 
 
@@ -283,9 +302,44 @@ def evaluate(args, policy, tracks, mode='eval', settings=EVAL_SETTINGS):
     return succ, lap, res
 
 
+def paired_gain(res, ref_res, settings, relative=False):
+    '''
+        time saved (ref - candidate) over the runs of `settings` both finished, mean [s] or relative
+        (fraction of the ref time), and their number. Means over different finished tracks are not comparable.
+    '''
+    ok_c = {r[0]: r[2] for r in res if r[1] and any(r[0].endswith(f'@{c:g}/{st}') for c, st in settings)}
+    ok_r = {r[0]: r[2] for r in ref_res if r[1]}
+    common = sorted(set(ok_c) & set(ok_r))
+    if not common:
+        return float('nan'), 0
+    d = [(ok_r[k] - ok_c[k]) / ok_r[k] if relative else ok_r[k] - ok_c[k] for k in common]
+    return float(np.mean(d)), len(common)
+
+
+UNCAPPED = tuple(s for s in EVAL_SETTINGS if s[0] >= 8.0)
+
+
+def judge_round(entry, best, args):
+    '''
+        (better, noticeable, text) for a round against the best round so far.
+        better:     higher score, or the same score and faster on the runs both finished -> saved as best
+        noticeable: score + min_gain, or the same score and lap_gain faster -> resets the early-stop count
+    '''
+    if best is None:
+        return True, True, 'first round'
+    ds = entry['score'] - best['score']
+    g, n = paired_gain(entry['res'], best['res'], UNCAPPED, relative=True)
+    faster = np.isfinite(g) and g > 0
+    better = ds > 1e-9 or (abs(ds) <= 1e-9 and faster)
+    noticeable = ds >= args.min_gain - 1e-9 or (ds >= -1e-9 and np.isfinite(g) and g >= args.lap_gain)
+    text = (f"score {ds*100:+.1f}%p vs best (round {best['round']}), "
+            f"{g*100:+.1f}% faster on {n} uncapped runs both finished" if n else f"score {ds*100:+.1f}%p vs best")
+    return better, noticeable, text
+
+
 # ------------------------------------------------------------------ behavior cloning
 def train_bc(args, actor, O, Y, rms, grad_steps, lr, Nn=None):
-    torch.set_num_threads(args.workers)
+    torch.set_num_threads(args.bc_threads)
     # normalize in chunks straight into float32: rms.normalize on everything at once makes a float64 copy
     # (6.8 GB at 10.7M samples; IL run 8 was OOM-killed at 20.8 of 23 GB)
     X = torch.empty((len(O), O.shape[1]), dtype=torch.float32)
@@ -359,6 +413,15 @@ def main():
     eval_tracks = sorted([t for t in all_tracks if variant_map(t) in EVAL_MAPS
                           and (HOLDOUT in t or os.path.basename(t)[:-4] in [m + s for m in EVAL_MAPS for s in ('', '_rev')])])
     eval_tracks = eval_tracks[:args.eval_tracks]
+    open_tracks, open_settings = [], ()
+    if args.open_eval:
+        from eval_open_space import TEST_DIR
+        open_tracks = sorted(glob.glob(os.path.join(TEST_DIR, args.open_level, '*.npz')))
+        open_settings = tuple((c, 'center') for c in args.open_caps)
+        if not open_tracks:
+            raise FileNotFoundError(f'no open-space test tracks in {TEST_DIR}/{args.open_level}: run '
+                                    '`python -u eval_open_space.py --make` first (or --open_eval 0)')
+        cprint(f'[data] open-space check: {len(open_tracks)} {args.open_level} tracks x caps {list(args.open_caps)}, 2 laps', bold=True)
     cprint(f'[data] {len(train_tracks)} training tracks, {len(eval_tracks)} eval tracks '
            f'(original geometry + held-out {HOLDOUT}), both directions', bold=True)
 
@@ -406,6 +469,15 @@ def main():
         data_O, data_Y, data_N = [O], [Y], [Nn]
         save_round(0, O, Y, Nn)
 
+    # best round so far and rounds without a noticeable improvement (replayed from the log on --resume)
+    best, stale = None, 0
+    for e in log:
+        e.setdefault('score', e.get('success', 0.0))
+        b, n, _ = judge_round(e, best, args)
+        stale = 0 if n else stale + 1
+        if b:
+            best = e
+
     s2r = args.sim2real
     eval_desc = (f"delay {s2r['steer_delay_nominal']} s, left steer {s2r.get('steer_left_max_nominal', args.max_steer)} rad, a_max {s2r['a_max_nominal']}, noise, "
                  f"start/cap {EVAL_SETTINGS}")
@@ -415,23 +487,40 @@ def main():
         t0 = time.time()
         vl = train_bc(args, actor, Oall, Yall, rms, args.grad_steps,
                       args.lr if (rnd == 0 and not args.init) else args.lr * 0.5, Nall)
+        n_data = len(Oall)
+        del Oall, Yall, Nall            # the merged copy is only for BC; free it before evaluation (15 GB PC)
         policy = ({k: v.clone() for k, v in actor.state_dict().items()}, rms.mean.copy(), rms.var.copy())
         save(args, actor, rms, tag=f'round{rnd}')
         succ, lap, res = evaluate(args, policy, eval_tracks, 'eval')
-        cprint(f'[round {rnd}] data {len(Oall)} | bc val {vl:.5f} ({time.time()-t0:.0f}s) | '
+        op = evaluate(args, policy, open_tracks, 'eval', settings=open_settings)[0] if args.open_eval else float('nan')
+        score = 0.5 * (succ + op) if args.open_eval else succ
+        cprint(f'[round {rnd}] data {n_data} | bc val {vl:.5f} ({time.time()-t0:.0f}s) | '
                f'EVAL ({eval_desc}): 2-lap success {succ*100:.1f}% '
-               f'mean uncapped 2-lap time {lap:.1f}s',
+               f'mean uncapped 2-lap time {lap:.1f}s'
+               + (f' | open-space ({args.open_level}) 2-lap success {op*100:.1f}% | score {score*100:.1f}' if args.open_eval else ''),
                color='cyan', bold=True)
         for r in res:
             if not r[1]:
                 print(f'      fail {r[0]:28s} {r[2]:6.1f}s')
-        log.append({'round': rnd, 'data': len(Oall), 'val': vl, 'success': succ, 'lap': lap, 'res': res})
-        if not log[:-1] or (succ, -np.nan_to_num(lap, nan=1e9)) >= max((l['success'], -np.nan_to_num(l['lap'], nan=1e9)) for l in log[:-1]):
+        entry = {'round': rnd, 'data': n_data, 'val': vl, 'success': succ, 'lap': lap, 'open': op, 'score': score, 'res': res}
+        log.append(entry)
+        better, noticeable, why = judge_round(entry, best, args)
+        stale = 0 if noticeable else stale + 1
+        cprint(f'[round {rnd}] {why} -> {"noticeable improvement" if noticeable else f"no noticeable improvement ({stale}/{args.patience})"}',
+               color='green' if noticeable else 'yellow')
+        if better:
+            best = entry
             save(args, actor, rms)
             cprint(f'[round {rnd}] saved as best -> {args.save_dir}/sim2real', color='green')
         with open(f'{args.save_dir}/train_log.pkl', 'wb') as f:
             pickle.dump(log, f)
         if rnd == args.dagger_iters:
+            cprint(f'[stop] reached the maximum of {args.dagger_iters} DAgger rounds; best is round {best["round"]}', bold=True)
+            break
+        if rnd >= args.min_rounds and stale >= args.patience:
+            cprint(f'[stop] early stop after round {rnd}: {args.patience} rounds in a row without a noticeable improvement '
+                   f'(score +{args.min_gain*100:g}%p or {args.lap_gain*100:g}% faster). Best is round {best["round"]} '
+                   f'(score {best["score"]*100:.1f}) -> {args.save_dir}/sim2real', bold=True)
             break
         # DAgger: the student drives (expert drives a fraction beta of the episodes), expert labels
         beta = max(0.5 ** (rnd + 1), args.min_beta)

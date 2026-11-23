@@ -116,6 +116,10 @@ def get_args():
     p.add_argument('--open_level', default='big', help='eval_open_space.py level used for model selection')
     p.add_argument('--open_caps', nargs='+', type=float, default=[5.0, 8.0], help='speed caps for that check')
     p.add_argument('--baseline', action='store_true', help='settings before 11/23 (see BASELINE)')
+    # start only from a solid IL policy (11/23 decision): PPO refines it, it should not have to repair it
+    p.add_argument('--min_il_success', type=float, default=0.98, help='IL 2-lap success on the eval tracks')
+    p.add_argument('--min_il_open', type=float, default=0.95, help='IL 2-lap success on the open-space tracks')
+    p.add_argument('--force_start', action='store_true', help='start PPO even below those')
     a = p.parse_args()
     if a.baseline:
         vars(a).update(BASELINE)
@@ -154,20 +158,6 @@ def make_env(seed, cfg):
         else:
             setattr(env, k, v)
     return env
-
-
-def paired_gain(res, ref_res, settings):
-    '''
-        mean time saved [s] (ref - candidate) over the runs of `settings` that both finished, and their
-        number. Averages over different finished tracks are not comparable; this is.
-    '''
-    tag = lambda r: r[0]
-    ok_c = {tag(r): r[2] for r in res if r[1] and any(tag(r).endswith(f'@{c:g}/{s}') for c, s in settings)}
-    ok_r = {tag(r): r[2] for r in ref_res if r[1]}
-    common = sorted(set(ok_c) & set(ok_r))
-    if not common:
-        return float('nan'), 0
-    return float(np.mean([ok_r[k] - ok_c[k] for k in common])), len(common)
 
 
 def main():
@@ -233,6 +223,12 @@ def main():
            + (f' | worst-case success {il_worst*100:.1f}%' if args.worst_eval else '')
            + (f' | open-space ({args.open_level}) 2-lap success {il_open*100:.1f}%' if args.open_eval else ''),
            color='cyan', bold=True)
+    low = [f'eval {il_succ*100:.1f}% < {args.min_il_success*100:g}%'] if il_succ < args.min_il_success - 1e-9 else []
+    if args.open_eval and il_open < args.min_il_open - 1e-9:
+        low.append(f'open-space {il_open*100:.1f}% < {args.min_il_open*100:g}%')
+    if low and not args.force_start:
+        raise SystemExit(f'[stop] IL policy {args.il} is not solid enough for PPO ({", ".join(low)}). '
+                         'Train IL further, or pass --force_start.')
     best = dict(succ=il_succ, res=il_res, name='IL')
     log = [{'update': 0, 'step': 0, 'success': il_succ, 'lap': il_lap, 'worst': il_worst, 'open': il_open, 'res': il_res}]
 
@@ -385,7 +381,7 @@ def main():
 
         if (update % args.eval_every == 0 or update == n_updates) and not warm:
             succ, lap, res = IL.evaluate(args, policy(), eval_tracks, 'eval')
-            gain, n_common = paired_gain(res, best['res'], uncapped)
+            gain, n_common = IL.paired_gain(res, best['res'], uncapped)
             worst = IL.evaluate(args, policy(), eval_tracks, 'worst')[0] if args.worst_eval else float('nan')
             worst_ok = (not args.worst_eval) or worst >= il_worst - 1e-9
             op = open_eval() if args.open_eval else float('nan')
