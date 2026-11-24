@@ -15,7 +15,7 @@ import select
 import sys
 import time
 
-CENTER = 0.558      # steering_angle_to_servo_offset in vesc.yaml
+CENTER = 0.567      # steering_angle_to_servo_offset in vesc.yaml (11/24; was 0.558)
 # (servo value, label, questions); questions: 'more' = moved further than the previous value,
 # 'gap' = gap left to the mechanical stop, 'buzz' = servo straining / buzzing, 'cm' = stick tip offset
 SEQUENCE = [
