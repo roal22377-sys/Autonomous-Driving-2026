@@ -171,6 +171,9 @@ def get_args():
     p.add_argument('--crash_target', default='il', choices=('il', 'best'),
                    help="success the collision cost aims at: 'il' = the IL policy's (fixed); 'best' = ratchet, the "
                         "best saved model's (starts at IL, only goes up, so completion keeps being pushed past IL)")
+    p.add_argument('--crash_start', type=float, default=None,
+                   help='collision cost at the start (default --collision_cost, which stays the floor), e.g. the cost '
+                        'the --init checkpoint ended with, so its critic matches the rewards')
     p.add_argument('--crash_up', type=float, default=1.5)
     p.add_argument('--crash_down', type=float, default=0.8)
     p.add_argument('--crash_max', type=float, default=2000.0)
@@ -231,7 +234,7 @@ def merge_sim_override(il_task, override, save_dir):
 
 def env_config(args):
     '''the reward / training settings every worker applies to its env (spawned workers do not see args)'''
-    return dict(PROGRESS_COEFF=args.progress_coeff, COLLISION_COST=args.collision_cost,
+    return dict(PROGRESS_COEFF=args.progress_coeff, COLLISION_COST=args.crash_start or args.collision_cost,
                 STEER_RATE_COST=args.steer_rate_cost, TIME_COST=args.time_cost, WALL_COST=args.wall_cost,
                 WALL_MARGIN=args.wall_margin, LAT_COST=args.lat_cost, LAT_GRIP_SHARE=args.lat_grip_share,
                 LAP_BONUS=args.lap_bonus, uncapped_prob=args.uncapped_prob,
@@ -388,16 +391,15 @@ def main():
     n_updates = int(args.total_steps // args.n_steps)
     actor_start = None                             # first update that trains the actor
     bc_boost = 1.0
-    crash_cost = args.collision_cost                # adapted after evaluations (--crash_adapt)
+    crash_cost = args.crash_start or args.collision_cost   # adapted after evaluations (--crash_adapt)
     bc_dim = torch.tensor([1.0, args.bc_speed])   # BC weight per action (steering, speed)
     tstat = {}                                     # track basename -> [decayed episodes, decayed failures]
     if state is not None:
         total, update, actor_start, bc_boost = state['total'], state['update'], state['actor_start'], state['bc_boost']
         done_stats = state['done_stats']
         tstat = state.get('tstat', {})
-        crash_cost = state.get('crash_cost', args.collision_cost)
-        if crash_cost != args.collision_cost:
-            venv.set_attr('COLLISION_COST', crash_cost)
+        crash_cost = state.get('crash_cost', crash_cost)
+        venv.set_attr('COLLISION_COST', crash_cost)          # the workers started with --crash_start / --collision_cost
         if actor_start is not None:
             set_log_std(min(1.0, (update - actor_start) / max(1, n_updates - actor_start)))
     if args.track_focus > 0 and tstat:              # resumed: keep the failure-weighted track sampling

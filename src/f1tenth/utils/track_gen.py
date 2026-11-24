@@ -374,7 +374,7 @@ def _job(job):
 
 
 if __name__ == '__main__':
-    # python -m utils.track_gen <variants_per_map> [workers]     generate / bring up to date
+    # python -m utils.track_gen [variants_per_map=16] [workers]  generate / bring up to date
     # python -m utils.track_gen --check                          only report stale files
     import sys
     import multiprocessing as mp
@@ -386,7 +386,7 @@ if __name__ == '__main__':
         print(f'generator {generator_signature()}: {len(files) - len(old)} up to date, {len(old)} stale'
               + (f' (e.g. {os.path.basename(old[0])})' if old else ''))
         sys.exit(1 if old or not files else 0)
-    per_map = int(sys.argv[1]) if len(sys.argv) > 1 else 6
+    per_map = int(sys.argv[1]) if len(sys.argv) > 1 else 16    # 11/24: 6 -> 16 (PPO memorized the 5 training variants per layout)
     workers = int(sys.argv[2]) if len(sys.argv) > 2 else 16
     jobs = []
     for m in MAPS:

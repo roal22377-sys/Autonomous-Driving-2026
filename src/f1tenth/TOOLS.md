@@ -24,7 +24,7 @@ tools/setup_train_env.sh
 # 3) 트랙 만들기 (git에 없음, PC마다 한 번. 같은 코드면 어느 PC에서나 같은 트랙이 나옴)
 cd src/f1tenth
 PY=~/venv/f1tenth/bin/python
-OMP_NUM_THREADS=1 $PY -m utils.track_gen 6 20                 # 학습 트랙 322개, 약 1~2분
+OMP_NUM_THREADS=1 $PY -m utils.track_gen 16 20                # 트랙 782개 (학습 736 + 시험용 w105 46), 약 5분
 OMP_NUM_THREADS=1 $PY -u eval_open_space.py --make --workers 20   # 막다른 공간 시험 트랙 132개, 약 1분
 $PY -m utils.track_gen --check                                 # "322 up to date, 0 stale"이면 준비 끝
 ```
@@ -98,6 +98,7 @@ OMP_NUM_THREADS=1 nohup $PY -u train_ppo_s2r.py --il imitation/11 --algo_idx 2 -
 | `--bc_start` / `--bc_end` | 0.5 / 0.02 | IL 쪽으로 당기는 힘 |
 | `--crash_adapt` / `--crash_up` / `--crash_down` / `--crash_max` | 1 / 1.5 / 0.8 / 2000 | 평가 완주율이 IL보다 2 %p 넘게 낮으면 충돌 벌점 ×1.5, IL 이상이면 ×0.8 (500 아래로는 안 내림) |
 | `--crash_target` | il | 충돌 벌점의 목표 완주율. `il` = IL 완주율 고정, `best` = 래칫(저장된 최고 모델의 완주율, 올라가기만 함) |
+| `--crash_start` | 없음 | 시작할 때 충돌 벌점 (없으면 `--collision_cost`, 하한은 계속 `--collision_cost`) |
 | `--init` | 없음 | PPO 체크포인트에서 시작 (예: `ppo_s2r/2/checkpoint/model_1760000.pt`). 저장 기준은 계속 `--il`과 비교 |
 | `--baseline_from` | 없음 | 같은 `--il`로 돌린 이전 PPO의 IL 기준 평가 재사용 (약 8분 절약) |
 | `--bc_adapt` | 0 | 1이면 완주율 하락 때 IL 쪽 당김을 2배씩 (PPO 2 방식) |
@@ -213,7 +214,7 @@ git commit -m "IL run 11 model" && git tag model-il11 && git push && git push --
 |---|---|
 | `It could not load track ...` | `yamldataclassconfig`가 2.x. `pip install yamldataclassconfig==1.5.0` (설치 스크립트는 1.5.0으로 고정) |
 | `No module named 'wandb'` | `main_il.py`가 import함. `pip install wandb` |
-| `... tracks were made by an older track generator` | 트랙 재생성: `$PY -m utils.track_gen 6 <workers>` |
+| `... tracks were made by an older track generator` | 트랙 재생성: `$PY -m utils.track_gen 16 <workers>` |
 | `no open-space test tracks` | `$PY -u eval_open_space.py --make` |
 | `IL policy ... is not solid enough for PPO` | IL이 98%/95% 미만. IL을 더 돌리거나, 더 개선되지 않으면 `--force_start` |
 | 학습이 갑자기 죽음 (`Killed`), 스왑 사용 급증 | 메모리 부족. `--workers`(PPO는 `--eval_workers`도), IL은 `--max_data`를 낮춤 |

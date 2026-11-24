@@ -20,7 +20,7 @@
 | 차 성능 | a_max 2.5~3.5 m/s² (실측 2.7), 마찰 ×0.85~1.1, 차 크기 0.30×0.60 m | `configs/task/dynamic.yaml` |
 | 서보 모델 | bang-bang(평균 35% 덜 꺾임)을 위치 제어 + 속도 제한으로 수정 | `installation/.../dynamic_models.py` `pid_steer` |
 | 센서 노이즈 | 실측 기반: 라이다 0.008 m, 무효값 0.3%, 튀는 값, 마운트 ±1°, odom 0.06 m/s, 에피소드마다 ×0.5~2 | `utils/lidar.py`, `f1tenth.yaml` |
-| 트랙 | 23개 맵 × 정/역방향 × (원래 폭 + 무작위 폭 6개) = 322개. 폭 1.7~4.4 m, 열린 옆 공간 | `utils/track_gen.py` (`python -m utils.track_gen 6 22`) |
+| 트랙 | 23개 맵 × 정/역방향 × (원래 폭 + 무작위 변형 16개) = 782개 (11/24 PPO 4부터, 그 전 6개 = 322개). 폭 1.7~4.4 m, 열린 옆 공간 | `utils/track_gen.py` (`python -m utils.track_gen 16 20`) |
 | 레이싱 라인 | 최소 곡률 → 랩 타임 직접 최소화(late apex 등). 벽과 0.55 m 여유 | `utils/raceline.py` |
 | expert | 레이싱 라인 추종 + 조향 지연 보정(보내놓은 명령으로 위치 예측) + 라인 이탈 시 감속 합류 | `utils/rule_based.py` `RacelinePlanner` |
 | 관측 (76) | 라이다 54 + 속도 1 + **최근 명령 10개(20)** + **속도 상한 1** | `utils/observation.py`, `agent_node.py` |
@@ -50,7 +50,7 @@ expert(11/23): 명령한 조향으로 도는 데 필요한 횡가속이 접지�
 
 ```bash
 # 0. 트랙: 생성기가 바뀐 파일만 다시 만든다 (전체 약 1~3분). 상태만 보려면 --check
-OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -m utils.track_gen 6 20
+OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -m utils.track_gen 16 20
 OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py --make --workers 20   # 열린 공간 시험 트랙
 
 # 1. IL run 11 (라이다 88칸)
