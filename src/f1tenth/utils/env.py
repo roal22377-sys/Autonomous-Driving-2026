@@ -108,10 +108,18 @@ class F1Wrapper(gym.Wrapper):
     WORST_END = {'steer_delay': 1, 'speed_delay': 1, 'a_max': 0, 'mu_scale': 0, 'noise_scale': 1,
                  'steer_scale_left': 0, 'steer_scale_right': 0, 'steer_left_max': 0}
 
+    # training episodes with several gaps at their hard side at once (PPO 5): with HARD_PROB, every sim2real
+    # entry of the episode is drawn from the HARD_FRAC of its range next to the harder end (WORST_END)
+    HARD_PROB = 0.0
+    HARD_FRAC = 0.4
+
     def _rand(self, key, default):
         '''sample a range (train), take its harder end (worst) or the nominal value (eval) of a sim2real entry.'''
         if self.sim_mode == 'train' and key in self.s2r:
             lo, hi = self.s2r[key]
+            if getattr(self, 'hard', False) and key in self.WORST_END:
+                span = (hi - lo) * self.HARD_FRAC
+                lo, hi = (hi - span, hi) if self.WORST_END[key] == 1 else (lo, lo + span)
             return float(self.noise_rng.uniform(lo, hi))
         if self.sim_mode == 'worst' and key in self.s2r and key in self.WORST_END:
             return float(self.s2r[key][self.WORST_END[key]])
@@ -200,12 +208,15 @@ class F1Wrapper(gym.Wrapper):
         self.yaw_frenet = poses_phi
 
     def reset(self, **kwargs):
+        self.hard = self.sim_mode == 'train' and self.HARD_PROB > 0 and self.noise_rng.random() < self.HARD_PROB
         if self.obs_noise:
             # per-episode speed reading error, like an imperfect odom calibration
             self.speed_scale = self.noise_rng.uniform(*self.obs_cfg['speed']['scale_range'])
             lid = self.obs_cfg['lidar']
             if self.sim_mode == 'worst':
                 k = float(self.s2r.get('noise_scale', [1.0, 1.0])[self.WORST_END['noise_scale']])
+            elif self.sim_mode == 'train' and 'noise_scale' in self.s2r:
+                k = self._rand('noise_scale', 1.0)          # one uniform draw as before (hard episodes: the noisy end)
             else:
                 k = float(self.noise_rng.uniform(*self.s2r.get('noise_scale', [1.0, 1.0])))
             rot = lid.get('rotation_deg', 0.0)
@@ -400,6 +411,7 @@ class F1Wrapper(gym.Wrapper):
         info['lap_split_times'] = list(self.lap_times)
         info['success'] = self.success
         info['stuck'] = self.stuck
+        info['hard'] = self.hard
         info['track_file'] = self.track_file
         info['privileged'] = self.privileged()
         return obs, reward, terminate, truncate, info

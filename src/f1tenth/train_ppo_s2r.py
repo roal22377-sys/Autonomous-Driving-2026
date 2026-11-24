@@ -69,7 +69,7 @@ from algorithm.common.models import Critic, LOG_STD_MIN
 REWARD_KEYS = ('forward_reward', 'collision_cost', 'steer_cost', 'time_cost', 'wall_cost', 'lat_cost', 'lap_bonus')
 
 # settings before 11/23, for the baseline run (--baseline)
-BASELINE = dict(track_focus=0.0, stuck_time=0.0, bc_speed=1.0, ret_norm=0, time_cost=0.0, steer_rate_cost=5.0, wall_cost=0.0, lat_cost=0.0, lap_bonus=0.0,
+BASELINE = dict(hard_prob=0.0, open_train_share=0.0, track_focus=0.0, stuck_time=0.0, bc_speed=1.0, ret_norm=0, time_cost=0.0, steer_rate_cost=5.0, wall_cost=0.0, lat_cost=0.0, lap_bonus=0.0,
                 log_std_steer=-2.0, log_std_speed=-2.0, log_std_decay=0.0, uncapped_prob=0.25,
                 lr_end=5e-5, max_kl=0.02, bc_end=0.05, warmup_ev=-1e9, bc_adapt=0, worst_eval=0)
 
@@ -132,6 +132,13 @@ def get_args():
     p.add_argument('--lap_bonus', type=float, default=0.0, help='per second faster than the expert-pace lap (try 2)')
     p.add_argument('--uncapped_prob', type=float, default=0.5,
                    help='share of training episodes without a speed cap (a capped car gets no speed signal)')
+    p.add_argument('--hard_prob', type=float, default=0.0,
+                   help='share of training episodes with every sim2real gap drawn from its harder side at once '
+                        '(delay, grip, accel, steering, noise; PPO 5: 0.25). The worst-case check needs these together')
+    p.add_argument('--hard_frac', type=float, default=0.4, help='... the part of each range next to its harder end')
+    p.add_argument('--open_train_share', type=float, default=0.0,
+                   help='share of training episodes on open-space training tracks (a big dead-end bay at every corner, '
+                        'eval_open_space.py --make_train; PPO 5: 0.2). The open-space test tracks stay unseen')
     p.add_argument('--track_focus', type=float, default=3.0,
                    help='training track weight = 1 + this x the track\'s recent failure rate (0 = uniform)')
     p.add_argument('--stuck_time', type=float, default=3.0,
@@ -238,23 +245,51 @@ def env_config(args):
                 STEER_RATE_COST=args.steer_rate_cost, TIME_COST=args.time_cost, WALL_COST=args.wall_cost,
                 WALL_MARGIN=args.wall_margin, LAT_COST=args.lat_cost, LAT_GRIP_SHARE=args.lat_grip_share,
                 LAP_BONUS=args.lap_bonus, uncapped_prob=args.uncapped_prob,
-                STUCK_TIME=args.stuck_time, STUCK_DIST=args.stuck_dist, BACKWARD_DIST=args.backward_dist)
+                STUCK_TIME=args.stuck_time, STUCK_DIST=args.stuck_dist, BACKWARD_DIST=args.backward_dist,
+                HARD_PROB=args.hard_prob, HARD_FRAC=args.hard_frac, open_train=args.open_train_share > 0)
 
 
-def track_weights(tstat, focus, prior=2.0):
-    '''sampling weight per training track from its (decayed) episode / failure counts, shrunk to the overall rate'''
+def open_train_tracks():
+    from eval_open_space import TRAIN_DIR
+    return sorted(glob.glob(os.path.join(TRAIN_DIR, '*.npz')))
+
+
+def training_tracks(open_train):
+    '''generated training tracks (held-out variant excluded) + the open-space training tracks if used'''
+    tracks = [t for t in IL.list_variants(IL.MAPS) if IL.HOLDOUT not in t]
+    return tracks + (open_train_tracks() if open_train else [])
+
+
+def base_track_weights(args):
+    '''{track basename: weight} so that the open-space training tracks get --open_train_share of the episodes'''
+    reg = [os.path.basename(t) for t in training_tracks(False)]
+    base = {n: 1.0 for n in reg}
+    if args.open_train_share > 0:
+        op = [os.path.basename(t) for t in open_train_tracks()]
+        s = args.open_train_share
+        base.update({n: s / (1.0 - s) * len(reg) / len(op) for n in op})
+    return base
+
+
+def track_weights(tstat, focus, prior=2.0, base=None):
+    '''sampling weight per training track from its (decayed) episode / failure counts, shrunk to the overall rate;
+    with `base` ({track: weight}, --open_train_share) every track is listed and its weight is base x that'''
     n = sum(v[0] for v in tstat.values())
     g = sum(v[1] for v in tstat.values()) / n if n > 0 else 0.0
-    w = {k: 1.0 + focus * (v[1] + prior * g) / (v[0] + prior) for k, v in tstat.items()}
+    rate = lambda k: (tstat[k][1] + prior * g) / (tstat[k][0] + prior) if k in tstat else g
+    if base is not None:
+        return {k: b * (1.0 + focus * rate(k)) for k, b in base.items()}, 1.0 + focus * g, g
+    w = {k: 1.0 + focus * rate(k) for k in tstat}
     return w, 1.0 + focus * g, g
 
 
 def make_env(seed, cfg):
     args = IL.get_args([])
     args.seed = seed
-    env = F1Wrapper(args, IL.MAPS, obs_noise=True, sim_mode='train',
-                    tracks=[t for t in IL.list_variants(IL.MAPS) if IL.HOLDOUT not in t])
+    env = F1Wrapper(args, IL.MAPS, obs_noise=True, sim_mode='train', tracks=training_tracks(cfg.get('open_train', False)))
     for k, v in cfg.items():
+        if k == 'open_train':
+            continue
         if k == 'uncapped_prob':
             env.sl_cfg['uncapped_prob'] = v
         else:
@@ -277,6 +312,11 @@ def main():
             if isinstance(v, (int, float, str, bool)) or v is None:
                 f.write(f'{k}: {v}\n')
     require_fresh_variants(IL.list_variants(IL.MAPS))
+    if args.open_train_share > 0:
+        if not open_train_tracks():
+            raise FileNotFoundError('no open-space training tracks: run `python -u eval_open_space.py --make_train` first')
+        require_fresh_variants(open_train_tracks())
+    base_w = base_track_weights(args) if args.open_train_share > 0 else None
 
     # IL policy (actor + frozen normalizer) and a frozen copy as the BC teacher
     il_dir = f'results/{args.il}'
@@ -402,8 +442,8 @@ def main():
         venv.set_attr('COLLISION_COST', crash_cost)          # the workers started with --crash_start / --collision_cost
         if actor_start is not None:
             set_log_std(min(1.0, (update - actor_start) / max(1, n_updates - actor_start)))
-    if args.track_focus > 0 and tstat:              # resumed: keep the failure-weighted track sampling
-        venv.call('set_track_weights', *track_weights(tstat, args.track_focus)[:2])
+    if (args.track_focus > 0 and tstat) or base_w is not None:   # resumed / open-space share from the start
+        venv.call('set_track_weights', *track_weights(tstat, args.track_focus, base=base_w)[:2])
 
     def save_state():
         '''everything needed to continue this run (--resume); written atomically'''
@@ -447,6 +487,7 @@ def main():
                 next_p[i] = fi['privileged']
                 done_stats.append(dict(ret=ep_ret[i] + rew[i], len=ep_len[i] + 1, laps=fi.get('lap_count', 0),
                                        crash=bool(fail[i]), success=bool(succ[i]), stuck=bool(fi.get('stuck', False)),
+                                       hard=bool(fi.get('hard', False)), open='maps_open_train' in str(fi.get('track_file', '')),
                                        speed=(ep_speed[i]) / (ep_len[i] + 1)))
                 if fi.get('track_file'):                     # failure-weighted track sampling
                     v = tstat.setdefault(os.path.basename(fi['track_file']), [0.0, 0.0])
@@ -464,10 +505,10 @@ def main():
             total += N
         B = {k: np.stack(v) for k, v in B.items()}                 # (T, N, ...)
         focus = float('nan')
-        if args.track_focus > 0 and tstat:
-            w, w0, _ = track_weights(tstat, args.track_focus)
+        if (args.track_focus > 0 and tstat) or base_w is not None:
+            w, w0, _ = track_weights(tstat, args.track_focus, base=base_w)
             venv.call('set_track_weights', w, w0)          # used from each env's next episode
-            ws = np.sort(np.array(list(w.values())))[::-1]
+            ws = np.sort(np.array([v / (base_w or {}).get(k, 1.0) for k, v in w.items()]))[::-1]
             focus = float(ws[:max(1, len(ws) // 5)].sum() / ws.sum())   # weight share of the hardest 20 % seen
         priv_rms.update(B['priv'].reshape(-1, P))
         t_roll = time.time() - t0
@@ -549,6 +590,9 @@ def main():
                    std_steer=float(std[0]), std_speed=float(std[1]), critic_loss=float(closs.item()), ret_scale=r_scale,
                    ep_return=mean('ret'), ep_laps=mean('laps'), crash_rate=mean('crash'), success_rate=mean('success'),
                    ep_speed=mean('speed'), stuck_rate=mean('stuck'), track_focus=focus, reward_per_step=rc)
+        sub_crash = lambda key: (float(np.mean([d['crash'] for d in recent if d.get(key)]))
+                                 if any(d.get(key) for d in recent) else float('nan'))
+        row.update(hard_share=mean('hard'), hard_crash=sub_crash('hard'), open_share=mean('open'), open_crash=sub_crash('open'))
         log.append(row)
         print(f'[update {update}/{n_updates}] steps {total} | '
               + ('critic warm-up' if warm else f'kl {kl:.4f} clip {clip_frac:.2f} bc_w {bc_w:.3f} lr {lr:.1e}')
@@ -556,6 +600,8 @@ def main():
               + f' | episodes: crash {row["crash_rate"]*100:.0f}% success {row["success_rate"]*100:.0f}%'
               + f' stuck {row["stuck_rate"]*100:.0f}% laps {row["ep_laps"]:.2f} speed {row["ep_speed"]:.2f} m/s'
               + (f' | hardest 20% tracks get {focus*100:.0f}% of the weight' if np.isfinite(focus) else '')
+              + (f' | hard-conditions episodes {row["hard_share"]*100:.0f}% (crash {row["hard_crash"]*100:.0f}%)' if args.hard_prob > 0 else '')
+              + (f' | open-space tracks {row["open_share"]*100:.0f}% (crash {row["open_crash"]*100:.0f}%)' if args.open_train_share > 0 else '')
               + f' | per step: prog {rc["forward_reward"]:.2f} time -{rc["time_cost"]:.2f} steer -{rc["steer_cost"]:.3f}'
               + f' wall -{rc["wall_cost"]:.3f} lat -{rc["lat_cost"]:.3f} crash -{rc["collision_cost"]:.2f}'
               + f' | rollout {t_roll:.0f}s update {time.time()-t0-t_roll:.0f}s (total {IL._hms(time.time()-T_START)})',

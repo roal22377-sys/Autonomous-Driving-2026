@@ -4,6 +4,7 @@
     Run from src/f1tenth:
 
         python -u eval_open_space.py --make                                   # build the test tracks once
+        python -u eval_open_space.py --make_train                             # training tracks of the same kind (PPO 5)
         python -u eval_open_space.py expert imitation/8 imitation/83 [--caps 5 8] [--levels train big]
 
     Test tracks (installation/maps_open_test/<level>/, never used for training): the evaluation maps,
@@ -40,7 +41,11 @@ import numpy as np
 TEST_DIR = os.path.join(HERE, 'installation', 'maps_open_test')
 EVAL_MAPS = ['Sochi', 'IMS', 'Catalunya', 'Zandvoort', 'Silverstone', 'SaoPaulo',
              'YasMarina', 'MoscowRaceway', 'Shanghai', 'MexicoCity', 'Montreal']
-SEEDS = (901, 902)                     # training uses 100-105
+SEEDS = (901, 902)                     # training uses 100-115 (maps_gen) and 200-203 (maps_open_train)
+# training tracks of the same kind (train_ppo_s2r.py --open_train_share): ALL maps, other seeds, so the test
+# tracks above stay unseen; seeds 200-201 at the 'big' level, 202-203 at the 'train' level with a bay at every corner
+TRAIN_DIR = os.path.join(HERE, 'installation', 'maps_open_train')
+TRAIN_SEEDS = {200: 'big', 201: 'big', 202: 'train', 203: 'train'}
 LEVELS = {
     'none':  dict(RUNOFF_PROB=0.0),         # control: the same corridors without any run-off
     'train': dict(RUNOFF_PROB=1.0, RUNOFF_MIN_CURV=1 / 5.0, RUNOFF_LEN=(2.0, 7.0), RUNOFF_EXTRA_W=(0.0, 2.5)),
@@ -58,6 +63,26 @@ def _make_job(job):
     v = tg.make_variant(map_name, seed, reverse, original=False)
     path = tg.save_variant(v, out_dir=os.path.join(TEST_DIR, level))
     return path, len(v['runoffs'])
+
+
+def _make_train_job(job):
+    level, map_name, seed, reverse = job
+    from utils import track_gen as tg
+    for k, v in LEVELS[level].items():
+        setattr(tg, k, v)
+    out = os.path.join(TRAIN_DIR, f"{map_name}{'_rev' if reverse else ''}_w{seed}.npz")
+    if os.path.isfile(out) and not tg.stale_variants([out]):
+        return out, len(np.load(out)['runoffs']), 'kept'
+    v = tg.make_variant(map_name, seed, reverse, original=False)
+    return tg.save_variant(v, out_dir=TRAIN_DIR), len(v['runoffs']), 'new'
+
+
+def make_train_tracks(workers):
+    from train_il_s2r import MAPS
+    jobs = [(lv, m, s, r) for s, lv in TRAIN_SEEDS.items() for m in MAPS for r in (False, True)]
+    with mp.get_context('fork').Pool(workers) as p:
+        for i, (path, n, what) in enumerate(p.imap_unordered(_make_train_job, jobs)):
+            print(f'[{i + 1}/{len(jobs)}] {os.path.basename(path)}: {n} run-offs ({what})', flush=True)
 
 
 def make_tracks(workers, levels):
@@ -146,12 +171,17 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('models', nargs='*', help="'expert' and/or results/<model> names, e.g. imitation/8")
     p.add_argument('--make', action='store_true', help='build the test tracks')
+    p.add_argument('--make_train', action='store_true', help='build the open-space TRAINING tracks (installation/maps_open_train)')
     p.add_argument('--levels', nargs='+', default=list(LEVELS))
     p.add_argument('--caps', nargs='+', type=float, default=[5.0, 8.0], help='speed limits [m/s] (agent.yaml speed_limit)')
     p.add_argument('--workers', type=int, default=22)
     p.add_argument('--out', default=None, help='save all runs as json')
     p.add_argument('--max_tracks', type=int, default=0, help='first N tracks per level (smoke tests)')
     a = p.parse_args()
+    if a.make_train:
+        make_train_tracks(a.workers)
+        if not a.models and not a.make:
+            return
     if a.make:
         make_tracks(a.workers, a.levels)
         if not a.models:
