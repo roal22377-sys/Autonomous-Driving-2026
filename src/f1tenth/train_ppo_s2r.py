@@ -410,8 +410,15 @@ def main():
         src = torch.load(f'results/{args.baseline_from}/checkpoint/resume.pt', map_location='cpu', weights_only=False)
         if src['args'].get('il') != args.il:
             raise SystemExit(f'--baseline_from {args.baseline_from} started from {src["args"].get("il")}, not {args.il}')
-        diff = {k: (src['args'].get(k), args[k]) for k in ('worst_eval', 'open_eval', 'open_level', 'eval_tracks', 'eval_low_caps', 'sim_override')
-                if src['args'].get(k) != args[k]}
+        src_args = dict(src['args'])
+        if 'eval_low_caps' not in src_args:
+            # runs before 11/25 03:50 did not save list options: read the low caps off its baseline evaluation
+            src_args['eval_low_caps'] = sorted({float(r[0].split('@')[1].split('/')[0]) for r in src['il']['res']
+                                                if float(r[0].split('@')[1].split('/')[0]) < 5.0}) or None
+        mine = lambda k: sorted(args[k]) if k == 'eval_low_caps' and args[k] else args[k]
+        theirs = lambda k: sorted(src_args[k]) if k == 'eval_low_caps' and src_args.get(k) else src_args.get(k)
+        diff = {k: (theirs(k), mine(k)) for k in ('worst_eval', 'open_eval', 'open_level', 'eval_tracks', 'eval_low_caps', 'sim_override')
+                if theirs(k) != mine(k)}
         def body(path):                                     # yaml without comments / blank lines
             return [l.split('#')[0].rstrip() for l in open(path) if l.split('#')[0].strip()]
         for name, now in (('dynamic.yaml', 'configs/task/dynamic.yaml'), ('f1tenth.yaml', f'{args.save_dir}/backup/f1tenth.yaml')):
@@ -480,7 +487,9 @@ def main():
 
     def save_state():
         '''everything needed to continue this run (--resume); written atomically'''
-        st = dict(args={k: v for k, v in args.items() if isinstance(v, (int, float, str, bool)) or v is None},
+        scalar = lambda v: isinstance(v, (int, float, str, bool)) or v is None
+        st = dict(args={k: (list(v) if isinstance(v, (list, tuple)) else v) for k, v in args.items()
+                        if scalar(v) or (isinstance(v, (list, tuple)) and all(map(scalar, v)))},
                   actor=actor.state_dict(), critic=critic.state_dict(), teacher=teacher.state_dict(),
                   opt_actor=opt_actor.state_dict(), opt_critic=opt_critic.state_dict(),
                   priv_rms=(priv_rms.mean, priv_rms.var, priv_rms.count), ret_rms=(ret_rms.mean, ret_rms.var, ret_rms.count),
