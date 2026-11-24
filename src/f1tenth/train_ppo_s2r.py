@@ -587,14 +587,18 @@ def main():
                 # completion as a constraint: the policy itself must find it worth staying safe
                 old = crash_cost
                 target = max(il_succ, best['succ']) if args.crash_target == 'best' else il_succ
-                if succ < target - 0.02:
+                # the worst-case / open-space checks count too when they ran (a model that reached the target on
+                # the eval tracks but is below IL there is not safe enough yet: 11/24 PPO 4 update 30)
+                gates_bad = gates and not (worst_ok and open_ok)
+                if succ < target - 0.02 or gates_bad:
                     crash_cost = min(crash_cost * args.crash_up, args.crash_max)
-                elif succ >= target - 1e-9:
+                elif succ >= target - 1e-9 and gates:
                     crash_cost = max(crash_cost * args.crash_down, args.collision_cost)
                 if crash_cost != old:
                     venv.set_attr('COLLISION_COST', crash_cost)
                     cprint(f'[crash cost] {old:.0f} -> {crash_cost:.0f} (eval {succ*100:.1f}% vs target {target*100:.1f}%'
-                           f' = {"best saved" if args.crash_target == "best" else "IL"})', color='yellow', bold=True)
+                           f' = {"best saved" if args.crash_target == "best" else "IL"}'
+                           + (' | worst-case / open-space below IL' if gates_bad else '') + ')', color='yellow', bold=True)
             row['collision_cost'] = crash_cost
             torch.save({'actor': actor.state_dict(), 'critic': critic.state_dict()},
                        f'{args.save_dir}/checkpoint/model_{total}.pt')
