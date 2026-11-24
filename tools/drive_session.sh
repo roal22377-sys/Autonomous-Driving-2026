@@ -11,6 +11,8 @@
 #   tools/drive_session.sh --finish --circle   # ...then stop + fetch + tools/circle_analysis.py
 #   tools/drive_session.sh --speed [2 3 4]      # last tab runs straight speed tests toward a wall (tools/speed_series.sh)
 #   tools/drive_session.sh --finish --speed    # ...then stop + fetch + tools/speed_analysis.py (speed_to_erpm_gain)
+#   tools/drive_session.sh --straight [--trim -0.01]  # last tab runs the straight-line alignment (tools/straight_test.py):
+#                                     #   drive straight, enter the drift from a tape line, it suggests the steering trim
 #   tools/drive_session.sh --stop     # stop agent, bag (saved cleanly), bringup on the car
 #   tools/drive_session.sh --fetch    # extract the newest bag on the car -> logs/<bag>_extracted/
 #   tools/drive_session.sh --agent    # (re)start only the agent in this terminal (bringup keeps running)
@@ -36,7 +38,11 @@ case "$1" in
   -m) [ -n "$2" ] || { echo "usage: $0 -m \"commit message\""; exit 1; }
       MSG="$2"; shift 2 ;;
 esac
-CIRCLE_ARGS="" SPEED=0 SPEED_ARGS=""
+CIRCLE_ARGS="" SPEED=0 SPEED_ARGS="" STRAIGHT=0 STRAIGHT_ARGS=""
+if [ "$1" = "--straight" ]; then
+  STRAIGHT=1; shift
+  while [[ "$1" == --* && "$1" != --finish && "$1" != --stop ]]; do STRAIGHT_ARGS="$STRAIGHT_ARGS $1 $2"; shift 2; done
+fi
 if [ "$1" = "--speed" ]; then
   SPEED=1; shift
   while [[ "$1" =~ ^[0-9.]+$ ]]; do SPEED_ARGS="$SPEED_ARGS $1"; shift; done
@@ -88,7 +94,7 @@ case "$1" in
     read -p "Press s in the TELEOP tab first, then Enter here to start the agent: "
     exec ssh $SSH_OPTS -t "$CAR_HOST" "$CAR_ENV && ros2 run f1tenth_stack agent_node --ros-args --params-file src/f1tenth_ros/f1tenth_stack/config/$AGENT_YAML" ;;
   "") ;;
-  *) echo "usage: $0 [-m msg|--no-deploy] [--circle [radius] | --speed [v ...]] | --finish [--circle|--speed] | --stop | --fetch | --agent"; exit 1 ;;
+  *) echo "usage: $0 [-m msg|--no-deploy] [--circle [radius] | --speed [v ...] | --straight [--trim x]] | --finish [--circle|--speed] | --stop | --fetch | --agent"; exit 1 ;;
 esac
 
 
@@ -115,7 +121,11 @@ mktab teleop   "sleep 4"          'ros2 run key_teleop key_teleop'
 mktab bag      "sleep 6"          'mkdir -p ~/bags && ros2 bag record -o ~/bags/run_$(date +%m%d_%H%M) /scan /odom /drive /teleop /ackermann_cmd /sensors/core'
 mktab status   "sleep 6"          'python3 tools/live_status.py'
 mktab monitor  "sleep 6"          'ros2 topic echo /ackermann_cmd'
-if [ $SPEED = 1 ]; then
+if [ $STRAIGHT = 1 ]; then
+  LAST="6 STRAIGHT test"
+  mktab agent  "echo 'Straight alignment: wait for bringup, press r in the TELEOP tab (s = emergency stop).'; sleep 6" \
+               "python3 tools/straight_test.py $STRAIGHT_ARGS"
+elif [ $SPEED = 1 ]; then
   LAST="6 SPEED test"
   mktab agent  "echo 'Speed tests: wait for bringup, press r in the TELEOP tab (s = emergency stop).'; sleep 4" \
                "tools/speed_series.sh $SPEED_ARGS"
@@ -136,7 +146,9 @@ gnome-terminal --window --title "1 bringup"            -e "bash $TABS/bringup.sh
                --tab    --title "5 cmd monitor"        -e "bash $TABS/monitor.sh" \
                --tab    --title "$LAST"                -e "bash $TABS/agent.sh" 2>/dev/null
 
-if [ $SPEED = 1 ]; then
+if [ $STRAIGHT = 1 ]; then
+  echo "[local] opened 6 tabs (straight alignment). When done: $0 --stop, then set steering_angle_to_servo_offset in vesc.yaml"
+elif [ $SPEED = 1 ]; then
   echo "[local] opened 6 tabs (speed test). When done: $0 --finish --speed"
 elif [ $CIRCLE = 1 ]; then
   echo "[local] opened 6 tabs (circle test). When done: $0 --finish --circle"
