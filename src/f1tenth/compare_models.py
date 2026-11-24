@@ -28,7 +28,7 @@ import numpy as np
 
 
 def run(job):
-    model, path, cap, start, mode, laps = job
+    model, path, cap, start, mode, laps = job[:6]
     import torch
     import train_il_s2r as IL
     from evaluate_s2r import model_args
@@ -67,7 +67,7 @@ def run(job):
         v.append(float(env.vehicle_state()[3]))
         st.append(float(np.clip(a[0], -1, 1)) * env.max_steer)
         done = term or trunc
-    group = 'open' if 'maps_open_test' in path else ('worst' if mode == 'worst' else 'eval')
+    group = job[6] if len(job) > 6 else ('open' if 'maps_open_test' in path else ('worst' if mode == 'worst' else 'eval'))
     return dict(model=model, group=group, key=f'{os.path.basename(path)[:-4]}@{cap:g}/{start}', ok=bool(env.success),
                 t=float(env.elapsed), v=float(np.mean(v)), jitter=float(np.abs(np.diff(st)).mean()) if len(st) > 1 else 0.0)
 
@@ -79,6 +79,9 @@ def main():
     p.add_argument('--quick', action='store_true', help='1 lap, eval cap 8 centerline + open cap 5 only, no worst')
     p.add_argument('--open_level', default='big')
     p.add_argument('--max_tracks', type=int, default=0, help='first N tracks of each set (smoke tests)')
+    p.add_argument('--low_caps', default='2,2.5,3,3.5,4',
+                   help="one more centerline run per eval track at these caps in turn (the car's 2-4 m/s; '' = off), "
+                        "like train_ppo_s2r.py --eval_low_caps")
     a = p.parse_args()
     import train_il_s2r as IL
     from eval_open_space import TEST_DIR
@@ -96,6 +99,9 @@ def main():
         jobs += [(m, t, c, s, 'eval', laps) for c, s in ev_set for t in ev]
         if not a.quick:
             jobs += [(m, t, 8.0, 'center', 'worst', laps) for t in ev]
+        low = [float(c) for c in a.low_caps.split(',') if c.strip()] if not a.quick else []
+        if low:
+            jobs += [(m, t, low[i % len(low)], 'center', 'eval', laps, 'low') for i, t in enumerate(ev)]
         jobs += [(m, t, c, s, 'eval', laps) for c, s in op_set for t in op]
     t0 = time.time()
     print(f'{len(jobs)} runs ({len(a.models)} models), {laps} lap(s), {a.workers} workers ...', flush=True)
@@ -105,8 +111,8 @@ def main():
     lines = [f'# model comparison ({time.strftime("%Y-%m-%d %H:%M")}, {laps} lap(s), reference = {ref})', '',
              f'tracks: eval {len(ev)} x {ev_set}' + ('' if a.quick else f', worst-case {len(ev)} x cap 8 centerline')
              + f', open-space ({a.open_level}) {len(op)} x {op_set}', '',
-             '| model | eval success | worst-case success | open-space success | paired time vs ref (eval, uncapped) | mean speed | steering jitter |',
-             '|---|---|---|---|---|---|---|']
+             '| model | eval success | low caps 2-4 m/s | worst-case success | open-space success | paired time vs ref (eval, uncapped) | mean speed | steering jitter |',
+             '|---|---|---|---|---|---|---|---|']
     by = lambda m, g: [r for r in res if r['model'] == m and r['group'] == g]
     for m in a.models:
         e, w, o = by(m, 'eval'), by(m, 'worst'), by(m, 'open')
@@ -117,7 +123,7 @@ def main():
         g = np.mean([(ref_ok[k] - mine[k]) / ref_ok[k] for k in com]) * 100 if com else 0.0
         gain = (f'{abs(g):.1f}% {"faster" if g >= 0 else "slower"} on {len(com)} runs'
                 if com and m != ref else ('reference' if m == ref else '-'))
-        lines.append(f'| {m} | {sr(e)} | {sr(w)} | {sr(o)} | {gain} | {np.mean([r["v"] for r in e]):.2f} m/s | '
+        lines.append(f'| {m} | {sr(e)} | {sr(by(m, "low"))} | {sr(w)} | {sr(o)} | {gain} | {np.mean([r["v"] for r in e]):.2f} m/s | '
                      f'{np.mean([r["jitter"] for r in e]):.4f} rad |')
     lines += ['', '## uncapped 2-lap time per track (centerline start; - = did not finish)', '',
               '| track | ' + ' | '.join(a.models) + ' |', '|---|' + '---|' * len(a.models)]
