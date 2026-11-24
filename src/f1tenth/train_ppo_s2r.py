@@ -192,6 +192,11 @@ def get_args():
     p.add_argument('--crash_start', type=float, default=None,
                    help='collision cost at the start (default --collision_cost, which stays the floor), e.g. the cost '
                         'the --init checkpoint ended with, so its critic matches the rewards')
+    p.add_argument('--cost_critic', type=int, default=0,
+                   help='1: a second critic predicts the discounted crash probability; the reward critic learns the '
+                        'rest, and the policy advantage is A_reward - crash_cost * A_crash. 11/25 PPO 8: one critic for '
+                        'rewards of ~0.01 per step and crashes of -10000..-30000 explained the returns badly '
+                        '(EV 0.2-0.66, twice -0.9), and success fell while the crash cost rose')
     p.add_argument('--crash_up', type=float, default=1.5)
     p.add_argument('--crash_down', type=float, default=0.8)
     p.add_argument('--crash_max', type=float, default=10000.0,
@@ -357,11 +362,16 @@ def main():
     actor_params = [p for n, p in actor.named_parameters() if 'log_std' not in n]
     opt_actor = torch.optim.Adam(actor_params, lr=args.lr)
     opt_critic = torch.optim.Adam(critic.parameters(), lr=args.critic_lr)
+    ccritic, opt_ccritic = None, None
+    if args.cost_critic:                           # crash critic: discounted crash probability (0..1)
+        ccritic = Critic(EasyDict({**args, 'obs_dim': args.obs_dim + P})).to(args.device)
+        ccritic.initialize()
+        opt_ccritic = torch.optim.Adam(ccritic.parameters(), lr=args.critic_lr)
 
-    def value(o, pr):
+    def value(o, pr, net=None):
         x = np.concatenate([rms.normalize(o), priv_rms.normalize(pr)], axis=-1)
         shape = x.shape[:-1]
-        v = critic(torch.as_tensor(x.reshape(-1, x.shape[-1]), dtype=torch.float32)).squeeze(-1)
+        v = (net or critic)(torch.as_tensor(x.reshape(-1, x.shape[-1]), dtype=torch.float32)).squeeze(-1)
         return v.reshape(shape)
 
     eval_tracks = sorted([t for t in IL.list_variants(IL.MAPS) if variant_map(t) in IL.EVAL_MAPS
@@ -398,6 +408,11 @@ def main():
             teacher.load_state_dict(torch.load(f"results/{state['args']['init']}", map_location='cpu', weights_only=False)['actor'])
         opt_actor.load_state_dict(state['opt_actor'])
         opt_critic.load_state_dict(state['opt_critic'])
+        if ccritic is not None and 'ccritic' in state:
+            ccritic.load_state_dict(state['ccritic'])
+            opt_ccritic.load_state_dict(state['opt_ccritic'])
+        elif ccritic is not None:
+            cprint('[resume] no crash critic in the stopped run: it starts untrained', color='yellow', bold=True)
         for r, key in ((priv_rms, 'priv_rms'), (ret_rms, 'ret_rms')):
             r.mean, r.var, r.count = state[key]
         il_succ, il_lap, il_res, il_worst, il_open = (state['il'][k] for k in ('succ', 'lap', 'res', 'worst', 'open'))
@@ -440,6 +455,8 @@ def main():
         actor.load_state_dict(ck['actor'])
         if 'critic' in ck:
             critic.load_state_dict(ck['critic'])
+        if ccritic is not None and 'ccritic' in ck:
+            ccritic.load_state_dict(ck['ccritic'])
         teacher.load_state_dict(actor.state_dict())
         set_log_std(0.0)
         cprint(f'[init] actor{" and critic" if "critic" in ck else ""} from results/{args.init} '
@@ -492,6 +509,7 @@ def main():
                         if scalar(v) or (isinstance(v, (list, tuple)) and all(map(scalar, v)))},
                   actor=actor.state_dict(), critic=critic.state_dict(), teacher=teacher.state_dict(),
                   opt_actor=opt_actor.state_dict(), opt_critic=opt_critic.state_dict(),
+                  **(dict(ccritic=ccritic.state_dict(), opt_ccritic=opt_ccritic.state_dict()) if ccritic is not None else {}),
                   priv_rms=(priv_rms.mean, priv_rms.var, priv_rms.count), ret_rms=(ret_rms.mean, ret_rms.var, ret_rms.count),
                   il=dict(succ=il_succ, lap=il_lap, res=il_res, worst=il_worst, open=il_open),
                   best=best, log=log, update=update, total=total, actor_start=actor_start, bc_boost=bc_boost,
@@ -534,7 +552,7 @@ def main():
                 if fi.get('track_file'):                     # failure-weighted track sampling
                     v = tstat.setdefault(os.path.basename(fi['track_file']), [0.0, 0.0])
                     v[0], v[1] = 0.9 * v[0] + 1.0, 0.9 * v[1] + float(not succ[i])
-            disc_ret = disc_ret * args.gamma + rew
+            disc_ret = disc_ret * args.gamma + (rew + crash_cost * fail if ccritic is not None else rew)
             ret_rms.update(disc_ret.reshape(-1, 1))
             disc_ret[done] = 0.0
             for k, v in (('obs', obs), ('priv', priv), ('act', a), ('logp', logp), ('rew', rew), ('done', done),
@@ -555,7 +573,8 @@ def main():
         priv_rms.update(B['priv'].reshape(-1, P))
         t_roll = time.time() - t0
         r_scale = float(np.sqrt(ret_rms.var[0] + 1e-8)) if args.ret_norm else 1.0
-        rew_n = B['rew'] / r_scale
+        # with the crash critic the reward critic sees the rewards without the collision cost (fail <=> it was paid)
+        rew_n = (B['rew'] + crash_cost * B['fail'] if ccritic is not None else B['rew']) / r_scale
 
         # ---- GAE with the asymmetric critic (on normalized rewards)
         with torch.no_grad():
@@ -569,6 +588,21 @@ def main():
             adv[t] = last
         ret = adv + V
         ev = float(1.0 - np.var(ret - V) / (np.var(ret) + 1e-8))      # before this update: how well it predicts
+        evc, RC = float('nan'), None
+        if ccritic is not None:
+            with torch.no_grad():
+                Vc = value(B['obs'], B['priv'], ccritic).numpy()
+                Vc_next = value(B['nobs'], B['npriv'], ccritic).numpy()
+            advc = np.zeros((T, N), dtype=np.float32)
+            last = np.zeros(N, dtype=np.float32)
+            for t in reversed(range(T)):
+                delta = B['fail'][t] + args.gamma * (1.0 - B['fail'][t]) * Vc_next[t] - Vc[t]
+                last = delta + args.gamma * args.gae * (1.0 - B['done'][t]) * last
+                advc[t] = last
+            retc = advc + Vc
+            evc = float(1.0 - np.var(retc - Vc) / (np.var(retc) + 1e-8))
+            RC = torch.as_tensor(retc.reshape(T * N), dtype=torch.float32)
+            adv = adv - (crash_cost / r_scale) * advc         # same units as a collision cost inside the reward
         flat = lambda x: torch.as_tensor(x.reshape(T * N, *x.shape[2:]), dtype=torch.float32)
         S = flat(rms.normalize(B['obs']))
         C = flat(np.concatenate([rms.normalize(B['obs']), priv_rms.normalize(B['priv'])], axis=-1))
@@ -600,6 +634,12 @@ def main():
                 closs.backward()
                 torch.nn.utils.clip_grad_norm_(critic.parameters(), 1.0)
                 opt_critic.step()
+                if ccritic is not None:
+                    ccloss = ((ccritic(C[idx]).squeeze(-1) - RC[idx]) ** 2).mean()
+                    opt_ccritic.zero_grad()
+                    ccloss.backward()
+                    torch.nn.utils.clip_grad_norm_(ccritic.parameters(), 1.0)
+                    opt_ccritic.step()
                 if warm:
                     continue
                 d = actor(S[idx])
@@ -628,7 +668,7 @@ def main():
         steps_b = T * N
         rc = {k: comp[k] / steps_b for k in REWARD_KEYS}
         std = np.exp(actor.log_std.detach().numpy())
-        row = dict(update=update, step=total, warm=warm, ev=ev, kl=kl, clip_frac=clip_frac, bc_w=bc_w, lr=lr,
+        row = dict(update=update, step=total, warm=warm, ev=ev, ev_crash=evc, kl=kl, clip_frac=clip_frac, bc_w=bc_w, lr=lr,
                    std_steer=float(std[0]), std_speed=float(std[1]), critic_loss=float(closs.item()), ret_scale=r_scale,
                    ep_return=mean('ret'), ep_laps=mean('laps'), crash_rate=mean('crash'), success_rate=mean('success'),
                    ep_speed=mean('speed'), stuck_rate=mean('stuck'), track_focus=focus, reward_per_step=rc)
@@ -638,7 +678,7 @@ def main():
         log.append(row)
         print(f'[update {update}/{n_updates}] steps {total} | '
               + ('critic warm-up' if warm else f'kl {kl:.4f} clip {clip_frac:.2f} bc_w {bc_w:.3f} lr {lr:.1e}')
-              + f' | EV {ev:.2f} | std steer {std[0]:.3f} speed {std[1]:.3f} | ret scale {r_scale:.1f}'
+              + f' | EV {ev:.2f}' + (f' crash EV {evc:.2f}' if ccritic is not None else '') + f' | std steer {std[0]:.3f} speed {std[1]:.3f} | ret scale {r_scale:.1f}'
               + f' | episodes: crash {row["crash_rate"]*100:.0f}% success {row["success_rate"]*100:.0f}%'
               + f' stuck {row["stuck_rate"]*100:.0f}% laps {row["ep_laps"]:.2f} speed {row["ep_speed"]:.2f} m/s'
               + (f' | hardest 20% tracks get {focus*100:.0f}% of the weight' if np.isfinite(focus) else '')
@@ -689,7 +729,8 @@ def main():
                            f' = {"best saved" if args.crash_target == "best" else "IL"}'
                            + (' | worst-case / open-space below IL' if gates_bad else '') + ')', color='yellow', bold=True)
             row['collision_cost'] = crash_cost
-            torch.save({'actor': actor.state_dict(), 'critic': critic.state_dict()},
+            torch.save({'actor': actor.state_dict(), 'critic': critic.state_dict(),
+                        **({'ccritic': ccritic.state_dict()} if ccritic is not None else {})},
                        f'{args.save_dir}/checkpoint/model_{total}.pt')
             if better:
                 best = dict(succ=succ, res=res, name=f'update {update}')
@@ -698,7 +739,8 @@ def main():
                 rms.save(f'{args.save_dir}/sim2real')
                 rms.save(args.save_dir)
                 RunningMeanStd('agent_reward', 1).save(f'{args.save_dir}/sim2real')
-                torch.save({'actor': actor.state_dict(), 'critic': critic.state_dict()}, f'{args.save_dir}/checkpoint/model.pt')
+                torch.save({'actor': actor.state_dict(), 'critic': critic.state_dict(),
+                        **({'ccritic': ccritic.state_dict()} if ccritic is not None else {})}, f'{args.save_dir}/checkpoint/model.pt')
         with open(f'{args.save_dir}/train_log.pkl', 'wb') as f:
             pickle.dump(log, f)
         if update % args.ckpt_every == 0 or update == n_updates or 'eval_success' in row:
