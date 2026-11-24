@@ -54,10 +54,10 @@ WHEELBASE = None                # from configs/task/dynamic.yaml (length_f + len
 EXPERT = {'a_lat': 3.5, 'lad_base': 0.6, 'lad_gain': 0.22, 'merge_dist': 0.6}
 # the expert corners at this share of the episode's grip (mu * g; sim tires saturate there since 11/23).
 # A fixed 3.5 m/s^2 failed on low-grip episodes (mu 0.40-0.45: 62 % 2-lap success, 11/23 check).
-EXPERT_GRIP_SHARE = 0.6
+EXPERT_GRIP_SHARE = 0.7          # 11/24: 0.6 -> 0.7 (with the 11/23 mu 0.5 IL 11 slowed to ~2 m/s in 0.9 m corners on the car)
 # ... and never drives faster than its commanded steering allows at this share of the grip (merging after a
 # start or a disturbance). 11/23, expert only, 2 laps: 94.7 % -> 100 % on the eval tracks, open-space 87.5 % -> 97.7 %
-EXPERT_STEER_GRIP_SHARE = 0.7
+EXPERT_STEER_GRIP_SHARE = 0.7    # 11/24: 0.8 tried: 7 of 18 expert failures within 3.5 s of the start (merging), kept 0.7
 # 11/23 comparisons (expert alone, 2 laps; eval / open-space / worst / 2-lap time):
 #   'cap'  100 / 97.7 %, but taught "slow down and steer hard" in DAgger states (IL run 9: slow, jittery)
 #   'hold' 100 / 96.6 / 79.5 %, 156.4 s   <- used: no extra slow-down labels, not slower than no rule
