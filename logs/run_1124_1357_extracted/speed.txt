@@ -1,0 +1,13 @@
+          log  cmd  odom  true  steady_s  resid_cm  true/odom  true/cmd
+run_1124_1357  2.0 2.176 6.506      2.21   852.199      2.989     3.253
+run_1124_1357  2.5 2.731 3.568      1.75   143.757      1.306     1.427
+
+true speed = 2.148 x odom (median of 2 runs)  ->  speed_to_erpm_gain 4180 -> 1946
+(the gain sets both the odom reading and the command -> erpm conversion, so after the change commanded speed = true speed as well)
+
+acceleration / braking per run [m/s^2, true speed] (mean rate between 20 % and 80 % of the speed):
+          log  cmd  accel  brake
+run_1124_1357  2.0   4.31  18.13
+run_1124_1357  2.5   4.35  21.19
+run_1124_1357  3.0   4.60  26.87
+-> simulator a_max (configs/task/f1tenth*.yaml sim2real.a_max): acceleration median 4.35, max 4.60 m/s^2 | braking median 21.19, max 26.87 m/s^2  (no run commanded >= 4 m/s: may be below the motor limit)
