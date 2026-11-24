@@ -9,7 +9,7 @@ STEERS=() OPTS=()
 if [ "$1" = "radius" ]; then
   # turning-radius measurement: full lock each side, slow steady circles (~3 laps at 1.2 m/s) to mark
   # the outer front tire track with tape. Kick 2.0 m/s for 1 s to get the motor going.
-  STEERS=(0.4415 -0.497)
+  STEERS=(0.433 -0.506)
   OPTS=(--kick 2.0 --kick_time 1.0 --speeds 1.5 --hold 3 --low 1.2 --low_hold 15)
   shift
 fi
@@ -17,10 +17,10 @@ while [ $# -gt 0 ]; do
   if [ "$1" = "--" ]; then shift; OPTS=("$@"); break; fi
   STEERS+=("$1"); shift
 done
-# full lock both sides first (minimum turning radius + tire grip): left 0.4415 = servo 1.0 (VESC limit),
-# right -0.497 = servo 0.061 (mechanical stop). Then mid and small commands for the steering map
+# full lock both sides first (minimum turning radius + tire grip): left 0.433 = servo 1.0 (VESC limit),
+# right -0.506 = servo 0.061 (mechanical stop), with steering_angle_to_servo_offset 0.567 (11/24; was 0.4415 / -0.497 at 0.558). Then mid and small commands for the steering map
 # (q after the first two if only full lock is wanted).
-[ ${#STEERS[@]} -gt 0 ] || STEERS=(0.4415 -0.497 0.3 -0.3 0.15 -0.15)
+[ ${#STEERS[@]} -gt 0 ] || STEERS=(0.433 -0.506 0.3 -0.3 0.15 -0.15)
 
 cd ~/ros2_ws
 for s in "${STEERS[@]}"; do
