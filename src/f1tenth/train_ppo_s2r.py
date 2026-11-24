@@ -521,7 +521,7 @@ def main():
         total, update, actor_start, bc_boost = state['total'], state['update'], state['actor_start'], state['bc_boost']
         done_stats = state['done_stats']
         tstat = state.get('tstat', {})
-        crash_cost = state.get('crash_cost', crash_cost)
+        crash_cost = min(state.get('crash_cost', crash_cost), args.crash_max)   # a lowered --crash_max applies at once
         venv.set_attr('COLLISION_COST', crash_cost)          # the workers started with --crash_start / --collision_cost
         if actor_start is not None:
             set_log_std(min(1.0, (update - actor_start) / max(1, n_updates - actor_start)))
