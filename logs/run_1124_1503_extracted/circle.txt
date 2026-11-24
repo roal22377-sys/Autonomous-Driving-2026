@@ -1,0 +1,23 @@
+== every step (angles in rad, a_y in m/s^2; v_true/R need >= 60 deg of arc)
+          log  steer  speed_cmd  v_odom  v_true     w     R   a_y  angle_cmd  angle_eff  swept_deg
+run_1124_1503  0.432        1.5   1.544   2.361 1.144 2.064 2.701      0.419      0.163    127.217
+run_1124_1503  0.432        1.2   1.196   1.288 1.436 0.897 1.850      0.419      0.362    564.310
+
+== steering map (lowest lateral-accel step of each command; real = kinematic angle of the circle)
+  command +0.432: real angle 0.362 rad (0.86 x calibrated 0.419) at a_y 1.8 m/s^2, 1.3 m/s
+
+== turning radius (lowest lateral-accel step of each command = no tire slide)
+   rear-axle R | inner diameter (inner rear wheel) | outer diameter (outer front corner = space needed)
+  left  +0.432: R 0.90 m | inner 1.49 m | outer 2.27 m | outer front tire track 2.20 m (tape check)   (at 1.3 m/s, a_y 1.8)
+  sim full lock 0.482 rad: R 0.65 m | inner 1.00 m | outer 1.83 m
+
+== grip: effective angle vs lateral accel (angle drops = tires sliding)
+  command +0.432: 1.3m/s a_y 1.8 -> 1.00, 2.4m/s a_y 2.7 -> 0.45
+  highest lateral accel reached: 2.7 m/s^2 (sim: ~10 with mu 1.05)
+  TIRE GRIP LIMIT (steps where the tires slid): 2.7 m/s^2 median, 2.7 max  -> sim mu ~ 0.28
+
+== speed: true / odom = 1.303 (median of 2 steps) -> speed_to_erpm_gain 4180 -> 3207
+
+== low speed held? (commanded vs odom / true)
+  1.5 m/s: odom 1.54, true 2.36
+  1.2 m/s: odom 1.20, true 1.29
