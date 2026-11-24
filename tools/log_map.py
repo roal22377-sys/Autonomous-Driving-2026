@@ -61,8 +61,19 @@ def icp(src, dst_tree, dst, x, y, th, it=25):
 
 
 idx = np.flatnonzero((ts >= t0) & (ts <= t1))[::2]
+VOX = 0.05                       # [m] global map grid
+gmap = {}                        # voxel -> point: everything mapped so far (revisits re-anchor the pose: less drift)
+
+
+def add_to_map(p):
+    for q in p:
+        gmap.setdefault((int(q[0] // VOX), int(q[1] // VOX)), q)
+
+
 poses = [(0.0, 0.0, 0.0)]
 mp = [pts(idx[0])]
+add_to_map(mp[0])
+gtree, gpts, since = None, None, 0
 prev_od = odom(ts[idx[0]])
 for i in idx[1:]:
     od = odom(ts[i])
@@ -74,19 +85,27 @@ for i in idx[1:]:
     gx = x0 + np.cos(th0) * lx - np.sin(th0) * ly
     gy = y0 + np.sin(th0) * lx + np.cos(th0) * ly
     gth = th0 + (od[2] - prev_od[2])
+    src = pts(i)
     ref = np.vstack(mp[-15:])
-    pose = icp(pts(i), cKDTree(ref), ref, gx, gy, gth)
+    pose = icp(src, cKDTree(ref), ref, gx, gy, gth)          # against the last scans
+    if since >= 20 or gtree is None:                           # global map tree, rebuilt every 20 scans
+        gpts = np.array(list(gmap.values()))
+        gtree, since = cKDTree(gpts), 0
+    pose = icp(src, gtree, gpts, *pose, it=10)                 # then against everything seen so far
+    since += 1
     poses.append(pose)
-    mp.append(tf(pts(i), *pose))
+    mp.append(tf(src, *pose))
+    add_to_map(mp[-1])
     prev_od = od
 poses = np.array(poses)
-allp = np.vstack(mp)
+allp = np.array(list(gmap.values()))
 fig, ax = plt.subplots(figsize=(10, 10))
 ax.scatter(allp[:, 0], allp[:, 1], s=0.2, c='k', alpha=0.3)
 tt = ts[idx]
 sc = ax.scatter(poses[:, 0], poses[:, 1], c=tt - t0, cmap='plasma', s=8, zorder=3)
 plt.colorbar(sc, label='s', shrink=0.6)
-for k in range(0, len(poses), 10):
+LABEL_EVERY = max(10, len(poses) // 60)        # about 60 labels whatever the length
+for k in range(0, len(poses), LABEL_EVERY):
     x, y, th = poses[k]
     ax.arrow(x, y, 0.4 * np.cos(th), 0.4 * np.sin(th), head_width=0.12, color='b', zorder=4)
     j = np.searchsorted(d.t.values, tt[k]).clip(0, len(d) - 1)
