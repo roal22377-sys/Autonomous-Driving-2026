@@ -4,11 +4,11 @@
 agent_node:
   ros__parameters:
     name: ppo_s2r
-    algo_idx: 1
+    algo_idx: 5          # 11/24: PPO 5 update 100 (results/ppo_s2r/5/README.md)
     scan_topic: scan
     drive_topic: drive
     odom_topic: odom
-    speed_limit: 3.0    # [m/s] start low, then 5.0, competition 8.0
+    speed_limit: 2.0    # [m/s] 11/24 calibrated car: 2.0 first (as IL 11), then 4.0, 5.0; competition 8.0
     speed_min: 0.0
     steer_gain_left: 1.0
     steer_gain_right: 1.0
