@@ -168,6 +168,9 @@ def get_args():
     p.add_argument('--crash_adapt', type=int, default=1,
                    help='after each evaluation: success below IL - 2 %%p -> collision cost x crash_up (up to crash_max); '
                         'at or above IL -> x crash_down (not below --collision_cost). Safety from the reward, not from IL')
+    p.add_argument('--crash_target', default='il', choices=('il', 'best'),
+                   help="success the collision cost aims at: 'il' = the IL policy's (fixed); 'best' = ratchet, the "
+                        "best saved model's (starts at IL, only goes up, so completion keeps being pushed past IL)")
     p.add_argument('--crash_up', type=float, default=1.5)
     p.add_argument('--crash_down', type=float, default=0.8)
     p.add_argument('--crash_max', type=float, default=2000.0)
@@ -581,14 +584,15 @@ def main():
             if args.crash_adapt:
                 # completion as a constraint: the policy itself must find it worth staying safe
                 old = crash_cost
-                if succ < il_succ - 0.02:
+                target = max(il_succ, best['succ']) if args.crash_target == 'best' else il_succ
+                if succ < target - 0.02:
                     crash_cost = min(crash_cost * args.crash_up, args.crash_max)
-                elif succ >= il_succ - 1e-9:
+                elif succ >= target - 1e-9:
                     crash_cost = max(crash_cost * args.crash_down, args.collision_cost)
                 if crash_cost != old:
                     venv.set_attr('COLLISION_COST', crash_cost)
-                    cprint(f'[crash cost] {old:.0f} -> {crash_cost:.0f} (eval {succ*100:.1f}% vs IL {il_succ*100:.1f}%)',
-                           color='yellow', bold=True)
+                    cprint(f'[crash cost] {old:.0f} -> {crash_cost:.0f} (eval {succ*100:.1f}% vs target {target*100:.1f}%'
+                           f' = {"best saved" if args.crash_target == "best" else "IL"})', color='yellow', bold=True)
             row['collision_cost'] = crash_cost
             torch.save({'actor': actor.state_dict(), 'critic': critic.state_dict()},
                        f'{args.save_dir}/checkpoint/model_{total}.pt')
