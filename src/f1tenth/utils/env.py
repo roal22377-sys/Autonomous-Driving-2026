@@ -14,6 +14,7 @@
                                                                                 agent_n_action])
 '''
 
+import os
 from collections import deque, OrderedDict
 import numpy as np
 import gymnasium as gym
@@ -95,6 +96,7 @@ class F1Wrapper(gym.Wrapper):
         elif tracks is not None:
             self.track_files = tracks
         self._track_cache = OrderedDict()
+        self.track_p = None                         # sampling probabilities over track_files (set_track_weights)
         self.base_max_episode_steps = self._env.unwrapped.max_episode_steps
         # per-episode speed cap (configs/task/f1tenth.yaml speed_limit), applied like agent_node.py
         self.sl_cfg = dict(args.get('speed_limit', None) or {})
@@ -217,7 +219,9 @@ class F1Wrapper(gym.Wrapper):
         options = kwargs.pop('options', None)
         options = dict(options) if options is not None else None
         if self.track_files is not None and (options is None or 'map' not in options):
-            path = (options or {}).pop('track', None) or self.track_files[self.noise_rng.integers(len(self.track_files))]
+            path = (options or {}).pop('track', None) or self.track_files[
+                self.noise_rng.choice(len(self.track_files), p=self.track_p) if self.track_p is not None
+                else self.noise_rng.integers(len(self.track_files))]
             options = dict(options or {})
             options['map'] = self._load_track(path)
             self.track_file = path
@@ -236,6 +240,7 @@ class F1Wrapper(gym.Wrapper):
         self.progress_laps = self.sim_mode != 'ideal'
         self._env.unwrapped.num_laps = 10**6 if self.progress_laps else self.laps
         self.progress, self.elapsed, self.success, self.lap_times = 0.0, 0.0, False, []
+        self.stuck, self.stuck_ref, self.max_progress = False, (0.0, 0.0), 0.0
         obs_dict, info = self._env.reset(options=options, **kwargs)
         # enough steps for all laps even at a slow 1.6 m/s
         if self.s2r.get('laps_steps', False) and self.sim_mode != 'ideal':
@@ -267,6 +272,20 @@ class F1Wrapper(gym.Wrapper):
     LAT_COST = 0.0            # per m/s^2 of lateral acceleration above LAT_GRIP_SHARE * mu * g
     LAT_GRIP_SHARE = 0.8
     LAP_BONUS = 0.0           # per second a completed lap beats the expert-pace estimate (_reference_lap)
+    # stuck / wrong way (PPO only, 0 = off): no STUCK_DIST m of new progress for STUCK_TIME s, or BACKWARD_DIST m behind
+    # the furthest point reached, ends the episode as a crash (collision cost). Without it a car that turned around in
+    # a dead-end bay drives on for minutes (time limit: 2 laps at 1.6 m/s) and blurs what went wrong.
+    STUCK_TIME = 0.0          # [s]
+    STUCK_DIST = 0.5          # [m]
+    BACKWARD_DIST = 2.0       # [m]
+
+    def set_track_weights(self, weights, default=1.0):
+        '''training track sampling: weights {track basename: w}; tracks not listed get `default`. None = uniform'''
+        if weights is None or self.track_files is None:
+            self.track_p = None
+            return
+        w = np.array([float(weights.get(os.path.basename(t), default)) for t in self.track_files])
+        self.track_p = w / w.sum()
 
     def _reference_lap(self):
         '''lap time of this track's race line at the expert's pace (train_il_s2r.EXPERT_GRIP_SHARE of grip)'''
@@ -359,6 +378,13 @@ class F1Wrapper(gym.Wrapper):
                 self.lap_times.append(self.elapsed)
             if self.progress >= self.laps * length and not self.collision:
                 self.success, terminate = True, True
+            if self.STUCK_TIME > 0 and not self.success and not self.collision:
+                if self.progress >= self.stuck_ref[0] + self.STUCK_DIST:
+                    self.stuck_ref = (self.progress, self.elapsed)
+                self.max_progress = max(self.max_progress, self.progress)
+                if (self.elapsed - self.stuck_ref[1] > self.STUCK_TIME
+                        or self.max_progress - self.progress > self.BACKWARD_DIST):
+                    self.stuck, self.collision, terminate = True, True, True
         else:
             self.success = bool(self._env.unwrapped.toggle_list[0] >= 2 * self.laps)
             self.lap_times = list(self._env.unwrapped.lap_split_times)
@@ -373,6 +399,8 @@ class F1Wrapper(gym.Wrapper):
         info['lap_count'] = len(self.lap_times)
         info['lap_split_times'] = list(self.lap_times)
         info['success'] = self.success
+        info['stuck'] = self.stuck
+        info['track_file'] = self.track_file
         info['privileged'] = self.privileged()
         return obs, reward, terminate, truncate, info
 

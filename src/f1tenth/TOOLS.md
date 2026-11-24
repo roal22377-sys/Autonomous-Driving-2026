@@ -96,6 +96,10 @@ OMP_NUM_THREADS=1 nohup $PY -u train_ppo_s2r.py --il imitation/11 --algo_idx 1 \
 | `--clip` / `--max_kl` | 0.15 / 0.015 | 한 번에 바뀌는 양 |
 | `--log_std_steer` / `--log_std_speed` | −2.3 / −1.5 | 탐색 노이즈 (std 0.10 / 0.22), `--log_std_decay` 0.5만큼 줄어듦 |
 | `--bc_start` / `--bc_end` | 0.5 / 0.02 | IL 쪽으로 당기는 힘 |
+| `--bc_speed` | 0.25 | 속도 출력은 조향의 0.25배만 IL 쪽으로 당김 (1 = 조향과 같음) |
+| `--track_focus` | 3.0 | 학습 트랙 뽑는 가중치 = 1 + 3 × 그 트랙의 최근 실패율 (0 = 균등) |
+| `--full_eval` | 0 | 0: 최악 조건·막다른 공간 평가는 저장 후보(일반 평가에서 최고 이상)일 때만 실행해 평가 시간 약 절반. 1: 매번 실행(곡선이 다 그려짐) |
+| `--stuck_time` / `--stuck_dist` / `--backward_dist` | 3.0 / 0.5 / 2.0 | 3초간 0.5 m도 못 나아가거나 2 m 역주행하면 충돌로 끝냄 (0 = 끔, 평가는 항상 원래 규칙) |
 | `--time_cost` | 0.1 | 스텝당 시간 벌점 (= 랩 타임 최소화) |
 | `--steer_rate_cost` | 3.0 | 조향 급변(흔들림) 벌점 |
 | `--wall_cost` / `--wall_margin` | 5.0 / 0.30 | 벽 여유 벌점 |

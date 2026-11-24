@@ -20,7 +20,12 @@
       F1Wrapper.privileged). The actor (what runs on the car) sees only lidar + speed + history + cap
     - critic warm-up with the actor frozen until the critic explains the returns (explained variance),
       then PPO (clip + KL early stop) with a behavior-cloning term towards the IL policy whose weight
-      decays, and is raised again if the evaluation success drops below the IL policy's
+      decays, and is raised again if the evaluation success drops below the IL policy's; the speed output is
+      pulled only bc_speed (0.25) as hard as the steering (IL is moderately fast on purpose, PPO is for lap time)
+    - failure-weighted training tracks (--track_focus): a track is drawn with weight 1 + focus x its recent
+      failure rate, so the episodes go where the policy still crashes (dead-end bays, hairpins)
+    - an episode that makes no progress (stuck) or drives the wrong way ends as a crash (--stuck_time,
+      --backward_dist), e.g. after turning around in a bay; the evaluations keep the normal rules
     - separate, decaying exploration noise for steering (small: steering noise under delay = crashes)
       and speed; actor learning rate decays linearly
     - GAE that bootstraps from the true final observation on time-limit truncation
@@ -60,7 +65,7 @@ from algorithm.common.models import Critic, LOG_STD_MIN
 REWARD_KEYS = ('forward_reward', 'collision_cost', 'steer_cost', 'time_cost', 'wall_cost', 'lat_cost', 'lap_bonus')
 
 # settings before 11/23, for the baseline run (--baseline)
-BASELINE = dict(ret_norm=0, time_cost=0.0, steer_rate_cost=5.0, wall_cost=0.0, lat_cost=0.0, lap_bonus=0.0,
+BASELINE = dict(track_focus=0.0, stuck_time=0.0, bc_speed=1.0, ret_norm=0, time_cost=0.0, steer_rate_cost=5.0, wall_cost=0.0, lat_cost=0.0, lap_bonus=0.0,
                 log_std_steer=-2.0, log_std_speed=-2.0, log_std_decay=0.0, uncapped_prob=0.25,
                 lr_end=5e-5, max_kl=0.02, bc_end=0.05, warmup_ev=-1e9, bc_adapt=0, worst_eval=0)
 
@@ -101,6 +106,9 @@ def get_args():
     # behavior cloning towards the IL actor
     p.add_argument('--bc_start', type=float, default=0.5)
     p.add_argument('--bc_end', type=float, default=0.02)
+    p.add_argument('--bc_speed', type=float, default=0.25,
+                   help='BC weight of the speed output relative to steering: IL drives deliberately moderately '
+                        'fast, so pulling the speed back to it works against the lap time (1 = same as steering)')
     p.add_argument('--bc_adapt', type=int, default=1, help='double the BC weight when eval success drops below IL')
     # reward (utils/env.py calc_reward)
     p.add_argument('--ret_norm', type=int, default=1, help='scale rewards by the running std of the discounted return')
@@ -115,12 +123,21 @@ def get_args():
     p.add_argument('--lap_bonus', type=float, default=0.0, help='per second faster than the expert-pace lap (try 2)')
     p.add_argument('--uncapped_prob', type=float, default=0.5,
                    help='share of training episodes without a speed cap (a capped car gets no speed signal)')
+    p.add_argument('--track_focus', type=float, default=3.0,
+                   help='training track weight = 1 + this x the track\'s recent failure rate (0 = uniform)')
+    p.add_argument('--stuck_time', type=float, default=3.0,
+                   help='[s] end the episode as a crash after this long without --stuck_dist m of progress (0 = off)')
+    p.add_argument('--stuck_dist', type=float, default=0.5)
+    p.add_argument('--backward_dist', type=float, default=2.0, help='[m] wrong-way distance that ends it as a crash')
     # evaluation / model selection
     p.add_argument('--eval_every', type=int, default=10, help='updates between evaluations')
     p.add_argument('--eval_tracks', type=int, default=44)
     p.add_argument('--worst_eval', type=int, default=1, help='also evaluate at the worst-case sim2real settings')
     p.add_argument('--open_eval', type=int, default=1,
                    help='also require no loss on the open-space test tracks (python -u eval_open_space.py --make)')
+    p.add_argument('--full_eval', type=int, default=0,
+                   help='1: run the worst-case / open-space checks at every evaluation, not only for a model that '
+                        'beats the best on the eval tracks (needed to be saved anyway)')
     p.add_argument('--open_level', default='big', help='eval_open_space.py level used for model selection')
     p.add_argument('--open_caps', nargs='+', type=float, default=[5.0, 8.0], help='speed caps for that check')
     p.add_argument('--baseline', action='store_true', help='settings before 11/23 (see BASELINE)')
@@ -191,7 +208,16 @@ def env_config(args):
     return dict(PROGRESS_COEFF=args.progress_coeff, COLLISION_COST=args.collision_cost,
                 STEER_RATE_COST=args.steer_rate_cost, TIME_COST=args.time_cost, WALL_COST=args.wall_cost,
                 WALL_MARGIN=args.wall_margin, LAT_COST=args.lat_cost, LAT_GRIP_SHARE=args.lat_grip_share,
-                LAP_BONUS=args.lap_bonus, uncapped_prob=args.uncapped_prob)
+                LAP_BONUS=args.lap_bonus, uncapped_prob=args.uncapped_prob,
+                STUCK_TIME=args.stuck_time, STUCK_DIST=args.stuck_dist, BACKWARD_DIST=args.backward_dist)
+
+
+def track_weights(tstat, focus, prior=2.0):
+    '''sampling weight per training track from its (decayed) episode / failure counts, shrunk to the overall rate'''
+    n = sum(v[0] for v in tstat.values())
+    g = sum(v[1] for v in tstat.values()) / n if n > 0 else 0.0
+    w = {k: 1.0 + focus * (v[1] + prior * g) / (v[0] + prior) for k, v in tstat.items()}
+    return w, 1.0 + focus * g, g
 
 
 def make_env(seed, cfg):
@@ -320,11 +346,16 @@ def main():
     n_updates = int(args.total_steps // args.n_steps)
     actor_start = None                             # first update that trains the actor
     bc_boost = 1.0
+    bc_dim = torch.tensor([1.0, args.bc_speed])   # BC weight per action (steering, speed)
+    tstat = {}                                     # track basename -> [decayed episodes, decayed failures]
     if state is not None:
         total, update, actor_start, bc_boost = state['total'], state['update'], state['actor_start'], state['bc_boost']
         done_stats = state['done_stats']
+        tstat = state.get('tstat', {})
         if actor_start is not None:
             set_log_std(min(1.0, (update - actor_start) / max(1, n_updates - actor_start)))
+    if args.track_focus > 0 and tstat:              # resumed: keep the failure-weighted track sampling
+        venv.call('set_track_weights', *track_weights(tstat, args.track_focus)[:2])
 
     def save_state():
         '''everything needed to continue this run (--resume); written atomically'''
@@ -334,7 +365,7 @@ def main():
                   priv_rms=(priv_rms.mean, priv_rms.var, priv_rms.count), ret_rms=(ret_rms.mean, ret_rms.var, ret_rms.count),
                   il=dict(succ=il_succ, lap=il_lap, res=il_res, worst=il_worst, open=il_open),
                   best=best, log=log, update=update, total=total, actor_start=actor_start, bc_boost=bc_boost,
-                  done_stats=done_stats[-200:], np_rng=np.random.get_state(), torch_rng=torch.get_rng_state())
+                  done_stats=done_stats[-200:], tstat=tstat, np_rng=np.random.get_state(), torch_rng=torch.get_rng_state())
         torch.save(st, resume_path + '.tmp')
         os.replace(resume_path + '.tmp', resume_path)
     T_START = time.time()
@@ -366,8 +397,11 @@ def main():
                 fi = info['final_info'][i]
                 next_p[i] = fi['privileged']
                 done_stats.append(dict(ret=ep_ret[i] + rew[i], len=ep_len[i] + 1, laps=fi.get('lap_count', 0),
-                                       crash=bool(fail[i]), success=bool(succ[i]),
+                                       crash=bool(fail[i]), success=bool(succ[i]), stuck=bool(fi.get('stuck', False)),
                                        speed=(ep_speed[i]) / (ep_len[i] + 1)))
+                if fi.get('track_file'):                     # failure-weighted track sampling
+                    v = tstat.setdefault(os.path.basename(fi['track_file']), [0.0, 0.0])
+                    v[0], v[1] = 0.9 * v[0] + 1.0, 0.9 * v[1] + float(not succ[i])
             disc_ret = disc_ret * args.gamma + rew
             ret_rms.update(disc_ret.reshape(-1, 1))
             disc_ret[done] = 0.0
@@ -380,6 +414,12 @@ def main():
             obs, priv = nobs, npriv
             total += N
         B = {k: np.stack(v) for k, v in B.items()}                 # (T, N, ...)
+        focus = float('nan')
+        if args.track_focus > 0 and tstat:
+            w, w0, _ = track_weights(tstat, args.track_focus)
+            venv.call('set_track_weights', w, w0)          # used from each env's next episode
+            ws = np.sort(np.array(list(w.values())))[::-1]
+            focus = float(ws[:max(1, len(ws) // 5)].sum() / ws.sum())   # weight share of the hardest 20 % seen
         priv_rms.update(B['priv'].reshape(-1, P))
         t_roll = time.time() - t0
         r_scale = float(np.sqrt(ret_rms.var[0] + 1e-8)) if args.ret_norm else 1.0
@@ -437,7 +477,7 @@ def main():
                     t_mean = teacher(S[idx]).loc
                     clip_frac += float(((ratio - 1).abs() > args.clip).float().mean())
                     n_mb += 1
-                bc = ((d.loc - t_mean) ** 2).mean()
+                bc = (((d.loc - t_mean) ** 2) * bc_dim).mean()
                 opt_actor.zero_grad()
                 (pg + bc_w * bc).backward()
                 torch.nn.utils.clip_grad_norm_(actor_params, 0.5)
@@ -452,20 +492,21 @@ def main():
 
         # ---- log
         recent = done_stats[-200:]
-        mean = lambda k: float(np.mean([d[k] for d in recent])) if recent else float('nan')
+        mean = lambda k: float(np.mean([d.get(k, 0.0) for d in recent])) if recent else float('nan')
         steps_b = T * N
         rc = {k: comp[k] / steps_b for k in REWARD_KEYS}
         std = np.exp(actor.log_std.detach().numpy())
         row = dict(update=update, step=total, warm=warm, ev=ev, kl=kl, clip_frac=clip_frac, bc_w=bc_w, lr=lr,
                    std_steer=float(std[0]), std_speed=float(std[1]), critic_loss=float(closs.item()), ret_scale=r_scale,
                    ep_return=mean('ret'), ep_laps=mean('laps'), crash_rate=mean('crash'), success_rate=mean('success'),
-                   ep_speed=mean('speed'), reward_per_step=rc)
+                   ep_speed=mean('speed'), stuck_rate=mean('stuck'), track_focus=focus, reward_per_step=rc)
         log.append(row)
         print(f'[update {update}/{n_updates}] steps {total} | '
               + ('critic warm-up' if warm else f'kl {kl:.4f} clip {clip_frac:.2f} bc_w {bc_w:.3f} lr {lr:.1e}')
               + f' | EV {ev:.2f} | std steer {std[0]:.3f} speed {std[1]:.3f} | ret scale {r_scale:.1f}'
               + f' | episodes: crash {row["crash_rate"]*100:.0f}% success {row["success_rate"]*100:.0f}%'
-              + f' laps {row["ep_laps"]:.2f} speed {row["ep_speed"]:.2f} m/s'
+              + f' stuck {row["stuck_rate"]*100:.0f}% laps {row["ep_laps"]:.2f} speed {row["ep_speed"]:.2f} m/s'
+              + (f' | hardest 20% tracks get {focus*100:.0f}% of the weight' if np.isfinite(focus) else '')
               + f' | per step: prog {rc["forward_reward"]:.2f} time -{rc["time_cost"]:.2f} steer -{rc["steer_cost"]:.3f}'
               + f' wall -{rc["wall_cost"]:.3f} lat -{rc["lat_cost"]:.3f} crash -{rc["collision_cost"]:.2f}'
               + f' | rollout {t_roll:.0f}s update {time.time()-t0-t_roll:.0f}s (total {IL._hms(time.time()-T_START)})',
@@ -474,16 +515,20 @@ def main():
         if (update % args.eval_every == 0 or update == n_updates) and not warm:
             succ, lap, res = IL.evaluate(eval_args, policy(), eval_tracks, 'eval')
             gain, n_common = IL.paired_gain(res, best['res'], uncapped)
-            worst = IL.evaluate(eval_args, policy(), eval_tracks, 'worst')[0] if args.worst_eval else float('nan')
+            cand = succ > best['succ'] + 1e-9 or (succ >= best['succ'] - 1e-9 and np.isfinite(gain) and gain > 0)
+            # the worst-case and open-space checks (~half of the evaluation time) only matter for a model that
+            # could be saved; --full_eval 1 runs them every time (complete curves in plot_training.py)
+            gates = cand or args.full_eval
+            worst = IL.evaluate(eval_args, policy(), eval_tracks, 'worst')[0] if args.worst_eval and gates else float('nan')
             worst_ok = (not args.worst_eval) or worst >= il_worst - 1e-9
-            op = open_eval() if args.open_eval else float('nan')
+            op = open_eval() if args.open_eval and gates else float('nan')
             open_ok = (not args.open_eval) or op >= il_open - 1e-9
-            better = worst_ok and open_ok and (succ > best['succ'] + 1e-9 or
-                                   (succ >= best['succ'] - 1e-9 and np.isfinite(gain) and gain > 0))
+            better = cand and worst_ok and open_ok
             cprint(f'[eval @ update {update}] 2-lap success {succ*100:.1f}% (best {best["name"]} {best["succ"]*100:.1f}%) '
                    f'| vs best on {n_common} runs both finished: {gain:+.2f} s faster'
-                   + (f' | worst-case success {worst*100:.1f}% (IL {il_worst*100:.1f}%)' if args.worst_eval else '')
-                   + (f' | open-space {op*100:.1f}% (IL {il_open*100:.1f}%)' if args.open_eval else '')
+                   + (f' | worst-case success {worst*100:.1f}% (IL {il_worst*100:.1f}%)' if args.worst_eval and gates else '')
+                   + (f' | open-space {op*100:.1f}% (IL {il_open*100:.1f}%)' if args.open_eval and gates else '')
+                   + ('' if gates else ' | not better than the best: worst-case / open-space checks skipped')
                    + ('  -> saved' if better else ''), color='green' if better else 'cyan', bold=True)
             row.update(eval_success=succ, eval_lap=lap, paired_gain=gain, worst=worst, open=op, res=res, saved=better)
             if args.bc_adapt:
