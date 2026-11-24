@@ -66,8 +66,8 @@ tail -f results/imitation_9_train.log           # 진행 보기 (Ctrl+C는 보�
 ## 3. PPO 학습 — `train_ppo_s2r.py`
 
 ```bash
-OMP_NUM_THREADS=1 nohup $PY -u train_ppo_s2r.py --il imitation/11 --algo_idx 1 \
-    > results/ppo_1_train.log 2>&1 &
+OMP_NUM_THREADS=1 nohup $PY -u train_ppo_s2r.py --il imitation/11 --algo_idx 2 --force_start \
+    > results/ppo_2_train.log 2>&1 &
 ```
 
 - **시작 조건**: IL이 일반 트랙 98% 이상, 막다른 공간 95% 이상이어야 시작합니다. 아니면 이유를 출력하고 멈춥니다.
@@ -96,6 +96,8 @@ OMP_NUM_THREADS=1 nohup $PY -u train_ppo_s2r.py --il imitation/11 --algo_idx 1 \
 | `--clip` / `--max_kl` | 0.15 / 0.015 | 한 번에 바뀌는 양 |
 | `--log_std_steer` / `--log_std_speed` | −2.3 / −1.5 | 탐색 노이즈 (std 0.10 / 0.22), `--log_std_decay` 0.5만큼 줄어듦 |
 | `--bc_start` / `--bc_end` | 0.5 / 0.02 | IL 쪽으로 당기는 힘 |
+| `--bc_max` | 8 | 완주율이 IL보다 떨어질 때 당기는 힘을 2배씩 올리는 상한 (bc_start의 8배) |
+| `--collision_cost` | 500 | 충돌 벌점 (PPO 1의 200은 속도를 위해 완주율을 내줌) |
 | `--bc_speed` | 0.25 | 속도 출력은 조향의 0.25배만 IL 쪽으로 당김 (1 = 조향과 같음) |
 | `--track_focus` | 3.0 | 학습 트랙 뽑는 가중치 = 1 + 3 × 그 트랙의 최근 실패율 (0 = 균등) |
 | `--full_eval` | 0 | 0: 최악 조건·막다른 공간 평가는 저장 후보(일반 평가에서 최고 이상)일 때만 실행해 평가 시간 약 절반. 1: 매번 실행(곡선이 다 그려짐) |

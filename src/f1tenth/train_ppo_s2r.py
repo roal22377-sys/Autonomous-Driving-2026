@@ -110,10 +110,13 @@ def get_args():
                    help='BC weight of the speed output relative to steering: IL drives deliberately moderately '
                         'fast, so pulling the speed back to it works against the lap time (1 = same as steering)')
     p.add_argument('--bc_adapt', type=int, default=1, help='double the BC weight when eval success drops below IL')
+    p.add_argument('--bc_max', type=float, default=8.0,
+                   help='the boosted BC weight can reach this x bc_start (PPO 1 capped it at bc_start: no effect early on)')
     # reward (utils/env.py calc_reward)
     p.add_argument('--ret_norm', type=int, default=1, help='scale rewards by the running std of the discounted return')
     p.add_argument('--progress_coeff', type=float, default=10.0)
-    p.add_argument('--collision_cost', type=float, default=200.0)
+    p.add_argument('--collision_cost', type=float, default=500.0,
+                   help='PPO 1 (200) traded completion for speed: 87.9 -> 50.8 %% success in 40 updates')
     p.add_argument('--steer_rate_cost', type=float, default=3.0)
     p.add_argument('--time_cost', type=float, default=0.1)
     p.add_argument('--wall_cost', type=float, default=5.0)
@@ -450,7 +453,7 @@ def main():
             actor_start = update
         warm = actor_start is None
         frac = 0.0 if warm else min(1.0, (update - actor_start) / max(1, n_updates - actor_start))
-        bc_w = min(args.bc_start, args.bc_start * (args.bc_end / args.bc_start) ** frac * bc_boost)
+        bc_w = min(args.bc_start * args.bc_max, args.bc_start * (args.bc_end / args.bc_start) ** frac * bc_boost)
         lr = args.lr + (args.lr_end - args.lr) * frac
         for g in opt_actor.param_groups:
             g['lr'] = lr
