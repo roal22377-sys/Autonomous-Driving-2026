@@ -152,8 +152,11 @@ def make_variant(map_name, seed, reverse=False, original=False):
     c_opt, _ = resample_closed(center, OPT_DS)
     tree = cKDTree(center)
     _, j = tree.query(c_opt)
-    _, off = min_curvature_line(c_opt, wl[j], wr[j], RACELINE_MARGIN)
-    line_opt, _, _ = refine_min_time(c_opt, wl[j], wr[j], RACELINE_MARGIN, off, **LAP_TIME_LIMITS)
+    # bounded by the rough wall where it comes closer than the smooth width (11/24: the roughness was added after
+    # the line, leaving 0.33 m from the car's center to the wall instead of 0.55; pockets only widen, ignored here)
+    bl, br = np.minimum(wl, wl_occ)[j], np.minimum(wr, wr_occ)[j]
+    _, off = min_curvature_line(c_opt, bl, br, RACELINE_MARGIN)
+    line_opt, _, _ = refine_min_time(c_opt, bl, br, RACELINE_MARGIN, off, **LAP_TIME_LIMITS)
     raceline, _ = resample_closed(line_opt, DENSE_DS)
 
     occ, origin = rasterize(center, wl_occ, wr_occ, runoffs)

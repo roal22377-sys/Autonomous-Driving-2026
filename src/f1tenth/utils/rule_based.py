@@ -377,7 +377,7 @@ class RacelinePlanner:
 
     def __init__(self, track, wb, v_min=2.0, v_max=8.0, a_lat=4.0, a_acc=3.0, a_brake=3.0,
                  max_steer=0.497, lad_base=0.6, lad_gain=0.22, sv_max=2.65, merge_dist=0.6, max_steer_left=None,
-                 max_steer_right=None,
+                 max_steer_right=None, sim_agent=None,
                  merge_speed=2.0, a_lat_steer=None, steer_speed_mode='cap', lad_off_gain=0.0):
         from utils.raceline import speed_profile
         self.merge_dist = merge_dist
@@ -410,6 +410,10 @@ class RacelinePlanner:
         self.wheelbase, self.max_steer, self.sv_max = wb, max_steer, sv_max
         self.max_steer_left = max_steer if max_steer_left is None else min(max_steer_left, max_steer)   # + = left
         self.max_steer_right = max_steer if max_steer_right is None else min(max_steer_right, max_steer)
+        # the simulator's own vehicle (dynamics, integrator, params) to predict with, if given (11/24: the no-slip
+        # bicycle model left a 0.15 m mean tracking error; with the true dynamics 0.12 m, worst-case 3/6 -> 6/6 tracks)
+        self.sim_agent = sim_agent
+        self._last_cmd = (0.0, 0.0)                       # (wheel angle, speed) last returned by plan()
         self.v_min, self.v_max, self.a_acc = v_min, v_max, a_acc
         self.lad_base, self.lad_gain = lad_base, lad_gain
         # look-ahead grows with the distance from the race line (11/23): on the line nothing changes, off it
@@ -440,6 +444,16 @@ class RacelinePlanner:
 
     def predict(self, state, steer_queue, speed_queue, dt):
         '''roll the true state [x, y, steer, v, yaw, ...] through the pending commands'''
+        if self.sim_agent is not None:
+            ag = self.sim_agent
+            xs = np.array(state, dtype=np.float64)
+            for k in range(max(len(steer_queue), len(speed_queue))):
+                # a queue that runs out keeps the newest command (the one sent last)
+                st = steer_queue[k] if k < len(steer_queue) else self._last_cmd[0]
+                sp = speed_queue[k] if k < len(speed_queue) else self._last_cmd[1]
+                accl, sv = ag.action_type.act(action=(sp, st), state=xs, params=ag.params)
+                xs = ag.integrator.integrate(f=ag.model.f_dynamics, x=xs, u=np.array([sv, accl]), dt=dt, params=ag.params)
+            return xs[0], xs[1], xs[4], xs[3]
         x, y, d, v, th = state[0], state[1], state[2], state[3], state[4]
         n = max(len(steer_queue), len(speed_queue))
         for k in range(n):
@@ -483,4 +497,5 @@ class RacelinePlanner:
                 speed = min(speed, v_turn)
             elif speed > v_turn:                    # 'hold': no acceleration beyond the turn limit
                 speed = min(speed, max(v_turn, float(state[3])))
+        self._last_cmd = (steer, speed)
         return speed, steer

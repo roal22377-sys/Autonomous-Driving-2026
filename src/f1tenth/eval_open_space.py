@@ -169,7 +169,7 @@ def run(job):
         if model == 'expert':
             sq, vq = env.pending_commands()
             v, s = pl.plan(env.vehicle_state(), sq, vq, env.timestep)
-            act = np.clip([s / env.max_steer, normalize_speed(v, env.min_speed, env.max_speed)], -1, 1)
+            act = np.clip([env.steer_command(s), normalize_speed(v, env.min_speed, env.max_speed)], -1, 1)
         else:
             with torch.no_grad():
                 act = actor(torch.as_tensor(rms.normalize(obs), dtype=torch.float32)).loc.numpy()

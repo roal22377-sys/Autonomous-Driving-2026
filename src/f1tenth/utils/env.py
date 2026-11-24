@@ -147,18 +147,55 @@ class F1Wrapper(gym.Wrapper):
         self.steer_queue = deque([0.0] * self.steer_delay_steps)
         self.speed_queue = deque([0.0] * self.speed_delay_steps)
 
+    def steer_command(self, angle):
+        '''normalized steering command for a wheel angle [rad] (+ = left) with this episode's per-side lock;
+        the expert uses it, so its full lock is a full command as on the car'''
+        lock = self.steer_left_max if angle > 0 else self.steer_right_max
+        return float(np.clip(angle / max(lock, 1e-6), -1.0, 1.0))
+
     def _load_track(self, path):
         if path in self._track_cache:
             self._track_cache.move_to_end(path)
             return self._track_cache[path]
         from utils.track_gen import to_track
         track = to_track(path)
+        try:                                     # occupancy for the footprint collision check
+            with np.load(path) as z:
+                track._free = (z['occupancy'] > 128, float(z['resolution']), np.asarray(z['origin'], np.float64))
+        except Exception:
+            track._free = None
         self._track_cache[path] = track
         if len(self._track_cache) > MAX_TRACK_CACHE:
             self._track_cache.popitem(last=False)
         return track
 
     # ---------------------------------------------------------------- pose
+    def footprint_in_wall(self):
+        '''any of 8 body points (corners, mid-sides) in an occupied cell of the generated track's grid'''
+        free = getattr(self._env.unwrapped.track, '_free', None)
+        if free is None:
+            return False
+        grid, res, org = free
+        st = self.vehicle_state()
+        p = self.params
+        front = float(p['lf']) + float(p.get('front_overhang', 0.10))
+        rear = float(p.get('length', 0.60)) - front
+        hw = float(p.get('width', 0.30)) / 2.0
+        c, sn = np.cos(st[4]), np.sin(st[4])
+        for u in (front, 0.0, -rear):
+            for v in ((-hw, hw) if u != 0.0 else (-hw, hw)):
+                x = st[0] + u * c - v * sn
+                y = st[1] + u * sn + v * c
+                i, j = int((y - org[1]) / res), int((x - org[0]) / res)
+                if i < 0 or j < 0 or i >= grid.shape[0] or j >= grid.shape[1] or not grid[i, j]:
+                    return True
+        for u in (front, -rear):                         # bumper centers
+            x, y = st[0] + u * c, st[1] + u * sn
+            i, j = int((y - org[1]) / res), int((x - org[0]) / res)
+            if i < 0 or j < 0 or i >= grid.shape[0] or j >= grid.shape[1] or not grid[i, j]:
+                return True
+        return False
+
     def _reset_pose(self, obs_dict):
         # collision
         self.collision = obs_dict['collisions'][0]
@@ -370,7 +407,7 @@ class F1Wrapper(gym.Wrapper):
                                     speed : ~inf ~ inf
 
             Changed to:             [desired steer, normalized speed]
-                                    steer : -1(left) ~ 1(right)
+                                    steer : -1(right) ~ 1(left)
                                     speed : -1 ~ 1              -> mapped linearly to [min_speed, max_speed]
 
             With sim2real delays, the command reaches the car steer_delay / speed_delay later.
@@ -379,19 +416,21 @@ class F1Wrapper(gym.Wrapper):
         self.prev_cmd = self.last_action
         self.last_action = cmd.copy()
 
-        # the real servo can't reach the policy's full left lock (+ = left); agent_node.py clips there
-        steer = float(np.clip(float(cmd[0])*self.max_steer, -self.steer_right_max, self.steer_left_max))
         speed = min(float(unnormalize_speed(cmd[1], self.min_speed, self.max_speed)), self.speed_cap)
         # starting from rest: small commands are raised to the kick speed, like agent_node.py
         speed = apply_start_kick(speed, float(self.vehicle_state()[3]), self.kick_cfg)
-        # history = what was actually sent (after the steering clip and speed cap), exactly like agent_node.py
-        self.history.push([steer / self.max_steer, normalize_speed(speed, self.min_speed, self.max_speed)])
-        # steering linkage nonlinearity below full lock (per side, sim2real.steer_scale_*): the mid-range wheel angle
-        # is `scale` x the command, blending to exactly the command at full lock (11/23 circle test: full lock is
-        # 0.41 rad on both sides). Until 11/24 the scale was applied at full lock too (left max 0.35 rad at 0.85).
-        x = min(abs(steer) / self.max_steer, 1.0)
-        k = self.steer_scale[0 if steer > 0 else 1]
-        steer = float(np.clip(steer * (k + (1.0 - k) * x * x), -self.max_steer, self.max_steer))
+        # history = what was actually sent (the command and the capped / kicked speed), exactly like agent_node.py:
+        # on the car the command reaches +-1 (the servo end) whatever the wheel angle there turns out to be
+        self.history.push([float(cmd[0]), normalize_speed(speed, self.min_speed, self.max_speed)])
+        # wheel angle (+ = left): the full command gives this episode's lock on that side (sim2real.steer_*_max,
+        # 0.45-0.50 rad), and below it the linkage scale k (sim2real.steer_scale_*) blends to exactly the lock at
+        # full command. Until 11/24 evening the lock clipped the COMMAND (history 0.9 at a 0.45 lock, unlike the car)
+        # and k > 1 could push the wheel past the lock.
+        x = min(abs(float(cmd[0])), 1.0)
+        side = 0 if cmd[0] > 0 else 1
+        lock = self.steer_left_max if side == 0 else self.steer_right_max
+        k = self.steer_scale[side]
+        steer = float(np.sign(cmd[0]) * lock * x * (k + (1.0 - k) * x * x))
         if self.steer_delay_steps > 0:
             self.steer_queue.append(steer)
             steer = self.steer_queue.popleft()
@@ -402,6 +441,11 @@ class F1Wrapper(gym.Wrapper):
 
         obs_dict, _, terminate, truncate, info = self._env.step(_action)
         self._step_pose(obs_dict)
+        if not self.collision and self.footprint_in_wall():
+            # the gym's lidar TTC check (laser_models.check_ttc_jit) only fires for 0 <= TTC < 5 ms: a car that
+            # crosses the wall line within one 25 ms step or scrapes it sideways is missed, then sees open space
+            # from inside the wall (11/24: 2 of 36 noisy-expert crashes flagged 1 s and 60 s late)
+            self.collision, terminate = True, True
         self.elapsed += self.timestep
         lap_done = None
         if self.progress_laps:
