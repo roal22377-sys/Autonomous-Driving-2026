@@ -313,8 +313,10 @@ EVAL_CAPS = tuple(c for c, _ in EVAL_SETTINGS)
 
 
 def evaluate(args, policy, tracks, mode='eval', settings=EVAL_SETTINGS):
-    '''success over all runs; lap = mean 2-lap time of the first setting's runs that finished'''
-    jobs = [(p, policy, mode, 7 + i, cap, start) for cap, start in settings for i, p in enumerate(sorted(tracks))]
+    '''success over all runs; lap = mean 2-lap time of the first setting's runs that finished.
+       A setting's cap may be a tuple: the tracks then take its caps in turn (one run per track).'''
+    jobs = [(p, policy, mode, 7 + i, cap[i % len(cap)] if isinstance(cap, (tuple, list)) else cap, start)
+            for cap, start in settings for i, p in enumerate(sorted(tracks))]
     res = run_pool(eval_worker, jobs, min(args.workers, len(jobs)), len(jobs), 'eval', 'episodes')
     succ = np.mean([r[1] for r in res])
     held = [r[1] for r in res if HOLDOUT in r[0]]

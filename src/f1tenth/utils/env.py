@@ -330,6 +330,9 @@ class F1Wrapper(gym.Wrapper):
                               # ~1 Hz changes the command only a little per 25 ms step, so a step-to-step cost misses it
     STRAIGHT_EMA_TIME = 0.5   # [s] time constant of that moving average (slow line changes stay cheap)
     STRAIGHT_CURV = 0.05      # [1/m] straight = |centerline curvature| below this 1, 3 and 6 m ahead (radius > 20 m)
+    STRAIGHT_V_REF = 0.0      # [m/s] > 0: that cost is per meter driven (x progress / (V_REF dt)), the same as per step at
+                              # V_REF. 11/25 PPO 7 (per step, 15): a correction cost 2.7x more per meter at 3 m/s than at 8;
+                              # update 60 stopped correcting drifts on straights at caps 3-4 (0/22 finished at cap 3)
     # stuck / wrong way (PPO only, 0 = off): no STUCK_DIST m of new progress for STUCK_TIME s, or BACKWARD_DIST m behind
     # the furthest point reached, ends the episode as a crash (collision cost). Without it a car that turned around in
     # a dead-end bay drives on for minutes (time limit: 2 laps at 1.6 m/s) and blurs what went wrong.
@@ -378,7 +381,8 @@ class F1Wrapper(gym.Wrapper):
         if action is not None and self.STRAIGHT_STEER_COST > 0:
             self.steer_ema += (float(action[0]) - self.steer_ema) * min(1.0, self.timestep / self.STRAIGHT_EMA_TIME)
             if self.on_straight():
-                straight_cost = self.STRAIGHT_STEER_COST*(float(action[0]) - self.steer_ema)**2
+                per_m = max(0.0, float(self.delta_s)) / (self.STRAIGHT_V_REF*self.timestep) if self.STRAIGHT_V_REF > 0 else 1.0
+                straight_cost = self.STRAIGHT_STEER_COST*(float(action[0]) - self.steer_ema)**2*per_m
 
         time_cost = self.TIME_COST
         wall_cost = self.WALL_COST * max(0.0, self.WALL_MARGIN - self.min_wall)

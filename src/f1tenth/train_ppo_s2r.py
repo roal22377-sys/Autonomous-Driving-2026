@@ -128,6 +128,9 @@ def get_args():
                    help='extra steering-rate cost where the track ahead is straight (radius > 1/--straight_curv): '
                         'the 11/24 car weaved +-20 cm on straights; corners keep --steer_rate_cost only')
     p.add_argument('--straight_curv', type=float, default=0.05)
+    p.add_argument('--straight_v_ref', type=float, default=0.0,
+                   help='[m/s] > 0: the straight-line cost is per meter (equal to per step at this speed), so slow '
+                        'driving does not make corrections dearer (PPO 8: 4)')
     p.add_argument('--time_cost', type=float, default=0.1)
     p.add_argument('--wall_cost', type=float, default=5.0)
     p.add_argument('--wall_margin', type=float, default=0.30)
@@ -152,6 +155,10 @@ def get_args():
     # evaluation / model selection
     p.add_argument('--eval_every', type=int, default=10, help='updates between evaluations')
     p.add_argument('--eval_tracks', type=int, default=44)
+    p.add_argument('--eval_low_caps', type=float, nargs='*', default=[2.0, 2.5, 3.0, 3.5, 4.0],
+                   help='one more centerline run per eval track at these caps in turn (the car drives at 2-5 m/s). '
+                        '11/25 PPO 7: 0/22 finished at cap 3 (drifted into the left wall on straights without '
+                        'correcting) while caps 5 / 8, the only ones evaluated, still looked fine. Empty = off')
     p.add_argument('--worst_eval', type=int, default=1, help='also evaluate at the worst-case sim2real settings')
     p.add_argument('--open_eval', type=int, default=1,
                    help='also require no loss on the open-space test tracks (python -u eval_open_space.py --make)')
@@ -249,7 +256,7 @@ def env_config(args):
     '''the reward / training settings every worker applies to its env (spawned workers do not see args)'''
     return dict(PROGRESS_COEFF=args.progress_coeff, COLLISION_COST=args.crash_start or args.collision_cost,
                 STEER_RATE_COST=args.steer_rate_cost, STRAIGHT_STEER_COST=args.straight_steer_cost,
-                STRAIGHT_CURV=args.straight_curv, TIME_COST=args.time_cost, WALL_COST=args.wall_cost,
+                STRAIGHT_CURV=args.straight_curv, STRAIGHT_V_REF=args.straight_v_ref, TIME_COST=args.time_cost, WALL_COST=args.wall_cost,
                 WALL_MARGIN=args.wall_margin, LAT_COST=args.lat_cost, LAT_GRIP_SHARE=args.lat_grip_share,
                 LAP_BONUS=args.lap_bonus, uncapped_prob=args.uncapped_prob,
                 STUCK_TIME=args.stuck_time, STUCK_DIST=args.stuck_dist, BACKWARD_DIST=args.backward_dist,
@@ -360,6 +367,7 @@ def main():
     eval_tracks = sorted([t for t in IL.list_variants(IL.MAPS) if variant_map(t) in IL.EVAL_MAPS
                           and (IL.HOLDOUT in t or os.path.basename(t)[:-4] in [m + s for m in IL.EVAL_MAPS for s in ('', '_rev')])])[:args.eval_tracks]
     uncapped = tuple(s for s in IL.EVAL_SETTINGS if s[0] >= args.max_speed)       # lap time is compared on these
+    eval_settings = tuple(IL.EVAL_SETTINGS) + ((tuple(args.eval_low_caps), 'center'),) if args.eval_low_caps else tuple(IL.EVAL_SETTINGS)
     policy = lambda: ({k: v.clone() for k, v in actor.state_dict().items()}, rms.mean.copy(), rms.var.copy())
     eval_args = EasyDict(args)
     eval_args.workers = args.eval_workers         # evaluation pool size (the rollout workers stay alive meanwhile)
@@ -402,7 +410,7 @@ def main():
         src = torch.load(f'results/{args.baseline_from}/checkpoint/resume.pt', map_location='cpu', weights_only=False)
         if src['args'].get('il') != args.il:
             raise SystemExit(f'--baseline_from {args.baseline_from} started from {src["args"].get("il")}, not {args.il}')
-        diff = {k: (src['args'].get(k), args[k]) for k in ('worst_eval', 'open_eval', 'open_level', 'eval_tracks', 'sim_override')
+        diff = {k: (src['args'].get(k), args[k]) for k in ('worst_eval', 'open_eval', 'open_level', 'eval_tracks', 'eval_low_caps', 'sim_override')
                 if src['args'].get(k) != args[k]}
         def body(path):                                     # yaml without comments / blank lines
             return [l.split('#')[0].rstrip() for l in open(path) if l.split('#')[0].strip()]
@@ -416,7 +424,7 @@ def main():
             raise SystemExit(f'--baseline_from {args.baseline_from}: its worst-case / open-space baseline is missing')
         cprint(f'[baseline] IL evaluation reused from {args.baseline_from}', color='cyan')
     else:
-        il_succ, il_lap, il_res = IL.evaluate(eval_args, policy(), eval_tracks, 'eval')
+        il_succ, il_lap, il_res = IL.evaluate(eval_args, policy(), eval_tracks, 'eval', settings=eval_settings)
         il_worst = IL.evaluate(eval_args, policy(), eval_tracks, 'worst')[0] if args.worst_eval else float('nan')
         il_open = open_eval() if args.open_eval else float('nan')
     if state is None and args.init:
@@ -634,7 +642,7 @@ def main():
               flush=True)
 
         if (update % args.eval_every == 0 or update == n_updates) and not warm:
-            succ, lap, res = IL.evaluate(eval_args, policy(), eval_tracks, 'eval')
+            succ, lap, res = IL.evaluate(eval_args, policy(), eval_tracks, 'eval', settings=eval_settings)
             gain, n_common = IL.paired_gain(res, best['res'], uncapped)
             cand = succ > best['succ'] + 1e-9 or (succ >= best['succ'] - 1e-9 and np.isfinite(gain) and gain > 0)
             # the worst-case and open-space checks (~half of the evaluation time) only matter for a model that
