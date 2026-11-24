@@ -98,7 +98,7 @@ OMP_NUM_THREADS=1 ~/venv/f1tenth/bin/python -u eval_open_space.py expert imitati
 
 ## 실차: IL만 / IL+PPO 버전 나눠 쓰기
 
-- `config/agent_il.yaml` = IL run 9, `config/agent_ilppo.yaml` = IL+PPO(algo_idx를 저장된 PPO 번호로). 기존 `agent.yaml`(run 8)은 그대로.
+- `config/agent_il.yaml` = IL run 11, `config/agent_ilppo.yaml` = IL+PPO(algo_idx를 저장된 PPO 번호로). 기존 `agent.yaml`(run 8)은 그대로.
 - 둘 다 `steer_gain` 1.0, `speed_min` 0, `speed_limit` 3.0부터.
 - 선택: `MODEL=il tools/drive_session.sh` / `MODEL=ilppo tools/drive_session.sh` (`tools/run_car.sh`도 같음). MODEL 없으면 agent.yaml.
 - 학습이 끝난 모델은 `results/<model>/{sim2real,backup,README.md}`만 커밋(데이터·체크포인트 제외)하고 태그를 단다:
