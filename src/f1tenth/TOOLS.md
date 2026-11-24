@@ -96,6 +96,10 @@ OMP_NUM_THREADS=1 nohup $PY -u train_ppo_s2r.py --il imitation/11 --algo_idx 2 -
 | `--clip` / `--max_kl` | 0.15 / 0.015 | 한 번에 바뀌는 양 |
 | `--log_std_steer` / `--log_std_speed` | −2.3 / −1.5 | 탐색 노이즈 (std 0.10 / 0.22), `--log_std_decay` 0.5만큼 줄어듦 |
 | `--bc_start` / `--bc_end` | 0.5 / 0.02 | IL 쪽으로 당기는 힘 |
+| `--crash_adapt` / `--crash_up` / `--crash_down` / `--crash_max` | 1 / 1.5 / 0.8 / 2000 | 평가 완주율이 IL보다 2 %p 넘게 낮으면 충돌 벌점 ×1.5, IL 이상이면 ×0.8 (500 아래로는 안 내림) |
+| `--init` | 없음 | PPO 체크포인트에서 시작 (예: `ppo_s2r/2/checkpoint/model_1760000.pt`). 저장 기준은 계속 `--il`과 비교 |
+| `--baseline_from` | 없음 | 같은 `--il`로 돌린 이전 PPO의 IL 기준 평가 재사용 (약 8분 절약) |
+| `--bc_adapt` | 0 | 1이면 완주율 하락 때 IL 쪽 당김을 2배씩 (PPO 2 방식) |
 | `--bc_max` | 8 | 완주율이 IL보다 떨어질 때 당기는 힘을 2배씩 올리는 상한 (bc_start의 8배) |
 | `--collision_cost` | 500 | 충돌 벌점 (PPO 1의 200은 속도를 위해 완주율을 내줌) |
 | `--bc_speed` | 0.25 | 속도 출력은 조향의 0.25배만 IL 쪽으로 당김 (1 = 조향과 같음) |

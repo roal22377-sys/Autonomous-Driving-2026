@@ -22,6 +22,10 @@
       then PPO (clip + KL early stop) with a behavior-cloning term towards the IL policy whose weight
       decays, and is raised again if the evaluation success drops below the IL policy's; the speed output is
       pulled only bc_speed (0.25) as hard as the steering (IL is moderately fast on purpose, PPO is for lap time)
+    - completion as a constraint (--crash_adapt, PPO 3): after each evaluation below IL - 2 %p the collision
+      cost goes x1.5 (up to 2000), at or above IL it eases x0.8 back towards --collision_cost; the BC term only
+      decays (no boost), so safety comes from the reward and the policy is free to leave the IL line / speeds
+    - --init: continue from an earlier PPO checkpoint (IL stays the baseline), --baseline_from: reuse its IL eval
     - failure-weighted training tracks (--track_focus): a track is drawn with weight 1 + focus x its recent
       failure rate, so the episodes go where the policy still crashes (dead-end bays, hairpins)
     - an episode that makes no progress (stuck) or drives the wrong way ends as a crash (--stuck_time,
@@ -109,7 +113,9 @@ def get_args():
     p.add_argument('--bc_speed', type=float, default=0.25,
                    help='BC weight of the speed output relative to steering: IL drives deliberately moderately '
                         'fast, so pulling the speed back to it works against the lap time (1 = same as steering)')
-    p.add_argument('--bc_adapt', type=int, default=1, help='double the BC weight when eval success drops below IL')
+    p.add_argument('--bc_adapt', type=int, default=0,
+                   help='1: double the BC weight when eval success drops below IL (PPO 2; it kept the policy near IL '
+                        'instead of letting it learn to be safe itself -> PPO 3 adapts the collision cost instead)')
     p.add_argument('--bc_max', type=float, default=8.0,
                    help='the boosted BC weight can reach this x bc_start (PPO 1 capped it at bc_start: no effect early on)')
     # reward (utils/env.py calc_reward)
@@ -151,6 +157,20 @@ def get_args():
     p.add_argument('--min_il_success', type=float, default=0.98, help='IL 2-lap success on the eval tracks')
     p.add_argument('--min_il_open', type=float, default=0.95, help='IL 2-lap success on the open-space tracks')
     p.add_argument('--force_start', action='store_true', help='start PPO even below those')
+    # start / safety (PPO 3)
+    p.add_argument('--init', default=None,
+                   help='start the actor (and critic) from this PPO checkpoint under results/ instead of the IL policy, '
+                        'e.g. ppo_s2r/2/checkpoint/model_1760000.pt; the IL policy stays the baseline of the save gates '
+                        'and the BC term pulls towards this starting policy')
+    p.add_argument('--baseline_from', default=None,
+                   help='reuse the IL baseline evaluation of an earlier PPO run from the same --il (e.g. ppo_s2r/2) '
+                        'instead of evaluating it again (~8 min)')
+    p.add_argument('--crash_adapt', type=int, default=1,
+                   help='after each evaluation: success below IL - 2 %%p -> collision cost x crash_up (up to crash_max); '
+                        'at or above IL -> x crash_down (not below --collision_cost). Safety from the reward, not from IL')
+    p.add_argument('--crash_up', type=float, default=1.5)
+    p.add_argument('--crash_down', type=float, default=0.8)
+    p.add_argument('--crash_max', type=float, default=2000.0)
     a = p.parse_args()
     if a.baseline:
         vars(a).update(BASELINE)
@@ -318,10 +338,26 @@ def main():
         torch.set_rng_state(state['torch_rng'])
         cprint(f'[resume] continuing after update {state["update"]} ({state["total"]} steps), best so far: {best["name"]}',
                color='green', bold=True)
+    elif args.baseline_from:
+        src = torch.load(f'results/{args.baseline_from}/checkpoint/resume.pt', map_location='cpu', weights_only=False)
+        if src['args'].get('il') != args.il:
+            raise SystemExit(f'--baseline_from {args.baseline_from} started from {src["args"].get("il")}, not {args.il}')
+        il_succ, il_lap, il_res, il_worst, il_open = (src['il'][k] for k in ('succ', 'lap', 'res', 'worst', 'open'))
+        cprint(f'[baseline] IL evaluation reused from {args.baseline_from}', color='cyan')
     else:
         il_succ, il_lap, il_res = IL.evaluate(eval_args, policy(), eval_tracks, 'eval')
         il_worst = IL.evaluate(eval_args, policy(), eval_tracks, 'worst')[0] if args.worst_eval else float('nan')
         il_open = open_eval() if args.open_eval else float('nan')
+    if state is None and args.init:
+        # after the IL baseline (evaluated with the IL actor): continue from an earlier PPO policy
+        ck = torch.load(f'results/{args.init}', map_location='cpu', weights_only=False)
+        actor.load_state_dict(ck['actor'])
+        if 'critic' in ck:
+            critic.load_state_dict(ck['critic'])
+        teacher.load_state_dict(actor.state_dict())
+        set_log_std(0.0)
+        cprint(f'[init] actor{" and critic" if "critic" in ck else ""} from results/{args.init} '
+               f'(BC pulls towards it; the save gates still compare with IL {args.il})', color='cyan', bold=True)
     cprint(f'[IL {args.il}] eval 2-lap success {il_succ*100:.1f}% mean uncapped 2-lap time {il_lap:.1f}s'
            + (f' | worst-case success {il_worst*100:.1f}%' if args.worst_eval else '')
            + (f' | open-space ({args.open_level}) 2-lap success {il_open*100:.1f}%' if args.open_eval else ''),
@@ -349,12 +385,16 @@ def main():
     n_updates = int(args.total_steps // args.n_steps)
     actor_start = None                             # first update that trains the actor
     bc_boost = 1.0
+    crash_cost = args.collision_cost                # adapted after evaluations (--crash_adapt)
     bc_dim = torch.tensor([1.0, args.bc_speed])   # BC weight per action (steering, speed)
     tstat = {}                                     # track basename -> [decayed episodes, decayed failures]
     if state is not None:
         total, update, actor_start, bc_boost = state['total'], state['update'], state['actor_start'], state['bc_boost']
         done_stats = state['done_stats']
         tstat = state.get('tstat', {})
+        crash_cost = state.get('crash_cost', args.collision_cost)
+        if crash_cost != args.collision_cost:
+            venv.set_attr('COLLISION_COST', crash_cost)
         if actor_start is not None:
             set_log_std(min(1.0, (update - actor_start) / max(1, n_updates - actor_start)))
     if args.track_focus > 0 and tstat:              # resumed: keep the failure-weighted track sampling
@@ -368,6 +408,7 @@ def main():
                   priv_rms=(priv_rms.mean, priv_rms.var, priv_rms.count), ret_rms=(ret_rms.mean, ret_rms.var, ret_rms.count),
                   il=dict(succ=il_succ, lap=il_lap, res=il_res, worst=il_worst, open=il_open),
                   best=best, log=log, update=update, total=total, actor_start=actor_start, bc_boost=bc_boost,
+                  crash_cost=crash_cost,
                   done_stats=done_stats[-200:], tstat=tstat, np_rng=np.random.get_state(), torch_rng=torch.get_rng_state())
         torch.save(st, resume_path + '.tmp')
         os.replace(resume_path + '.tmp', resume_path)
@@ -537,6 +578,18 @@ def main():
             if args.bc_adapt:
                 # keep the policy near IL while it is worse than IL; relax again once it recovers
                 bc_boost = min(bc_boost * 2.0, 64.0) if succ < il_succ - 0.02 else max(1.0, bc_boost / 2.0)
+            if args.crash_adapt:
+                # completion as a constraint: the policy itself must find it worth staying safe
+                old = crash_cost
+                if succ < il_succ - 0.02:
+                    crash_cost = min(crash_cost * args.crash_up, args.crash_max)
+                elif succ >= il_succ - 1e-9:
+                    crash_cost = max(crash_cost * args.crash_down, args.collision_cost)
+                if crash_cost != old:
+                    venv.set_attr('COLLISION_COST', crash_cost)
+                    cprint(f'[crash cost] {old:.0f} -> {crash_cost:.0f} (eval {succ*100:.1f}% vs IL {il_succ*100:.1f}%)',
+                           color='yellow', bold=True)
+            row['collision_cost'] = crash_cost
             torch.save({'actor': actor.state_dict(), 'critic': critic.state_dict()},
                        f'{args.save_dir}/checkpoint/model_{total}.pt')
             if better:
