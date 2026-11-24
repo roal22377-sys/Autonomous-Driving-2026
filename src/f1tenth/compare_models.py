@@ -47,7 +47,7 @@ def run(job):
     if model == 'expert':
         from utils.rule_based import RacelinePlanner
         pl = RacelinePlanner(env._env.unwrapped.track, args.length_f + args.length_r, v_min=env.min_speed,
-                             v_max=env.speed_cap, max_steer=env.max_steer, max_steer_left=env.steer_left_max,
+                             v_max=env.speed_cap, max_steer=env.max_steer, max_steer_left=env.steer_left_max, max_steer_right=env.steer_right_max,
                              **IL.expert_kwargs(env))
     else:
         rms = RunningMeanStd('agent_obs', args.obs_dim)

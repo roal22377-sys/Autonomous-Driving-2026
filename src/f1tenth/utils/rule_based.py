@@ -377,6 +377,7 @@ class RacelinePlanner:
 
     def __init__(self, track, wb, v_min=2.0, v_max=8.0, a_lat=4.0, a_acc=3.0, a_brake=3.0,
                  max_steer=0.497, lad_base=0.6, lad_gain=0.22, sv_max=2.65, merge_dist=0.6, max_steer_left=None,
+                 max_steer_right=None,
                  merge_speed=2.0, a_lat_steer=None, steer_speed_mode='cap', lad_off_gain=0.0):
         from utils.raceline import speed_profile
         self.merge_dist = merge_dist
@@ -408,6 +409,7 @@ class RacelinePlanner:
         self.ds = float(np.mean(np.linalg.norm(np.roll(xy, -1, axis=0) - xy, axis=1)))
         self.wheelbase, self.max_steer, self.sv_max = wb, max_steer, sv_max
         self.max_steer_left = max_steer if max_steer_left is None else min(max_steer_left, max_steer)   # + = left
+        self.max_steer_right = max_steer if max_steer_right is None else min(max_steer_right, max_steer)
         self.v_min, self.v_max, self.a_acc = v_min, v_max, a_acc
         self.lad_base, self.lad_gain = lad_base, lad_gain
         # look-ahead grows with the distance from the race line (11/23): on the line nothing changes, off it
@@ -460,7 +462,7 @@ class RacelinePlanner:
         dx, dy = target - pos
         local_y = -np.sin(th) * dx + np.cos(th) * dy
         steer = np.arctan(self.wheelbase * 2.0 * local_y / max(dx * dx + dy * dy, 1e-6))
-        steer = float(np.clip(steer, -self.max_steer, self.max_steer))
+        steer = float(np.clip(steer, -self.max_steer_right, self.max_steer_left))
         # speed for where the car will be when this command lands (a little ahead of the prediction)
         speed = float(self.v_profile[(i + int(round(0.3 / self.ds))) % self.n])
         # far from the line (start on the centerline, after a disturbance): merge back slowly

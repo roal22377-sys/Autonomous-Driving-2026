@@ -86,6 +86,7 @@ class F1Wrapper(gym.Wrapper):
         self.base_params = dict(self._env.unwrapped.params)
         self.steer_delay_steps, self.speed_delay_steps = 0, 0
         self.steer_left_max = self.max_steer    # [rad] left end of the servo (sim2real.steer_left_max)
+        self.steer_right_max = self.max_steer   # [rad] right end (sim2real.steer_right_max, 11/24)
         self.steer_scale = (1.0, 1.0)              # real / commanded wheel angle, (left, right) (sim2real.steer_scale_*)
         self.track_files = None
         if sim_mode != 'ideal' and self.s2r.get('generated_tracks', False):
@@ -106,7 +107,7 @@ class F1Wrapper(gym.Wrapper):
     # ---------------------------------------------------------------- sim2real
     # sim_mode='worst': which end of each range is the harder one (0 = low end, 1 = high end)
     WORST_END = {'steer_delay': 1, 'speed_delay': 1, 'a_max': 0, 'mu_scale': 0, 'noise_scale': 1,
-                 'steer_scale_left': 0, 'steer_scale_right': 0, 'steer_left_max': 0}
+                 'steer_scale_left': 0, 'steer_scale_right': 0, 'steer_left_max': 0, 'steer_right_max': 0}
 
     # training episodes with several gaps at their hard side at once (PPO 5): with HARD_PROB, every sim2real
     # entry of the episode is drawn from the HARD_FRAC of its range next to the harder end (WORST_END)
@@ -129,10 +130,12 @@ class F1Wrapper(gym.Wrapper):
         params = dict(self.base_params)
         if self.sim_mode == 'ideal':
             self.steer_delay_steps = self.speed_delay_steps = 0
-            self.steer_left_max = self.max_steer
+            self.steer_left_max = self.steer_right_max = self.max_steer
             self.steer_scale = (1.0, 1.0)
         else:
             self.steer_left_max = min(self._rand('steer_left_max', self.max_steer), self.max_steer)
+            # (no draw for configs without the key: older models' episodes are unchanged)
+            self.steer_right_max = min(self._rand('steer_right_max', self.max_steer), self.max_steer)
             self.steer_scale = (self._rand('steer_scale_left', 1.0), self._rand('steer_scale_right', 1.0))
             self.steer_delay_steps = int(round(self._rand('steer_delay', 0.0) / self.timestep))
             self.speed_delay_steps = int(round(self._rand('speed_delay', 0.0) / self.timestep))
@@ -357,7 +360,7 @@ class F1Wrapper(gym.Wrapper):
         self.last_action = cmd.copy()
 
         # the real servo can't reach the policy's full left lock (+ = left); agent_node.py clips there
-        steer = min(float(cmd[0])*self.max_steer, self.steer_left_max)
+        steer = float(np.clip(float(cmd[0])*self.max_steer, -self.steer_right_max, self.steer_left_max))
         speed = min(float(unnormalize_speed(cmd[1], self.min_speed, self.max_speed)), self.speed_cap)
         # starting from rest: small commands are raised to the kick speed, like agent_node.py
         speed = apply_start_kick(speed, float(self.vehicle_state()[3]), self.kick_cfg)

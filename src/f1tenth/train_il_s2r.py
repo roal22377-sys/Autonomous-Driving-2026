@@ -112,6 +112,11 @@ def get_args(argv=None):
                    help='at about the same score: this much less steering jitter counts as an improvement (0.10 = 10 %%)')
     # open-space check in the round score (eval_open_space.py test tracks: a wide dead-end bay at every corner)
     p.add_argument('--open_eval', type=int, default=1, help='score = mean of eval and open-space 2-lap success')
+    p.add_argument('--open_train', type=int, default=0,
+                   help='1: also collect on the open-space TRAINING tracks (a big dead-end bay at every corner, '
+                        'eval_open_space.py --make_train; 184 of 920 tracks = 20 %% of the episodes). Test tracks stay unseen')
+    p.add_argument('--hard_prob', type=float, default=0.0,
+                   help='share of collection episodes with every sim2real gap at its harder side at once (utils/env.py HARD_PROB)')
     p.add_argument('--open_level', default='big')
     p.add_argument('--open_caps', nargs='+', type=float, default=[8.0, 5.0], help='speed caps of the open-space runs')
     p.add_argument('--dagger_steps', type=float, default=6e5, help='steps per DAgger iteration')
@@ -218,6 +223,7 @@ def rollout_worker(job):
     args.seed = seed
     np.random.seed(seed)
     env = F1Wrapper(args, MAPS, obs_noise=True, sim_mode='train', tracks=tracks)
+    env.HARD_PROB = float(os.environ.get('F1_HARD_PROB', '0'))     # --hard_prob (workers only see the environment)
     actor = None
     if policy is not None:
         actor = actor_from_state(policy[0])
@@ -229,7 +235,7 @@ def rollout_worker(job):
         obs, info = env.reset()
         # the expert respects this episode's speed cap (the policy is told the cap in its observation)
         pl = RacelinePlanner(env._env.unwrapped.track, args.length_f + args.length_r, v_min=env.min_speed, v_max=env.speed_cap,
-                             max_steer=env.max_steer, max_steer_left=env.steer_left_max, **expert_kwargs(env))
+                             max_steer=env.max_steer, max_steer_left=env.steer_left_max, max_steer_right=env.steer_right_max, **expert_kwargs(env))
         expert_drives = actor is None or np.random.rand() < beta
         noise_std = np.random.uniform(0.0, dart_std) if expert_drives else 0.0
         noise, done, steps = 0.0, False, 0
@@ -449,6 +455,15 @@ def main():
     all_tracks = list_variants(MAPS)
     require_fresh_variants(all_tracks)          # never train on tracks from an older generator
     train_tracks = [t for t in all_tracks if HOLDOUT not in t]
+    if args.open_train:
+        from eval_open_space import TRAIN_DIR, require_fresh_open_train
+        extra = sorted(glob.glob(os.path.join(TRAIN_DIR, '*.npz')))
+        if not extra:
+            raise FileNotFoundError('no open-space training tracks: run `python -u eval_open_space.py --make_train` first')
+        require_fresh_open_train(extra)
+        train_tracks += extra
+        print(f'[tracks] {len(train_tracks)} training tracks incl. {len(extra)} open-space ones', flush=True)
+    os.environ['F1_HARD_PROB'] = str(args.hard_prob)
     eval_tracks = sorted([t for t in all_tracks if variant_map(t) in EVAL_MAPS
                           and (HOLDOUT in t or os.path.basename(t)[:-4] in [m + s for m in EVAL_MAPS for s in ('', '_rev')])])
     eval_tracks = eval_tracks[:args.eval_tracks]

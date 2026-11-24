@@ -18,7 +18,7 @@
                 -> what made IL run 8 (trained with 2-5 m / 0-1 m bays) drive in; PPO model selection uses it
     Each run is two laps (the success criterion everywhere) from the centerline at the nominal real-car conditions (sim_mode 'eval': delay,
     grip, noise of configs/task/f1tenth.yaml) with the steering physically limited to the measured
-    full lock (0.41 rad both sides) for every model. Per crash we record where it happened:
+    full lock (0.50 rad both sides, 11/24) for every model. Per crash we record where it happened:
         runoff   - inside a run-off, outside the normal corridor   (the 11/23 failure)
         pocket   - outside the corridor in a side pocket
         corridor - inside the normal corridor (an ordinary wall hit)
@@ -51,7 +51,7 @@ LEVELS = {
     'train': dict(RUNOFF_PROB=1.0, RUNOFF_MIN_CURV=1 / 5.0, RUNOFF_LEN=(2.0, 7.0), RUNOFF_EXTRA_W=(0.0, 2.5)),
     'big':   dict(RUNOFF_PROB=1.0, RUNOFF_MIN_CURV=1 / 8.0, RUNOFF_LEN=(4.0, 7.0), RUNOFF_EXTRA_W=(1.0, 2.5)),
 }
-FULL_LOCK = 0.41                       # [rad] measured 11/23, both sides (configs/task/f1tenth.yaml max_steer)
+FULL_LOCK = 0.50                       # [rad] measured 11/24 (tape, both sides at the hardware stop; was 0.41 from 11/23)
 
 
 # ------------------------------------------------------------------ test tracks
@@ -160,7 +160,7 @@ def run(job):
     obs, info = env.reset(options={'track': path})
     if model == 'expert':
         pl = RacelinePlanner(env._env.unwrapped.track, args.length_f + args.length_r, v_min=env.min_speed,
-                             v_max=env.speed_cap, max_steer=env.max_steer, max_steer_left=env.steer_left_max,
+                             v_max=env.speed_cap, max_steer=env.max_steer, max_steer_left=env.steer_left_max, max_steer_right=env.steer_right_max,
                              **IL.expert_kwargs(env))
     L = float(env._env.unwrapped.track.centerline.spline.s[-1])
     done, entries, inside_prev, speeds = False, 0, False, []
