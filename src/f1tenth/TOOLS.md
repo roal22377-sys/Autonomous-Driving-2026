@@ -112,6 +112,7 @@ OMP_NUM_THREADS=1 nohup $PY -u train_ppo_s2r.py --il imitation/11 --algo_idx 2 -
 | `--stuck_time` / `--stuck_dist` / `--backward_dist` | 3.0 / 0.5 / 2.0 | 3초간 0.5 m도 못 나아가거나 2 m 역주행하면 충돌로 끝냄 (0 = 끔, 평가는 항상 원래 규칙) |
 | `--time_cost` | 0.1 | 스텝당 시간 벌점 (= 랩 타임 최소화) |
 | `--steer_rate_cost` | 3.0 | 조향 급변(흔들림) 벌점 |
+| `--straight_steer_cost` / `--straight_curv` | 0 / 0.05 | 직선(반경 20 m 이상)에서만 (조향 − 0.5 s 이동평균)² 벌점. 1 Hz 좌우 흔들림 억제 (PPO 7: 10) |
 | `--wall_cost` / `--wall_margin` | 5.0 / 0.30 | 벽 여유 벌점 |
 | `--lat_cost` / `--lat_grip_share` | 2.0 / 0.8 | 접지 한계(0.8 μg) 넘는 횡가속 벌점 |
 | `--lap_bonus` | 0 | 랩 완주 보너스 (속도가 안 오를 때 2로 시험) |

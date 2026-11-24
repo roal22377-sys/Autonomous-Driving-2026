@@ -66,7 +66,7 @@ from utils.color import cprint
 from eval_open_space import TEST_DIR as OPEN_TEST_DIR
 from algorithm.common.models import Critic, LOG_STD_MIN
 
-REWARD_KEYS = ('forward_reward', 'collision_cost', 'steer_cost', 'time_cost', 'wall_cost', 'lat_cost', 'lap_bonus')
+REWARD_KEYS = ('forward_reward', 'collision_cost', 'steer_cost', 'straight_cost', 'time_cost', 'wall_cost', 'lat_cost', 'lap_bonus')
 
 # settings before 11/23, for the baseline run (--baseline)
 BASELINE = dict(hard_prob=0.0, open_train_share=0.0, track_focus=0.0, stuck_time=0.0, bc_speed=1.0, ret_norm=0, time_cost=0.0, steer_rate_cost=5.0, wall_cost=0.0, lat_cost=0.0, lap_bonus=0.0,
@@ -124,6 +124,10 @@ def get_args():
     p.add_argument('--collision_cost', type=float, default=500.0,
                    help='PPO 1 (200) traded completion for speed: 87.9 -> 50.8 %% success in 40 updates')
     p.add_argument('--steer_rate_cost', type=float, default=3.0)
+    p.add_argument('--straight_steer_cost', type=float, default=0.0,
+                   help='extra steering-rate cost where the track ahead is straight (radius > 1/--straight_curv): '
+                        'the 11/24 car weaved +-20 cm on straights; corners keep --steer_rate_cost only')
+    p.add_argument('--straight_curv', type=float, default=0.05)
     p.add_argument('--time_cost', type=float, default=0.1)
     p.add_argument('--wall_cost', type=float, default=5.0)
     p.add_argument('--wall_margin', type=float, default=0.30)
@@ -244,7 +248,8 @@ def merge_sim_override(il_task, override, save_dir):
 def env_config(args):
     '''the reward / training settings every worker applies to its env (spawned workers do not see args)'''
     return dict(PROGRESS_COEFF=args.progress_coeff, COLLISION_COST=args.crash_start or args.collision_cost,
-                STEER_RATE_COST=args.steer_rate_cost, TIME_COST=args.time_cost, WALL_COST=args.wall_cost,
+                STEER_RATE_COST=args.steer_rate_cost, STRAIGHT_STEER_COST=args.straight_steer_cost,
+                STRAIGHT_CURV=args.straight_curv, TIME_COST=args.time_cost, WALL_COST=args.wall_cost,
                 WALL_MARGIN=args.wall_margin, LAT_COST=args.lat_cost, LAT_GRIP_SHARE=args.lat_grip_share,
                 LAP_BONUS=args.lap_bonus, uncapped_prob=args.uncapped_prob,
                 STUCK_TIME=args.stuck_time, STUCK_DIST=args.stuck_dist, BACKWARD_DIST=args.backward_dist,
@@ -606,6 +611,7 @@ def main():
               + (f' | hard-conditions episodes {row["hard_share"]*100:.0f}% (crash {row["hard_crash"]*100:.0f}%)' if args.hard_prob > 0 else '')
               + (f' | open-space tracks {row["open_share"]*100:.0f}% (crash {row["open_crash"]*100:.0f}%)' if args.open_train_share > 0 else '')
               + f' | per step: prog {rc["forward_reward"]:.2f} time -{rc["time_cost"]:.2f} steer -{rc["steer_cost"]:.3f}'
+              + (f' straight -{rc["straight_cost"]:.3f}' if args.straight_steer_cost > 0 else '')
               + f' wall -{rc["wall_cost"]:.3f} lat -{rc["lat_cost"]:.3f} crash -{rc["collision_cost"]:.2f}'
               + f' | rollout {t_roll:.0f}s update {time.time()-t0-t_roll:.0f}s (total {IL._hms(time.time()-T_START)})',
               flush=True)

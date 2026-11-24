@@ -180,11 +180,15 @@ IL 12가 끝나면 Claude가 결과를 보고 PPO 7 값을 정한 뒤 시작합�
 미리 정한 판단 기준: 일반 완주율 70 % 미만 → PPO 시작 안 함 / 충돌 벌점 시작 4000 (PPO 1~5 모두 초반 하락, 4000 이상에서 회복) /
 막다른 공간이 expert보다 20 %p 넘게 낮으면 막다른 공간 트랙 30 % / 최악 조건이 20 %p 넘게 낮으면 어려운 조건 35 % /
 직선 흔들림이 IL 11 이상이면 조향 급변 벌점 5 / expert와 랩 타임 차이 10 % 이내면 속도 당김 0.5. 그 외 PPO 5 설정.
+**직선 흔들림 벌점** `--straight_steer_cost 10` (기본 포함): 앞쪽 1·3·6 m 곡률이 모두 0.05 1/m 미만(반경 20 m 이상)인 직선에서
+(조향 명령 − 약 0.5 s 이동평균)² × 10. 11/24 실차는 직선에서 1 Hz로 ±20 cm 흔들림 — 스텝 간 변화(기존 조향 급변 벌점)로는 1 Hz가
+거의 안 잡혀서(같은 크기에서 약 1/37) 이동평균과의 차이로 잡음. 검증: 끄면 보상 동일, 직선 49 %, 실차처럼 흔들리는 IL 11은 진행 보상의
+14.9 %, PPO 5는 1.9 %, 코너는 벌점 없음, 스텝당 약 0.2 ms.
 ```bash
 train_il_s2r.py --algo_idx 12 --workers 20 --task_config configs/task/f1tenth_lidar88.yaml --hidden_dim 512 \
     --expert_steps 1.5e6 --dagger_steps 8e5 --dart_std 0.08 --grad_steps 20000 --open_train 1 --hard_prob 0.25
 train_ppo_s2r.py --il imitation/12 --algo_idx 7 --force_start --crash_target best --crash_start 4000 \
-    --hard_prob 0.25 --open_train_share 0.2          # 기본값; IL 12 결과에 따라 위 기준으로 조정
+    --hard_prob 0.25 --open_train_share 0.2 --straight_steer_cost 10   # 기본값; IL 12 결과에 따라 위 기준으로 조정
 ```
 
 ### PPO 5 결과 (11/24) — 업데이트 100에서 처음으로 저장 (`results/ppo_s2r/5/README.md`, 태그 `model-il11-ppo5`)

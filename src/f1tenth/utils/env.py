@@ -255,6 +255,7 @@ class F1Wrapper(gym.Wrapper):
         self._env.unwrapped.num_laps = 10**6 if self.progress_laps else self.laps
         self.progress, self.elapsed, self.success, self.lap_times = 0.0, 0.0, False, []
         self.stuck, self.stuck_ref, self.max_progress = False, (0.0, 0.0), 0.0
+        self.steer_ema = 0.0
         obs_dict, info = self._env.reset(options=options, **kwargs)
         # enough steps for all laps even at a slow 1.6 m/s
         if self.s2r.get('laps_steps', False) and self.sim_mode != 'ideal':
@@ -286,6 +287,12 @@ class F1Wrapper(gym.Wrapper):
     LAT_COST = 0.0            # per m/s^2 of lateral acceleration above LAT_GRIP_SHARE * mu * g
     LAT_GRIP_SHARE = 0.8
     LAP_BONUS = 0.0           # per second a completed lap beats the expert-pace estimate (_reference_lap)
+    # extra steering-rate cost where the track ahead is straight (PPO 7 option, 0 = off): the 11/24 car weaved
+    # +-20 cm at ~1 Hz on straights. Only on straights, so quick hard steering in corners is not discouraged.
+    STRAIGHT_STEER_COST = 0.0 # per (normalized steering command - its ~0.5 s moving average)^2 on straights: a weave of
+                              # ~1 Hz changes the command only a little per 25 ms step, so a step-to-step cost misses it
+    STRAIGHT_EMA_TIME = 0.5   # [s] time constant of that moving average (slow line changes stay cheap)
+    STRAIGHT_CURV = 0.05      # [1/m] straight = |centerline curvature| below this 1, 3 and 6 m ahead (radius > 20 m)
     # stuck / wrong way (PPO only, 0 = off): no STUCK_DIST m of new progress for STUCK_TIME s, or BACKWARD_DIST m behind
     # the furthest point reached, ends the episode as a crash (collision cost). Without it a car that turned around in
     # a dead-end bay drives on for minutes (time limit: 2 laps at 1.6 m/s) and blurs what went wrong.
@@ -311,6 +318,13 @@ class F1Wrapper(gym.Wrapper):
         v = speed_profile(xy, self.min_speed, self.speed_cap, grip, a_max, min(a_max, grip))
         return lap_time(xy, v)
 
+    def on_straight(self):
+        '''the centerline 1, 3 and 6 m ahead is nearly straight (simulator-only: used in the reward, not observed)'''
+        cl = self._env.unwrapped.track.centerline.spline      # as privileged()
+        L = float(cl.s[-1])
+        s0 = float(self.position_frenet[0])
+        return all(abs(float(cl.calc_curvature((s0 + d) % L))) < self.STRAIGHT_CURV for d in (1.0, 3.0, 6.0))
+
     def calc_reward(self, action=None, lap_done=None):
         # forward reward: progress along the centerline (frenet s) this step [m].
         # Rewards speed, not mere survival; driving backwards gives a negative reward.
@@ -323,6 +337,11 @@ class F1Wrapper(gym.Wrapper):
         steer_cost = 0.0
         if action is not None and self.STEER_RATE_COST > 0:
             steer_cost = self.STEER_RATE_COST*float(action[0] - self.prev_cmd[0])**2
+        straight_cost = 0.0
+        if action is not None and self.STRAIGHT_STEER_COST > 0:
+            self.steer_ema += (float(action[0]) - self.steer_ema) * min(1.0, self.timestep / self.STRAIGHT_EMA_TIME)
+            if self.on_straight():
+                straight_cost = self.STRAIGHT_STEER_COST*(float(action[0]) - self.steer_ema)**2
 
         time_cost = self.TIME_COST
         wall_cost = self.WALL_COST * max(0.0, self.WALL_MARGIN - self.min_wall)
@@ -332,10 +351,11 @@ class F1Wrapper(gym.Wrapper):
             lap_bonus = self.LAP_BONUS * max(0.0, self.ref_lap - lap_done)
 
         # final reward
-        reward = forward_reward - collision_cost - steer_cost - time_cost - wall_cost - lat_cost + lap_bonus
+        reward = forward_reward - collision_cost - steer_cost - straight_cost - time_cost - wall_cost - lat_cost + lap_bonus
         reward_dict = {'forward_reward': forward_reward,
                        'collision_cost': collision_cost,
                        'steer_cost': steer_cost,
+                       'straight_cost': straight_cost,
                        'time_cost': time_cost,
                        'wall_cost': wall_cost,
                        'lat_cost': lat_cost,
