@@ -67,10 +67,30 @@ def dry_run(plan, a):
           f'across (sim grip would allow {SIM_GRIP:.0f} m/s^2)')
 
 
+def full_lock():
+    '''
+        steering commands the servo can reach, from config/vesc.yaml (same rule as agent_node):
+        servo = gain*cmd + offset within [servo_min, servo_max] and [0, 1]. Falls back to offset 0.567.
+    '''
+    import os
+    import re
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'f1tenth_ros', 'f1tenth_stack',
+                        'config', 'vesc.yaml')
+    try:
+        txt = open(path).read()
+        get = lambda k, d: float(re.search(rf'^\s*{k}:\s*([-\d.]+)', txt, re.M).group(1)) if re.search(rf'^\s*{k}:', txt, re.M) else d
+        gain, offset = get('steering_angle_to_servo_gain', 1.0), get('steering_angle_to_servo_offset', 0.567)
+        smin, smax = max(get('servo_min', 0.0), 0.0), min(get('servo_max', 1.0), 1.0)
+    except OSError:
+        gain, offset, smin, smax = 1.0, 0.567, 0.06, 1.0
+    a, b = (smin - offset) / gain, (smax - offset) / gain
+    return min(a, b) + 5e-4, max(a, b) - 5e-4
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--steer', type=float, required=True,
-                   help='steering command [rad], + left / - right (full lock: +0.4415 left, -0.497 right)')
+                   help='steering command [rad], + left / - right (full lock from config/vesc.yaml: 0.433 left, -0.507 right at offset 0.567)')
     p.add_argument('--speeds', type=float, nargs='+', default=[2.0, 2.5, 3.0, 3.5])
     p.add_argument('--low', type=float, nargs='*', default=[1.5, 1.2, 1.0, 0.8],
                    help='low-speed hold check at the end, descending (empty to skip)')
@@ -84,9 +104,10 @@ def main():
     p.add_argument('--no_prompt', action='store_true',
                    help='start right after /odom and /scan are up (3 s countdown), no Enter (circle_series.sh asked already)')
     a = p.parse_args()
-    if not -0.497 <= a.steer <= 0.4415:
-        print(f'[warn] steering {a.steer:+.3f} is past full lock (+0.4415 left / -0.497 right); clipped')
-        a.steer = min(max(a.steer, -0.497), 0.4415)
+    lo, hi = full_lock()
+    if not lo <= a.steer <= hi:
+        print(f'[warn] steering {a.steer:+.3f} is past full lock ({hi:+.4f} left / {lo:+.4f} right); clipped')
+        a.steer = min(max(a.steer, lo), hi)
     plan = build_plan(a)
     dry_run(plan, a)
     if a.dry_run:
