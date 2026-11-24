@@ -110,6 +110,11 @@ def get_args():
     # behavior cloning towards the IL actor
     p.add_argument('--bc_start', type=float, default=0.5)
     p.add_argument('--bc_end', type=float, default=0.02)
+    p.add_argument('--bc_steer_weight', type=float, default=0.0,
+                   help='k > 0: the steering BC term of each state is weighted 1 + k x (teacher steering)^2, so the rare '
+                        'states that need near full lock (hairpins) are not forgotten while the rest drifts freely. 11/25 '
+                        'PPO 8: Shanghai_rev failed from update 20, Montreal_rev from 40 (unwinding mid-hairpin, at every '
+                        'cap) although the IL teacher drives them; PPO 7 kept them. PPO 11: 8')
     p.add_argument('--bc_speed', type=float, default=0.25,
                    help='BC weight of the speed output relative to steering: IL drives deliberately moderately '
                         'fast, so pulling the speed back to it works against the lap time (1 = same as steering)')
@@ -670,7 +675,12 @@ def main():
                     t_mean = teacher(S[idx]).loc
                     clip_frac += float(((ratio - 1).abs() > args.clip).float().mean())
                     n_mb += 1
-                bc = (((d.loc - t_mean) ** 2) * bc_dim).mean()
+                if args.bc_steer_weight > 0:
+                    # rare large-steering states (hairpins) keep the teacher's lock: weight 1 + k x teacher steer^2
+                    w = 1.0 + args.bc_steer_weight * t_mean[:, 0].clamp(-1, 1) ** 2
+                    bc = (((d.loc - t_mean) ** 2) * bc_dim * torch.stack([w, torch.ones_like(w)], -1)).mean()
+                else:
+                    bc = (((d.loc - t_mean) ** 2) * bc_dim).mean()
                 opt_actor.zero_grad()
                 (pg + bc_w * bc).backward()
                 torch.nn.utils.clip_grad_norm_(actor_params, 0.5)
