@@ -148,6 +148,10 @@ def get_args():
                         'eval_open_space.py --make_train; PPO 5: 0.2). The open-space test tracks stay unseen')
     p.add_argument('--track_focus', type=float, default=3.0,
                    help='training track weight = 1 + this x the track\'s recent failure rate (0 = uniform)')
+    p.add_argument('--focus_by_group', type=int, default=0,
+                   help='1: that failure rate per map and direction (all its variants) instead of per file. 11/25 PPO 10: '
+                        'failures sat on hairpin maps (Montreal_rev, Shanghai_rev: every cap, from u40), while with ~1000 '
+                        'files each came up once in ~40 updates and the hardest 20 %% got only 20-25 %% of the weight')
     p.add_argument('--stuck_time', type=float, default=3.0,
                    help='[s] end the episode as a crash after this long without --stuck_dist m of progress (0 = off)')
     p.add_argument('--stuck_dist', type=float, default=0.5)
@@ -290,12 +294,29 @@ def base_track_weights(args):
     return base
 
 
-def track_weights(tstat, focus, prior=2.0, base=None):
+def track_group(name):
+    '''failure-statistics group of a track file: map, direction, dead-end (open-space, seeds >= 200) or not.
+    Montreal_rev.npz, Montreal_rev_w103.npz -> Montreal_rev; Montreal_rev_w201.npz -> Montreal_rev_open'''
+    parts = os.path.basename(name)[:-4].split('_')
+    seed = int(parts[-1][1:]) if parts[-1][:1] == 'w' and parts[-1][1:].isdigit() else None
+    return parts[0] + ('_rev' if 'rev' in parts else '') + ('_open' if seed is not None and seed >= 200 else '')
+
+
+def track_weights(tstat, focus, prior=2.0, base=None, by_group=False):
     '''sampling weight per training track from its (decayed) episode / failure counts, shrunk to the overall rate;
-    with `base` ({track: weight}, --open_train_share) every track is listed and its weight is base x that'''
+    with `base` ({track: weight}, --open_train_share) every track is listed and its weight is base x that.
+    by_group: the failure rate of the track's group (track_group: all variants of a map and direction), so a
+    hard corner that every variant shares (a hairpin) gets practice although each file comes up rarely'''
     n = sum(v[0] for v in tstat.values())
     g = sum(v[1] for v in tstat.values()) / n if n > 0 else 0.0
-    rate = lambda k: (tstat[k][1] + prior * g) / (tstat[k][0] + prior) if k in tstat else g
+    if by_group:
+        agg = {}
+        for k, v in tstat.items():
+            a = agg.setdefault(track_group(k), [0.0, 0.0])
+            a[0], a[1] = a[0] + v[0], a[1] + v[1]
+        rate = lambda k: (agg[track_group(k)][1] + prior * g) / (agg[track_group(k)][0] + prior) if track_group(k) in agg else g
+    else:
+        rate = lambda k: (tstat[k][1] + prior * g) / (tstat[k][0] + prior) if k in tstat else g
     if base is not None:
         return {k: b * (1.0 + focus * rate(k)) for k, b in base.items()}, 1.0 + focus * g, g
     w = {k: 1.0 + focus * rate(k) for k in tstat}
@@ -500,7 +521,7 @@ def main():
         if actor_start is not None:
             set_log_std(min(1.0, (update - actor_start) / max(1, n_updates - actor_start)))
     if (args.track_focus > 0 and tstat) or base_w is not None:   # resumed / open-space share from the start
-        venv.call('set_track_weights', *track_weights(tstat, args.track_focus, base=base_w)[:2])
+        venv.call('set_track_weights', *track_weights(tstat, args.track_focus, base=base_w, by_group=args.focus_by_group)[:2])
 
     def save_state():
         '''everything needed to continue this run (--resume); written atomically'''
@@ -566,7 +587,7 @@ def main():
         B = {k: np.stack(v) for k, v in B.items()}                 # (T, N, ...)
         focus = float('nan')
         if (args.track_focus > 0 and tstat) or base_w is not None:
-            w, w0, _ = track_weights(tstat, args.track_focus, base=base_w)
+            w, w0, _ = track_weights(tstat, args.track_focus, base=base_w, by_group=args.focus_by_group)
             venv.call('set_track_weights', w, w0)          # used from each env's next episode
             ws = np.sort(np.array([v / (base_w or {}).get(k, 1.0) for k, v in w.items()]))[::-1]
             focus = float(ws[:max(1, len(ws) // 5)].sum() / ws.sum())   # weight share of the hardest 20 % seen
