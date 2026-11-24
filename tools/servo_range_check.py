@@ -99,7 +99,7 @@ def main():
             print('앞바퀴 바깥면에 긴 막대(자)를 붙이고, 막대 끝 아래 종이에 위치를 표시하세요.')
             stick, _ = ask('막대 길이는 바퀴 중심에서 끝까지 몇 cm? (숫자, 모르면 Enter)', CENTER, False)
             out.write(f'stick_cm: {stick}\n')
-            print('지금 중앙(0.558)입니다. 막대 끝 위치를 종이에 표시하세요.')
+            print(f'지금 중앙({CENTER:.3f})입니다. 막대 끝 위치를 종이에 표시하세요.')
         for i, (v, label, qs) in enumerate(seq):
             end = 'END' in label or '0.061' in label
             print(f'\n[{i + 1}/{len(seq)}] 서보 {v:.3f}  ({label})')
