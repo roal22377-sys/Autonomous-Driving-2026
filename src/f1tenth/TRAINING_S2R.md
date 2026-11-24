@@ -176,12 +176,15 @@ CAPS·과거 명령 잡음·신경망 폭 1024는 짧은 BC 확인에서 효과 
 
 반영 안 한 것: 제동 시 바퀴 잠김(일반 주행에서는 odom이 평균 4 %, 센 제동에서 최대 약 20 % 낮게 읽힘 — 속도 측정 오차 ±5 %와 노이즈가
 대부분 덮음), 연습 코스의 통로 사이 틈(실차에서 막아서 시험; 대회 코스에 틈이 있으면 그때 학습 트랙에 추가), μ 정확한 값(넓은 공간 원선회 필요).
+IL 12가 끝나면 Claude가 결과를 보고 PPO 7 값을 정한 뒤 시작합니다 (45분 안에 시작되지 않으면 `results/ppo7_fallback.sh`가 기본값으로 시작).
+미리 정한 판단 기준: 일반 완주율 70 % 미만 → PPO 시작 안 함 / 충돌 벌점 시작 4000 (PPO 1~5 모두 초반 하락, 4000 이상에서 회복) /
+막다른 공간이 expert보다 20 %p 넘게 낮으면 막다른 공간 트랙 30 % / 최악 조건이 20 %p 넘게 낮으면 어려운 조건 35 % /
+직선 흔들림이 IL 11 이상이면 조향 급변 벌점 5 / expert와 랩 타임 차이 10 % 이내면 속도 당김 0.5. 그 외 PPO 5 설정.
 ```bash
-src/f1tenth/results/run_il12_ppo7.sh      # IL 12, 끝나면 PPO 7 자동
-#   train_il_s2r.py --algo_idx 12 --workers 20 --task_config configs/task/f1tenth_lidar88.yaml --hidden_dim 512 \
-#       --expert_steps 1.5e6 --dagger_steps 8e5 --dart_std 0.08 --grad_steps 20000 --open_train 1 --hard_prob 0.25
-#   train_ppo_s2r.py --il imitation/12 --algo_idx 7 --force_start --crash_target best --crash_start 2000 \
-#       --hard_prob 0.25 --open_train_share 0.2
+train_il_s2r.py --algo_idx 12 --workers 20 --task_config configs/task/f1tenth_lidar88.yaml --hidden_dim 512 \
+    --expert_steps 1.5e6 --dagger_steps 8e5 --dart_std 0.08 --grad_steps 20000 --open_train 1 --hard_prob 0.25
+train_ppo_s2r.py --il imitation/12 --algo_idx 7 --force_start --crash_target best --crash_start 4000 \
+    --hard_prob 0.25 --open_train_share 0.2          # 기본값; IL 12 결과에 따라 위 기준으로 조정
 ```
 
 ### PPO 5 결과 (11/24) — 업데이트 100에서 처음으로 저장 (`results/ppo_s2r/5/README.md`, 태그 `model-il11-ppo5`)
