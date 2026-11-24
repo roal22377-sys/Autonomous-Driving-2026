@@ -118,7 +118,8 @@ EOF
 }
 mktab bringup  ""                 'ros2 launch f1tenth_stack bringup_launch.py vesc_config:=$HOME/ros2_ws/src/f1tenth_ros/f1tenth_stack/config/vesc.yaml use_agent:=false'
 mktab teleop   "sleep 4"          'ros2 run key_teleop key_teleop'
-mktab bag      "sleep 6"          'mkdir -p ~/bags && ros2 bag record -o ~/bags/run_$(date +%m%d_%H%M) /scan /odom /drive /teleop /ackermann_cmd /sensors/core'
+# a session restarted within the same minute would reuse the folder name and ros2 bag record would refuse -> add seconds then
+mktab bag      "sleep 6"          'mkdir -p ~/bags && N=run_$(date +%m%d_%H%M) && { [ ! -e ~/bags/$N ] || N=${N}_$(date +%S); } && ros2 bag record -o ~/bags/$N /scan /odom /drive /teleop /ackermann_cmd /sensors/core'
 mktab status   "sleep 6"          'python3 tools/live_status.py'
 mktab monitor  "sleep 6"          'ros2 topic echo /ackermann_cmd'
 if [ $STRAIGHT = 1 ]; then
