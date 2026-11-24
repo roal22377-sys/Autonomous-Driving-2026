@@ -60,6 +60,7 @@ def _make_job(job):
     from utils import track_gen as tg
     for k, v in LEVELS[level].items():          # this process only (fork pool)
         setattr(tg, k, v)
+    tg._SIG = None                              # the signature includes these settings (worker reused across levels)
     v = tg.make_variant(map_name, seed, reverse, original=False)
     path = tg.save_variant(v, out_dir=os.path.join(TEST_DIR, level))
     return path, len(v['runoffs'])
@@ -70,11 +71,36 @@ def _make_train_job(job):
     from utils import track_gen as tg
     for k, v in LEVELS[level].items():
         setattr(tg, k, v)
+    tg._SIG = None
     out = os.path.join(TRAIN_DIR, f"{map_name}{'_rev' if reverse else ''}_w{seed}.npz")
     if os.path.isfile(out) and not tg.stale_variants([out]):
         return out, len(np.load(out)['runoffs']), 'kept'
     v = tg.make_variant(map_name, seed, reverse, original=False)
     return tg.save_variant(v, out_dir=TRAIN_DIR), len(v['runoffs']), 'new'
+
+
+def level_signature(level):
+    '''generator signature with a level's run-off settings (what its tracks store), in a throwaway process'''
+    with mp.get_context('fork').Pool(1) as p:
+        return p.apply(_level_sig_job, (level,))
+
+
+def _level_sig_job(level):
+    from utils import track_gen as tg
+    for k, v in LEVELS[level].items():
+        setattr(tg, k, v)
+    tg._SIG = None
+    return tg.generator_signature()
+
+
+def require_fresh_open_train(files):
+    '''raise if an open-space training track was made by an older generator (or another level's settings)'''
+    from utils.track_gen import file_signature
+    want = {s: level_signature(lv) for s, lv in TRAIN_SEEDS.items()}
+    old = [f for f in files if file_signature(f) != want.get(int(os.path.basename(f)[:-4].rsplit('_w', 1)[1]), '')]
+    if old:
+        raise RuntimeError(f'{len(old)} of {len(files)} open-space training tracks are stale (e.g. {os.path.basename(old[0])}): '
+                           'run `python -u eval_open_space.py --make_train` in src/f1tenth')
 
 
 def make_train_tracks(workers):

@@ -315,7 +315,8 @@ def main():
     if args.open_train_share > 0:
         if not open_train_tracks():
             raise FileNotFoundError('no open-space training tracks: run `python -u eval_open_space.py --make_train` first')
-        require_fresh_variants(open_train_tracks())
+        from eval_open_space import require_fresh_open_train
+        require_fresh_open_train(open_train_tracks())
     base_w = base_track_weights(args) if args.open_train_share > 0 else None
 
     # IL policy (actor + frozen normalizer) and a frozen copy as the BC teacher
