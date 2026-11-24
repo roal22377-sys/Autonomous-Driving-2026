@@ -1,0 +1,16 @@
+# IL run 12 (11/24 evening: simulator synced to the calibrated 11/24 car, full lock 0.50, per-side command gains
+# 0.866 / 1.012 from the model config). Select on the car with
+#   MODEL=il12 tools/drive_session.sh      or      MODEL=il12 tools/run_car.sh use_agent:=true
+# Needs vesc.yaml from 11/24 (speed_to_erpm_gain 3100, steering_angle_to_servo_offset 0.567) and
+# results/imitation/12/sim2real (after training; git pull).
+agent_node:
+  ros__parameters:
+    name: imitation
+    algo_idx: 12
+    scan_topic: scan
+    drive_topic: drive
+    odom_topic: odom
+    speed_limit: 2.0    # [m/s] 2.0 first (as IL 11 on 11/24), then 4.0
+    speed_min: 0.0
+    steer_gain_left: 1.0    # the per-side calibration is in the model config (steer_cmd_gain_left/right)
+    steer_gain_right: 1.0
