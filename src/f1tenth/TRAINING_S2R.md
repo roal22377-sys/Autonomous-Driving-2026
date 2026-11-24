@@ -177,8 +177,12 @@ expert(새 시뮬레이터): 일반 100 %, 최악 조건 86.4 %, 막다른 공�
 train_il_s2r.py --algo_idx 12 --workers 20 --task_config configs/task/f1tenth_lidar88.yaml --hidden_dim 512 \
     --expert_steps 1.5e6 --dagger_steps 8e5 --dart_std 0.08 --grad_steps 20000 --open_train 1 --hard_prob 0.25
 train_ppo_s2r.py --il imitation/12 --algo_idx 7 --force_start --crash_target best --crash_start 2000 \
-    --hard_prob 0.25 --open_train_share 0.2
+    --hard_prob 0.25 --open_train_share 0.2 --sim_override configs/task/sim_override_ppo7.yaml
 ```
+PPO 7만 실측에 더 맞춘 범위 (`configs/task/sim_override_ppo7.yaml`, 오후 주행 분석 `tools/drive_analysis.py`):
+조향 지연 0.08~0.20 s (기본 0.12, 시뮬레이터 측정 0.125 s = 실차 0.125~0.15 s), 가감속 2.6~4.3 (기본 3.3; 실차 가속 2.7~3.0, 제동 3.4~4.2),
+μ 0.52~0.85 (4 m/s 주행에서 5.3 m/s² 미끄러짐 없음 → ≥ 0.54), 중간 조향 기본 왼쪽 1.05 / 오른쪽 0.90 (명령 변환 후 남은 오차 추정).
+IL 12는 조금 넓은 범위로 출발점을 학습하고, 실차 성능을 정하는 PPO 7에서 맞춤.
 
 ### PPO 5 결과 (11/24) — 업데이트 100에서 처음으로 저장 (`results/ppo_s2r/5/README.md`, 태그 `model-il11-ppo5`)
 일반 93.2 % (IL 87.9), 처음 보는 변형 86 % (76), 최악 조건 89.4 % (83.3), 막다른 공간 67.0 % (67.0), 28.5 s 빠름, 흔들림 절반.
