@@ -20,9 +20,11 @@ from collections import deque
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 import numpy as np
 
 ODOM_TIMEOUT = 0.5      # [s] don't drive if the speed reading is older than this
+TELEOP_HOLD = 0.25      # [s] a /teleop message newer than this = the keyboard (mux priority 100, timeout 0.2 s) has the car
 VESC_SERVO_RANGE = (0.0, 1.0)   # VESC firmware clamps the servo output to this, whatever vesc.yaml says
 
 def steering_command_limits(vesc_config):
@@ -62,6 +64,7 @@ class AgentNode(Node):
     self.declare_parameter('scan_topic', 'scan')
     self.declare_parameter('drive_topic', 'drive')
     self.declare_parameter('odom_topic', 'odom')
+    self.declare_parameter('teleop_topic', 'teleop')   # keyboard commands (mux, higher priority than the agent)
     self.declare_parameter('speed_limit', 0.0)     # [m/s] cap on commanded speed for practice runs; <= 0 disables
     # [m/s] low-speed test mode (> 0 enables, needs speed_limit): the policy's capped range
     # [min_speed, speed_limit] is stretched to [speed_min, speed_limit] on the car, and /odom is mapped
@@ -80,6 +83,10 @@ class AgentNode(Node):
     self.drive_topic = self.get_parameter('drive_topic').value
     self.odom_topic = self.get_parameter('odom_topic').value
     self.speed_limit = float(self.get_parameter('speed_limit').value)
+    if 0 < self.speed_limit < 2.0:
+      # trained with caps 2-8 m/s (speed-limit input) and a 2.0 m/s start kick: below 2.0 both are outside training
+      self.get_logger().warn(f'[drive] speed_limit {self.speed_limit} < 2.0 m/s: outside the trained caps (2-8) and below '
+                             'the start kick (2.0 m/s); use speed_min (low-speed mode) for slower runs')
     self.speed_min = float(self.get_parameter('speed_min').value)
     self.gain_left = float(self.get_parameter('steer_gain_left').value)
     self.gain_right = float(self.get_parameter('steer_gain_right').value)
@@ -169,13 +176,24 @@ class AgentNode(Node):
       self.obs_rms.load(save_dir, required=True)
       self.actor = torch.load(f'{save_dir}/actor.pt').to(self.device)
       self.get_logger().info('[model] agent load success')
-    except:
-      self.get_logger().info('[model] agent load failed. directory does not exist')
-      raise ValueError
+    except Exception as e:
+      self.get_logger().error(f'[model] agent load failed from {save_dir}: {e!r}')
+      raise
+    # one forward pass now: the first real call took 1.8-3.1 s on the car (11/24 logs) while ~10 scans queued up
+    with torch.no_grad():
+      self.actor(torch.zeros(self.obs_dim, dtype=torch.float32, device=self.device))
 
     # subscribe
-    self.laser_sub = self.create_subscription(LaserScan, self.scan_topic, self.scanCallback, 10)
-    self.scan_queue = deque(maxlen=2)
+    # newest scan only (a slow callback must not work through a backlog of old scans)
+    scan_qos = QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.BEST_EFFORT)
+    self.laser_sub = self.create_subscription(LaserScan, self.scan_topic, self.scanCallback, scan_qos)
+    self.scan_checked = False
+    # while the keyboard holds or drives the car, the commands sent here are not executed: keep the action history
+    # empty then (like a simulator reset) instead of filling it with commands the car never ran. 11/24 run 1515: behind
+    # the hold the history fed back on itself (steering 0 -> 0.42 rad with the car standing) and the car set off at 0.40 rad
+    self.teleop_time = None
+    self.teleop_sub = self.create_subscription(AckermannDriveStamped, self.get_parameter('teleop_topic').value,
+                                               self.teleopCallback, 10)
     self.odom_speed, self.odom_time = None, None
     if self.use_speed:
       self.odom_sub = self.create_subscription(Odometry, self.odom_topic, self.odomCallback, 10)
@@ -185,6 +203,9 @@ class AgentNode(Node):
     
     self.speed = 0.0
     self.steering_angle = 0.0
+
+  def teleopCallback(self, msg: AckermannDriveStamped):
+    self.teleop_time = time.monotonic()
 
   def odomCallback(self, odom_msg: Odometry):
     self.odom_speed = odom_msg.twist.twist.linear.x
@@ -197,6 +218,17 @@ class AgentNode(Node):
                              'is vesc_to_odom_node running?', throttle_duration_sec=1.0)
       self.history.reset()
       return
+
+    if not self.scan_checked:
+      # the observation bins assume the UST-10LX layout: 1081 beams from -135 deg in 0.25 deg steps
+      if (abs(scan_msg.angle_min + 0.75 * np.pi) > 0.01 or abs(scan_msg.angle_increment - np.radians(0.25)) > 1e-4
+              or len(scan_msg.ranges) < 1080):
+        self.get_logger().error(f'[scan] unexpected layout: angle_min {scan_msg.angle_min:.4f}, increment '
+                                f'{scan_msg.angle_increment:.6f}, {len(scan_msg.ranges)} beams (expected -2.3562, 0.004363, 1081)')
+      self.scan_checked = True
+    teleop_active = self.teleop_time is not None and time.monotonic() - self.teleop_time < TELEOP_HOLD
+    if teleop_active:
+      self.history.reset()
 
     # make obs
     raw_scan = np.array(scan_msg.ranges[:1080])
@@ -230,6 +262,8 @@ class AgentNode(Node):
     self.drive_pub.publish(msg)
 
     # remember what was actually sent (after the steering clip and speed cap), normalized like the policy output
+    if teleop_active:
+      return                    # not executed: the history stays empty until the keyboard lets go
     self.history.push([action[0] / side_gain / (self.args.max_steer * cmd_gain),
                        normalize_speed(action[1], self.args.min_speed, self.args.max_speed)])
 

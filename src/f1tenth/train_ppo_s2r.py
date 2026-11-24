@@ -382,6 +382,12 @@ def main():
             cprint(f'[resume] settings differ from the stopped run (old, now): {changed}', color='yellow', bold=True)
         actor.load_state_dict(state['actor'])
         critic.load_state_dict(state['critic'])
+        # BC teacher: saved since 11/24; older resume files of an --init run get it back from the --init checkpoint
+        # (until then a resumed --init run pulled towards the IL policy instead: PPO 4 after update 30, PPO 5 after 40)
+        if 'teacher' in state:
+            teacher.load_state_dict(state['teacher'])
+        elif state['args'].get('init'):
+            teacher.load_state_dict(torch.load(f"results/{state['args']['init']}", map_location='cpu', weights_only=False)['actor'])
         opt_actor.load_state_dict(state['opt_actor'])
         opt_critic.load_state_dict(state['opt_critic'])
         for r, key in ((priv_rms, 'priv_rms'), (ret_rms, 'ret_rms')):
@@ -396,7 +402,18 @@ def main():
         src = torch.load(f'results/{args.baseline_from}/checkpoint/resume.pt', map_location='cpu', weights_only=False)
         if src['args'].get('il') != args.il:
             raise SystemExit(f'--baseline_from {args.baseline_from} started from {src["args"].get("il")}, not {args.il}')
+        diff = {k: (src['args'].get(k), args[k]) for k in ('worst_eval', 'open_eval', 'open_level', 'eval_tracks', 'sim_override')
+                if src['args'].get(k) != args[k]}
+        def body(path):                                     # yaml without comments / blank lines
+            return [l.split('#')[0].rstrip() for l in open(path) if l.split('#')[0].strip()]
+        for name, now in (('dynamic.yaml', 'configs/task/dynamic.yaml'), ('f1tenth.yaml', f'{args.save_dir}/backup/f1tenth.yaml')):
+            if body(f'results/{args.baseline_from}/backup/{name}') != body(now):
+                diff[name] = 'differs from the source run'
+        if diff:
+            raise SystemExit(f'--baseline_from {args.baseline_from}: not comparable ({diff}); evaluate the IL baseline again (drop the option)')
         il_succ, il_lap, il_res, il_worst, il_open = (src['il'][k] for k in ('succ', 'lap', 'res', 'worst', 'open'))
+        if (args.worst_eval and not np.isfinite(il_worst)) or (args.open_eval and not np.isfinite(il_open)):
+            raise SystemExit(f'--baseline_from {args.baseline_from}: its worst-case / open-space baseline is missing')
         cprint(f'[baseline] IL evaluation reused from {args.baseline_from}', color='cyan')
     else:
         il_succ, il_lap, il_res = IL.evaluate(eval_args, policy(), eval_tracks, 'eval')
@@ -456,7 +473,7 @@ def main():
     def save_state():
         '''everything needed to continue this run (--resume); written atomically'''
         st = dict(args={k: v for k, v in args.items() if isinstance(v, (int, float, str, bool)) or v is None},
-                  actor=actor.state_dict(), critic=critic.state_dict(),
+                  actor=actor.state_dict(), critic=critic.state_dict(), teacher=teacher.state_dict(),
                   opt_actor=opt_actor.state_dict(), opt_critic=opt_critic.state_dict(),
                   priv_rms=(priv_rms.mean, priv_rms.var, priv_rms.count), ret_rms=(ret_rms.mean, ret_rms.var, ret_rms.count),
                   il=dict(succ=il_succ, lap=il_lap, res=il_res, worst=il_worst, open=il_open),

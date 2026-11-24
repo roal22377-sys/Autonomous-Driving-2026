@@ -497,11 +497,16 @@ def main():
         for f in files:
             z = np.load(f)
             data_O.append(z['O'].astype(np.float16)); data_Y.append(z['Y']); data_N.append(z['N'])
-        ck = torch.load(sorted(glob.glob(f'{args.save_dir}/checkpoint/model_round*.pt'))[-1])
+        cks = glob.glob(f'{args.save_dir}/checkpoint/model_round*.pt')
+        if not cks:
+            raise SystemExit('--resume: no round checkpoint yet (stopped during round 0): start again without --resume')
+        # by round number: a string sort puts model_round9 after model_round12
+        ck = torch.load(max(cks, key=lambda p: int(os.path.basename(p)[len('model_round'):-3])))
         actor.load_state_dict(ck['actor']); rms.mean, rms.var = ck['obs_mean'], ck['obs_var']
         if os.path.isfile(f'{args.save_dir}/train_log.pkl'):
             log = pickle.load(open(f'{args.save_dir}/train_log.pkl', 'rb'))
         start_rnd = len(files) - 1
+        log = [e for e in log if e.get('round', 0) < start_rnd]      # this round is trained again
         while sum(len(o) for o in data_O) > args.max_data and len(data_O) > 2:
             del data_O[1], data_Y[1], data_N[1]
         cprint(f'[resume] {len(files)} data rounds ({sum(len(o) for o in data_O)} samples), continuing at round {start_rnd}', bold=True)
