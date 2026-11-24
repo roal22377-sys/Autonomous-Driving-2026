@@ -8,7 +8,7 @@ agent_node:
     scan_topic: scan
     drive_topic: drive
     odom_topic: odom
-    speed_limit: 3.0    # [m/s] start low, then 5.0; the policy is told the cap (trained with caps 2-8 m/s)
+    speed_limit: 2.0    # [m/s] 11/24 test 3-A after the car calibration (gain 3100 = true speed); then 3.0, 5.0; the policy is told the cap (trained with caps 2-8 m/s)
     speed_min: 0.0      # off: the model drives 0.5-8 m/s itself and starts with the 2 m/s kick
     steer_gain_left: 1.0    # off: the model learned the 11/23 steering (0.41 rad lock both sides, per-side command gains)
     steer_gain_right: 1.0
