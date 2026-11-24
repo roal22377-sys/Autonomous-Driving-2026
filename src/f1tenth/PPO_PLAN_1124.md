@@ -134,12 +134,12 @@ IL은 "적당히 빠르게, 안정적으로" 도는 데까지만 하고, 랩 타
 | 완주율이 IL보다 떨어질 때 | IL 쪽 당김 2배 (`--bc_adapt 1`) → **충돌 벌점 1.5배** (`--crash_adapt 1`, 최대 2000) | 안전을 IL 흉내가 아니라 보상으로 정책 스스로 배우게 함 (제약 강화학습 방식). IL 이상이면 0.8배씩 500까지 내림 |
 | IL 쪽 당기는 힘 | 강화 장치로 최대 4.0 | 0.5 → 0.02로 줄어들기만 함 (초반 안정용) |
 | 출발점 | IL | `--init`: PPO 2의 가장 좋았던 체크포인트 (업데이트 40: 81.1 %, 33.8 s 빠름). 확보한 속도 개선을 이어받음. 저장 기준은 계속 IL과 비교 |
-| 충돌 벌점 목표 | — | IL 완주율 고정 (`--crash_target il`). 래칫(`best`: 저장된 최고 모델 완주율을 목표로, 올라가기만 함)은 PPO 3 평가를 보고 다음 실행에 적용 |
+| 충돌 벌점 목표 | — | **래칫** (`--crash_target best`): 저장된 최고 모델의 완주율(처음엔 IL 87.9 %)을 목표로, 올라가기만 함. IL을 넘기 전에는 IL 고정과 똑같이 동작하고, 넘은 뒤에도 완주율을 계속 끌어올림 |
 | IL 기준 평가 | 매번 다시 (약 8분) | `--baseline_from ppo_s2r/2`로 PPO 2의 값을 재사용 |
 
 ```bash
 OMP_NUM_THREADS=1 nohup ~/venv/f1tenth/bin/python -u train_ppo_s2r.py --il imitation/11 --algo_idx 3 --force_start \
-    --init ppo_s2r/2/checkpoint/model_1760000.pt --baseline_from ppo_s2r/2 > results/ppo_3_train.log 2>&1 &
+    --init ppo_s2r/2/checkpoint/model_1760000.pt --baseline_from ppo_s2r/2 --crash_target best > results/ppo_3_train.log 2>&1 &
 ```
 점검(학습 없음): 학습 프로세스 안에서 충돌 벌점이 500 → 750으로 바뀌고 충돌 보상에 반영됨, PPO 2 체크포인트 로드,
 PPO 2의 IL 기준값(87.9 / 83.3 / 67.0 %, 199 s) 재사용 확인.
