@@ -234,6 +234,9 @@ git commit -m "IL run 11 model" && git tag model-il11 && git push && git push --
 | `results/reports/` | 비교 보고서 |
 | `requirements_train.txt`, `../../tools/setup_train_env.sh` | 학습 환경 버전과 설치 |
 
+실차 시험 계획(11/24, 실차와 시뮬레이터의 약 30 % 차이 찾기): [`CAR_TESTS_1124.md`](CAR_TESTS_1124.md)
+`python3 tools/steer_response.py logs/<run>_extracted <시작> <끝> ...`: 주행 로그로 실차 조향 지연·좌우 응답 측정
+
 ### 실차 로그 지도화 (사고 지점 보기)
 ```bash
 python3 tools/log_map.py logs/<run>_extracted out.png <시작 s> <끝 s> [표시할 시각 s ...]   # LiDAR 스캔 매칭(ICP)으로 구간 지도 + 궤적 + 조향
