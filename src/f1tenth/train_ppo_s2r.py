@@ -183,7 +183,9 @@ def get_args():
                         'the --init checkpoint ended with, so its critic matches the rewards')
     p.add_argument('--crash_up', type=float, default=1.5)
     p.add_argument('--crash_down', type=float, default=0.8)
-    p.add_argument('--crash_max', type=float, default=2000.0)
+    p.add_argument('--crash_max', type=float, default=10000.0,
+                   help='2000 was binding (PPO 5): with gamma 0.995 a crash then costs about as much as 10 %% more speed over '
+                        '5 s at ~1 %% risk, which adds up to ~26 %% crashed episodes over 2 laps')
     a = p.parse_args()
     if a.baseline:
         vars(a).update(BASELINE)

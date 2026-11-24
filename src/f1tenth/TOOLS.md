@@ -96,7 +96,7 @@ OMP_NUM_THREADS=1 nohup $PY -u train_ppo_s2r.py --il imitation/11 --algo_idx 2 -
 | `--clip` / `--max_kl` | 0.15 / 0.015 | 한 번에 바뀌는 양 |
 | `--log_std_steer` / `--log_std_speed` | −2.3 / −1.5 | 탐색 노이즈 (std 0.10 / 0.22), `--log_std_decay` 0.5만큼 줄어듦 |
 | `--bc_start` / `--bc_end` | 0.5 / 0.02 | IL 쪽으로 당기는 힘 |
-| `--crash_adapt` / `--crash_up` / `--crash_down` / `--crash_max` | 1 / 1.5 / 0.8 / 2000 | 평가 완주율이 IL보다 2 %p 넘게 낮으면 충돌 벌점 ×1.5, IL 이상이면 ×0.8 (500 아래로는 안 내림) |
+| `--crash_adapt` / `--crash_up` / `--crash_down` / `--crash_max` | 1 / 1.5 / 0.8 / 10000 | 평가 완주율이 IL보다 2 %p 넘게 낮으면 충돌 벌점 ×1.5, IL 이상이면 ×0.8 (500 아래로는 안 내림) |
 | `--crash_target` | il | 충돌 벌점의 목표 완주율. `il` = IL 완주율 고정, `best` = 래칫(저장된 최고 모델의 완주율, 올라가기만 함) |
 | `--hard_prob` / `--hard_frac` | 0 / 0.4 | 에피소드 중 이 비율은 모든 시뮬레이터 차이를 동시에 어려운 쪽(범위의 40 %)에서 뽑음 (PPO 5: 0.25) |
 | `--open_train_share` | 0 | 막다른 공간 학습 트랙 비중 (PPO 5: 0.2, 먼저 `eval_open_space.py --make_train`) |
