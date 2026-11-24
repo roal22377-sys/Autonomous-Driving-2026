@@ -90,12 +90,12 @@ OMP_NUM_THREADS=1 nohup $PY -u train_ppo_s2r.py --il imitation/11 --algo_idx 1 \
 
 | 옵션 | 기본 | 의미 |
 |---|---|---|
-| `--total_steps` | 6e6 | 총 시뮬 스텝 |
+| `--total_steps` | 12e6 | 총 시뮬 스텝 |
 | `--eval_every` | 10 | 몇 업데이트마다 평가 (평가가 오래 걸리면 늘림) |
 | `--lr` / `--lr_end` | 5e-5 / 1e-5 | actor 학습률 (선형 감소) |
 | `--clip` / `--max_kl` | 0.15 / 0.015 | 한 번에 바뀌는 양 |
-| `--log_std_steer` / `--log_std_speed` | −2.5 / −1.5 | 탐색 노이즈 (std 0.08 / 0.22), `--log_std_decay` 0.5만큼 줄어듦 |
-| `--bc_start` / `--bc_end` | 1.0 / 0.02 | IL 쪽으로 당기는 힘 |
+| `--log_std_steer` / `--log_std_speed` | −2.3 / −1.5 | 탐색 노이즈 (std 0.10 / 0.22), `--log_std_decay` 0.5만큼 줄어듦 |
+| `--bc_start` / `--bc_end` | 0.5 / 0.02 | IL 쪽으로 당기는 힘 |
 | `--time_cost` | 0.1 | 스텝당 시간 벌점 (= 랩 타임 최소화) |
 | `--steer_rate_cost` | 3.0 | 조향 급변(흔들림) 벌점 |
 | `--wall_cost` / `--wall_margin` | 5.0 / 0.30 | 벽 여유 벌점 |

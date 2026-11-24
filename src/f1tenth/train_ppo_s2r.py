@@ -79,7 +79,7 @@ def get_args():
     p.add_argument('--resume', action='store_true',
                    help='continue from <save_dir>/checkpoint/resume.pt (same command + --resume)')
     p.add_argument('--ckpt_every', type=int, default=5, help='updates between resume checkpoints')
-    p.add_argument('--total_steps', type=float, default=6e6)
+    p.add_argument('--total_steps', type=float, default=12e6)
     p.add_argument('--n_steps', type=int, default=44000, help='rollout steps per update (all envs)')
     p.add_argument('--minibatch', type=int, default=2048)
     p.add_argument('--epochs', type=int, default=8)
@@ -91,7 +91,7 @@ def get_args():
     p.add_argument('--clip', type=float, default=0.15)
     p.add_argument('--max_kl', type=float, default=0.015)
     # exploration noise (log std of the gaussian around the actor mean), per action, decayed linearly
-    p.add_argument('--log_std_steer', type=float, default=-2.5)
+    p.add_argument('--log_std_steer', type=float, default=-2.3)
     p.add_argument('--log_std_speed', type=float, default=-1.5)
     p.add_argument('--log_std_decay', type=float, default=0.5, help='both log stds go down by this by the end')
     # critic warm-up: actor frozen for at least critic_warmup updates and until explained variance >= warmup_ev
@@ -99,7 +99,7 @@ def get_args():
     p.add_argument('--warmup_ev', type=float, default=0.6)
     p.add_argument('--max_warmup', type=int, default=20, help='start the actor after this many updates anyway')
     # behavior cloning towards the IL actor
-    p.add_argument('--bc_start', type=float, default=1.0)
+    p.add_argument('--bc_start', type=float, default=0.5)
     p.add_argument('--bc_end', type=float, default=0.02)
     p.add_argument('--bc_adapt', type=int, default=1, help='double the BC weight when eval success drops below IL')
     # reward (utils/env.py calc_reward)
