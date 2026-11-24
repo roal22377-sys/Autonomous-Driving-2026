@@ -2,12 +2,12 @@
   # general parameters shared by all vesc-related nodes
   ros__parameters:
     # erpm (electrical rpm) = speed_to_erpm_gain * speed (meters / second) + speed_to_erpm_offset
-    speed_to_erpm_gain: 4180.0
+    speed_to_erpm_gain: 3100.0   # 11/24 test 1 (run_1124_1429, tape + scan matching): true speed = 1.35 x odom at 4180 -> 4180/1.35
     speed_to_erpm_offset: 0.0
 
     # servo value (0 to 1) =  steering_angle_to_servo_gain * steering angle (radians) + steering_angle_to_servo_offset
     steering_angle_to_servo_gain: 1.0 #-0.82
-    steering_angle_to_servo_offset: 0.563   # 11/24 straight test (run_1124_1419): trim +0.005 rad drives straight (was 0.558)
+    steering_angle_to_servo_offset: 0.567   # 11/24: straight test + test 1 (6 runs) fit; still drifted right at 0.563 (was 0.558)
 
     port: /dev/sensors/vesc
     duty_cycle_min: 0.0
