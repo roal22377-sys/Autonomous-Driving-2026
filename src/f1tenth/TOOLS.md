@@ -233,3 +233,10 @@ git commit -m "IL run 11 model" && git tag model-il11 && git push && git push --
 | `results/imitation/<번호>/`, `results/ppo_s2r/<번호>/` | 학습 결과 |
 | `results/reports/` | 비교 보고서 |
 | `requirements_train.txt`, `../../tools/setup_train_env.sh` | 학습 환경 버전과 설치 |
+
+### 실차 로그 지도화 (사고 지점 보기)
+```bash
+python3 tools/log_map.py logs/<run>_extracted out.png <시작 s> <끝 s> [표시할 시각 s ...]   # LiDAR 스캔 매칭(ICP)으로 구간 지도 + 궤적 + 조향
+python3 tools/log_view.py logs/<run>_extracted <출력 폴더>                               # 자율 구간마다 사고 0.5~2 s 전 LiDAR 장면
+```
+odom만으로 그리면 방향 오차로 지도가 번지므로 `log_map.py`(스캔 매칭)를 씁니다. 차가 제자리에서 돌거나 끼어 있으면 매칭이 실패할 수 있습니다.
