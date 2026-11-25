@@ -1,3 +1,7 @@
+# Plan B, MAIN model (11/26 08:40 decision, 3-seed comparison results/reports/compare_1126_0837_*.md):
+# PPO 21 update 30 (results/ppo_s2r/2130). Short courses + practice course 99.4 % (IL 13 97.5 %), cap-8 2-lap 30.9 s
+# (IL 31.0 s), worst-case 82.6 % (IL 78.0 %), open-space 94.3 % (= IL), long F1 tracks 0.6 % slower than IL.
+#   MODEL=preview tools/drive_session.sh
 # Plan B (src/f1tenth/MAP_TOOL.md section 4): a model with the track-preview input. It localizes on the course map
 # (utils/localizer.py, every scan) and gets the race line / speed plan ahead (utils/preview.py).
 #   MODEL=preview tools/drive_session.sh
@@ -7,8 +11,8 @@
 # If the localization is lost (agent log "[preview] localization lost"), the model drives on LiDAR alone.
 agent_node:
   ros__parameters:
-    name: imitation
-    algo_idx: 13
+    name: ppo_s2r
+    algo_idx: 2130
     scan_topic: scan
     drive_topic: drive
     odom_topic: odom

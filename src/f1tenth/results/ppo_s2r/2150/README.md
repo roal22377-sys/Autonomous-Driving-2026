@@ -1,0 +1,1 @@
+ppo_s2r/21 checkpoint at update 50 (model_2200000.pt), IL imitation/13 normalizer. PPO 21 u50: eval 100 %, 1.13 s slower than IL 13 (2 laps), worst-case 87.9 %, open-space 93.2 %, short 100 %, LiDAR-only 72 / 73 %

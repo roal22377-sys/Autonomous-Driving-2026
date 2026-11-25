@@ -1,0 +1,1 @@
+ppo_s2r/21 checkpoint at update 30 (model_1320000.pt), IL imitation/13 normalizer. PPO 21 u30 (fixed crash cost 5000, small noise): eval 99.4 %, 0.85 s slower than IL 13 (2 laps), worst-case 88.6 %, open-space 96.6 %, short 100 %, LiDAR-only 78 / 80 %, practice 4/4 19.0 s

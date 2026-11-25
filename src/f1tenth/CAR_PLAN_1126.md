@@ -7,13 +7,22 @@
 | 0 | 준비 | 10분 | 필수 | `git pull`, `ssh jowonjun@10.106.0.73 true`, LiDAR 수평, 배터리 |
 | 1 | **지도 따기** | 30분 | 필수 | `tools/map_session.sh` → 3바퀴 → `tools/map_session.sh --finish Practice1126` → commit / push |
 | 2 | **LiDAR PPO 주행** | 40분 | 필수 | `MODEL=ilppo tools/drive_session.sh` 상한 2 → 4 → 5, 괜찮으면 `MODEL=ilppo_fast` 5 → 6. 상한마다 3바퀴 + `--finish` |
-| 3 | **위치 정보 모델** | 40분 | 아래 조건 | `loc_test.py`로 2번 기록 확인(valid 98 % 이상) → 차를 출발 자리에 → `MODEL=preview` 상한 2.5 → 5. 미끄러지면 `MODEL=preview_robust` |
+| 3 | **위치 정보 모델** | 40분 | 아래 조건 | `loc_test.py`로 2번 기록 확인(valid 98 % 이상) → 차를 출발 자리에 → `MODEL=preview` 상한 2.5 → 5. 미끄러지면 `MODEL=preview_robust`. 시간이 남으면 `MODEL=preview_il`로 같은 상한 비교 |
 | 4 | 원선회 | 10분 | 선택 | 공간이 있으면 `tools/drive_session.sh --circle`(조향 양 끝 2개) |
 
 - **2번 기록 하나로 세 가지를 합니다:** 실차 결과, 접지력 측정(5-1절), 위치 추정 시험(4-1절).
 - **시간이 부족하면** 1 → 2 → 3 순서로 하고 4번과 상한 6은 생략합니다.
 - **끝나면:** `git add -f logs/run_1126_*_extracted && git commit -m "car 11/26 logs" && git push`. 본 것(벽 접촉, 흔들림, 좋았던 주행)은 메시지로 남겨 주세요.
-- **13시까지 Claude가 할 일:** 밤새 학습한 모델을 비교해 `agent_preview*.yaml`을 확정하고 push합니다. 바뀐 점은 이 표 아래에 적습니다.
+- **11/26 08:45 확정 (Claude, 3시드 비교 `results/reports/compare_1126_0837_*.md`):**
+
+  | 설정 | 모델 | 짧은 코스+연습 코스 | 상한 8 2랩 | 최악 조건 | 막다른 공간 | 일반 |
+  |---|---|---|---|---|---|---|
+  | `MODEL=preview` (기본) | **PPO 21 u30** (`ppo_s2r/2130`) | **99.4 %** | **30.9 s** | 82.6 % | 94.3 % | 99.2 % |
+  | `MODEL=preview_robust` | PPO 21 u50 (`ppo_s2r/2150`) | 98.8 % | 31.1 s | **86.4 %** | 93.6 % | 99.2 % |
+  | `MODEL=preview_il` | IL 13 (`imitation/13`) | 97.5 % | 31.0 s | 78.0 % | 94.3 % | **100 %** |
+
+  - 연습 코스 양방향, 상한 2 / 2.5 / 3 / 4에서 세 모델 모두 3/3 완주했습니다.
+  - **상한 8(제한 없음) 역방향에서는 세 모델 모두 위쪽 돌출부(지도 x ≈ −3.4) 부근에서 가끔 닿았습니다.** 오늘은 상한 5까지만 씁니다.
 
 
 목표는 네 가지입니다.
@@ -127,11 +136,12 @@ python3 tools/loc_test.py logs/run_1126_XXXX_extracted maps/run_1126_YYYY --trac
 ## 5. 위치 정보 모델 주행 (계획 B, 30분) — 4번이 통과했을 때만
 
 ```bash
-MODEL=preview tools/drive_session.sh          # 기본 = 빠른 모델: IL 13 (또는 아침에 Claude가 넣은 PPO 18 후보)
-MODEL=preview_robust tools/drive_session.sh   # 강건 모델: PPO 17 u30 (ppo_s2r/1730), 아래 경우에 바꿔 탐
+MODEL=preview tools/drive_session.sh          # 기본: PPO 21 u30 (ppo_s2r/2130)
+MODEL=preview_robust tools/drive_session.sh   # 강건: PPO 21 u50 (ppo_s2r/2150), 아래 경우에 바꿔 탐
+MODEL=preview_il tools/drive_session.sh       # 비교: IL 13
 ```
 - **강건 모델로 바꾸는 경우:** 기본 모델이 같은 상한에서 미끄러지거나 벽에 닿는 경우입니다(특히 코너 출구에서 바깥 벽).
-  - PPO 17 u30은 시뮬레이터 최악 조건(지연·접지력·조향이 모두 나쁜 쪽) 완주가 94.7 %입니다(IL 13은 83.3 %). 명목 조건에서는 약 3.5 % 느립니다.
+  - PPO 21 u50은 시뮬레이터 최악 조건(지연·접지력·조향이 모두 나쁜 쪽) 완주가 86.4 %입니다(3시드). 기본 모델은 82.6 %, IL 13은 78.0 %입니다. 속도는 기본 모델보다 약 0.3 % 느립니다.
   - 두 모델 설정의 `course` / `map_dir`은 `map_session.sh`가 함께 바꿉니다.
 - `speed_limit` 2.5에서 시작해 3 → 4 → 5로 올립니다. 매번 3바퀴 이상 돌고 `--finish`로 기록합니다.
 - **위치를 0.3 s 넘게 잃으면 차가 스스로 멈춥니다**(속도 0, 조향은 모델 그대로). 위치를 다시 찾으면 이어서 달립니다. 로그에는 `[preview] localization lost: stopping after 0.3 s`가 나옵니다.

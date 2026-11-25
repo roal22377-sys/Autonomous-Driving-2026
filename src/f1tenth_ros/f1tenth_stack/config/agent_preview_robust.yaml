@@ -1,5 +1,5 @@
-# Plan B, ROBUST model: PPO 17 update 30 (results/ppo_s2r/1730: worst-case 94.7 % vs IL 13 83.3 %, LiDAR-only
-# 69 / 64 %, but ~3.5 % slower at nominal). Use it when IL 13 (agent_preview.yaml) slides or touches walls on the car.
+# Plan B, ROBUST model: PPO 21 update 50 (results/ppo_s2r/2150): worst-case 86.4 % (best of all, IL 13 78.0 %),
+# eval 99.2 %, short + practice 98.8 %, 0.9 % slower than IL. Use it when the main model slides or touches walls.
 #   MODEL=preview_robust tools/drive_session.sh
 # Plan B (src/f1tenth/MAP_TOOL.md section 4): a model with the track-preview input. It localizes on the course map
 # (utils/localizer.py, every scan) and gets the race line / speed plan ahead (utils/preview.py).
@@ -11,7 +11,7 @@
 agent_node:
   ros__parameters:
     name: ppo_s2r
-    algo_idx: 1730
+    algo_idx: 2150
     scan_topic: scan
     drive_topic: drive
     odom_topic: odom
