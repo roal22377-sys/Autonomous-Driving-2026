@@ -1,0 +1,32 @@
+# dynamic system
+integrator: rk4
+model: st
+
+# dynmaic configs
+mu: 0.65        # 11/24: nominal of 0.52-0.85 (sim2real.mu_scale 0.8-1.3); the 11/23 fit below used the 1.35x-low odom speed,
+                #   the calibrated 11/24 drive held 4.2 m/s^2 (p99) without sliding. Measure with a big circle test.
+                # friction: peak lateral accel ~ mu*g (saturating tires, dynamic_models.py). 11/23 fit to real
+                #   driving (tools/fit_tires.py): 0.41-0.44; real logs briefly reached 5-6 m/s^2 -> 0.5 nominal
+                #   (was 1.0489, which with the old linear tires had no grip limit at all)
+C_Sf: 4.718
+C_Sr: 5.4562
+# measured on the car (2026-11-17): wheelbase 0.34, front axle -> front bumper 0.10,
+# rear axle -> rear bumper 0.16, lidar 0.12 behind the front bumper (0.02 behind the front axle).
+# CG position not measured: kept at the original lf:lr split.
+length_f: 0.19      # CG -> front axle
+length_r: 0.15      # CG -> rear axle   (wheelbase 0.34)
+h: 0.074
+m: 3.74
+I: 0.04712
+s_min: -1.0
+s_max: 1.0
+sv_min: -2.65
+sv_max: 2.65
+v_switch: 7.319
+a_max: 9.51
+v_min: -8.0
+v_max: 8.0
+width: 0.30   # [m] real car (measured)
+length: 0.60  # [m] real car (measured), bumper to bumper
+front_overhang: 0.10   # [m] front axle -> front bumper (body for wall collisions)
+lidar_pos_offset: 0.17  # [m] CG -> lidar = wheelbase - 0.02 - length_r
