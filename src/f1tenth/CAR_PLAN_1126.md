@@ -1,5 +1,21 @@
 # 11/26(목) 실차 계획: 지도 따기 → LiDAR PPO 주행 → 위치 추정 → 위치 정보 모델(계획 B)
 
+## 한눈에 보기 (15:00 시작, 약 2.5시간)
+
+| # | 할 일 | 시간 | 필수 여부 | 명령 |
+|---|---|---|---|---|
+| 0 | 준비 | 10분 | 필수 | `git pull`, `ssh jowonjun@10.106.0.73 true`, LiDAR 수평, 배터리 |
+| 1 | **지도 따기** | 30분 | 필수 | `tools/map_session.sh` → 3바퀴 → `tools/map_session.sh --finish Practice1126` → commit / push |
+| 2 | **LiDAR PPO 주행** | 40분 | 필수 | `MODEL=ilppo tools/drive_session.sh` 상한 2 → 4 → 5, 괜찮으면 `MODEL=ilppo_fast` 5 → 6. 상한마다 3바퀴 + `--finish` |
+| 3 | **위치 정보 모델** | 40분 | 아래 조건 | `loc_test.py`로 2번 기록 확인(valid 98 % 이상) → 차를 출발 자리에 → `MODEL=preview` 상한 2.5 → 5. 미끄러지면 `MODEL=preview_robust` |
+| 4 | 원선회 | 10분 | 선택 | 공간이 있으면 `tools/drive_session.sh --circle`(조향 양 끝 2개) |
+
+- **2번 기록 하나로 세 가지를 합니다:** 실차 결과, 접지력 측정(5-1절), 위치 추정 시험(4-1절).
+- **시간이 부족하면** 1 → 2 → 3 순서로 하고 4번과 상한 6은 생략합니다.
+- **끝나면:** `git add -f logs/run_1126_*_extracted && git commit -m "car 11/26 logs" && git push`. 본 것(벽 접촉, 흔들림, 좋았던 주행)은 메시지로 남겨 주세요.
+- **13시까지 Claude가 할 일:** 밤새 학습한 모델을 비교해 `agent_preview*.yaml`을 확정하고 push합니다. 바뀐 점은 이 표 아래에 적습니다.
+
+
 목표는 네 가지입니다.
 1. 연습 코스 지도를 따서 맵 툴을 실차로 검증합니다.
 2. 지금까지 가장 좋은 LiDAR 전용 PPO의 실차 결과를 얻습니다. 같은 코스를 시뮬레이터에도 넣어 랩 타임을 직접 비교합니다.
