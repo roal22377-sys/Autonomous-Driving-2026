@@ -1,0 +1,1 @@
+ppo_s2r/17 checkpoint at update 40 (model_1760000.pt), IL imitation/13 normalizer. PPO 17 u40: eval 96.6 %, worst-case 93.2 %, open-space 87.5 %, short 93.8 %, 8.2 s slower than IL 13, LiDAR-only 72 / 80 %
