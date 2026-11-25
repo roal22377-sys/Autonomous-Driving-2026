@@ -490,7 +490,33 @@ train_il_s2r.py --algo_idx 13 --workers 20 --task_config configs/task/f1tenth_pr
   - 그래서 PPO 14는 `--sim_override configs/task/sim_override_preview_lost.yaml`로 학습합니다: 끊김 에피소드 35 %, 끊김 길이 0.5–8 s, 위치 없는 에피소드 10 %.
   - `--lost_eval 1`로 평가마다 위치 없는 성능을 보고합니다.
   - 차에서는 0.3 s 넘게 잃으면 멈춥니다(`agent_preview.yaml` `lost_stop`).
-- IL 13이 끝나면 Claude가 결과를 보고 PPO 14 설정을 정합니다(자동 시작 없음). 같은 관측으로 PPO를 하고, 짧은 코스 비중과 위치 끊김 대응을 보며 조정합니다.
+- r5 97.0 / 86.4 / 96.9 %, r6 97.7 / 89.8 / 96.9 %, r7 98.5 / 93.2 / 96.9 %, r8 97.7 / 93.2 / 100 %, **r9 100 / 95.5 / 100 %** (점수 98.5).
+  - 점수가 거의 한계라 Claude가 r9 뒤에 멈췄습니다(19:21). 조기 종료를 기다리면 1.5 h가 더 들고 오를 여지가 적어서, 그 시간을 PPO 14에 씁니다.
+  - 모델 설명은 `results/imitation/13/README.md`에 있습니다.
+- r9를 위치 없이 달리게 하면 상한 8에서 일반 36 %, 짧은 코스 69 %입니다(r3은 9 %, 53 %). 상한 3에서 68 % / 81 %입니다. 여전히 약해서 PPO 14에서 보강합니다.
+
+### PPO 14 (11/25 19:35~) — IL 13 r9에서 시작, 긴 위치 끊김 + 짧은 코스
+```bash
+train_ppo_s2r.py --il imitation/13 --algo_idx 14 --force_start \
+  --sim_override configs/task/sim_override_preview_lost.yaml \
+  --short_share 0.3 --short_eval 1 --lost_eval 1 --open_train_share 0.2 --hard_prob 0.25 \
+  --cost_critic 1 --critic_warmup 8 --crash_target il --crash_target_succ 0.96 --crash_start 4000 --crash_max 10000 \
+  --straight_steer_cost 5 --straight_v_ref 4 --bay_cost 2 --bc_steer_weight 15 \
+  --track_focus 10 --focus_by_group 1 --full_eval 1 --lr 5e-5 \
+  --real_tracks installation/maps_real/Practice1124.npz installation/maps_real/Practice1124_rev.npz
+```
+| 설정 | 왜 |
+|---|---|
+| 위치 끊김 35 %, 0.5–8 s, 위치 없는 에피소드 10 % | IL 13은 위치 없이 약함. 차에서 위치가 끊겨도 버티게 |
+| 짧은 코스 30 % + 짧은 코스 평가를 저장 기준에 | 대회 코스 100 m 이하 |
+| 충돌 목표 0.96 (고정), 충돌 벌점 4000 → 최대 10000, 충돌 전용 가치 함수 | IL이 100 %라 IL 기준(−2 %p)은 너무 빡빡함. PPO 5·7은 4000 이상에서 회복(11/24 교훈) |
+| lr 5e-5 | IL에서 처음 시작하는 PPO(PPO 5·7과 같음) |
+| 직선 흔들림 5, 막다른 공간 벌점 2, 조향 가중 BC 15, 실패 트랙 집중 10 (그룹별) | PPO 12·13에서 쓴 값 |
+
+- **저장 기준:** IL이 일반 100 %여서 PPO는 100 %이면서 더 빨라야 저장됩니다(자동 저장).
+- 그 밖의 후보는 평가 때마다 남는 체크포인트(`checkpoint/model_<steps>.pt`)에서 여러 시드로 비교해 고릅니다(11/25 교훈).
+- 업데이트 80–100까지 지켜본 뒤 판단합니다.
+- 내일 아침에 가장 좋은 모델을 `agent_preview.yaml`에 넣습니다. PPO가 IL보다 못하면 IL 13을 씁니다. 같은 관측으로 PPO를 하고, 짧은 코스 비중과 위치 끊김 대응을 보며 조정합니다.
 
 ### PPO 5 결과 (11/24) — 업데이트 100에서 처음으로 저장 (`results/ppo_s2r/5/README.md`, 태그 `model-il11-ppo5`)
 일반 93.2 % (IL 87.9), 처음 보는 변형 86 % (76), 최악 조건 89.4 % (83.3), 막다른 공간 67.0 % (67.0), 28.5 s 빠름, 흔들림 절반.
