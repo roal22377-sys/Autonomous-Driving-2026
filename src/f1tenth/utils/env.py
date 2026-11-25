@@ -79,6 +79,9 @@ class F1Wrapper(gym.Wrapper):
         self.speed_scale = 1.0
         self.lidar_override = {}
         self.history = ActionHistory(self.obs_cfg['history']['length'])
+        # track preview (plan B, utils/preview.py): race line + speed plan per course, simulated localization error
+        self.preview_cfg = self.obs_cfg['preview']
+        self._preview_cache, self.preview, self.loc_noise = {}, None, None
 
         # sim2real
         self.sim_mode = sim_mode
@@ -159,6 +162,21 @@ class F1Wrapper(gym.Wrapper):
         the expert uses it, so its full lock is a full command as on the car'''
         lock = self.steer_left_max if angle > 0 else self.steer_right_max
         return float(np.clip(angle / max(lock, 1e-6), -1.0, 1.0))
+
+    def _reset_preview(self):
+        '''race line + speed plan of this course (cached) and this episode's localization error'''
+        from utils.preview import TrackPreview, LocalizationNoise
+        key = self.track_file or id(self._env.unwrapped.track)
+        if key not in self._preview_cache:
+            rl = self._env.unwrapped.track.raceline
+            self._preview_cache[key] = TrackPreview(np.stack([rl.xs, rl.ys], axis=1), self.preview_cfg)
+            if len(self._preview_cache) > MAX_TRACK_CACHE:
+                self._preview_cache.pop(next(iter(self._preview_cache)))
+        self.preview = self._preview_cache[key]
+        # localization error: none in the ideal simulator, offset + jitter in eval / worst, + jumps and lost
+        # intervals in training
+        self.loc_noise = (LocalizationNoise(self.preview_cfg, self.noise_rng, self.timestep, train=self.sim_mode == 'train')
+                          if self.obs_noise and self.sim_mode != 'ideal' else None)
 
     def _load_track(self, path):
         if path in self._track_cache:
@@ -313,6 +331,8 @@ class F1Wrapper(gym.Wrapper):
         if self.show_centerline:
             self._env.unwrapped.add_render_callback(self._env.track.centerline.render_waypoints)
         self._reset_pose(obs_dict)
+        if self.preview_cfg['enabled']:
+            self._reset_preview()
         obs = self.getObs(obs_dict, reset=True)
         info['obs_dict'] = obs_dict
         info['privileged'] = self.privileged()
@@ -632,7 +652,13 @@ class F1Wrapper(gym.Wrapper):
         if self.obs_noise:
             scan, speed = add_obs_noise(scan, speed, self.noise_rng, self.obs_cfg, self.speed_scale,
                                         lidar_override=self.lidar_override)
-        observation = make_observation(scan, speed, self.obs_cfg, self.history, self.speed_cap)
+        preview = None
+        if self.preview_cfg['enabled']:
+            st = self.vehicle_state()
+            x, y, yaw, valid = (self.loc_noise.step(st[0], st[1], st[4]) if self.loc_noise is not None
+                                else (st[0], st[1], st[4], True))
+            preview = self.preview.features(x, y, yaw, self.speed_cap, valid)
+        observation = make_observation(scan, speed, self.obs_cfg, self.history, self.speed_cap, preview)
 
         return observation
     # ======================================================================== #

@@ -3,7 +3,10 @@
     Shared by the simulator (utils/env.py) and the real car
     (f1tenth_stack/agent_node.py) so both build exactly the same vector.
 
-        [ lidar bin 0, ..., lidar bin N-1, (speed [m/s]), (action history), (speed limit [m/s]) ]
+        [ lidar bin 0, ..., lidar bin N-1, (speed [m/s]), (action history), (speed limit [m/s]), (track preview) ]
+
+        track preview (track_preview.enabled, plan B): race-line offset / heading error, curvature and
+        speed plan ahead, valid flag, from the pose in a known map (utils/preview.py).
 
         action history (action_history.length = H > 0): the last H commands the policy sent,
         newest first, each [steer, speed] normalized to [-1, 1] -> 2*H values. The steering
@@ -20,6 +23,7 @@
 import numpy as np
 
 from utils.lidar import get_lidar_config, process_scan, add_scan_noise
+from utils.preview import get_preview_config, preview_dim
 
 DEFAULT_SPEED_CONFIG = {
     'enabled': False,
@@ -71,13 +75,14 @@ def apply_start_kick(cmd_speed, measured_speed, kick):
 def get_obs_config(args):
     '''Lidar + speed + action history + speed limit settings; checks that args.obs_dim matches them.'''
     cfg = {'lidar': get_lidar_config(args), 'speed': get_speed_config(args), 'history': get_history_config(args),
-           'speed_limit': get_speed_limit_config(args)}
+           'speed_limit': get_speed_limit_config(args), 'preview': get_preview_config(args)}
     obs_dim = cfg['lidar']['num_beams'] + (1 if cfg['speed']['enabled'] else 0) + 2*cfg['history']['length'] \
-              + (1 if cfg['speed_limit']['enabled'] else 0)
+              + (1 if cfg['speed_limit']['enabled'] else 0) + preview_dim(cfg['preview'])
     if args.obs_dim != obs_dim:
         raise ValueError(f"obs_dim is {args.obs_dim} but lidar.num_beams ({cfg['lidar']['num_beams']})"
                          f" + speed_obs ({int(cfg['speed']['enabled'])}) + 2*action_history ({cfg['history']['length']})"
                          f" + speed_limit ({int(cfg['speed_limit']['enabled'])})"
+                         f" + track_preview ({preview_dim(cfg['preview'])})"
                          f" = {obs_dim}. Fix configs/task/f1tenth.yaml.")
     return cfg
 
@@ -100,12 +105,13 @@ class ActionHistory:
         return self.buf.reshape(-1)
 
 
-def make_observation(raw_scan, speed, cfg, history=None, speed_limit=None):
+def make_observation(raw_scan, speed, cfg, history=None, speed_limit=None, preview=None):
     '''
         raw_scan:    >= 1080 lidar ranges [m]
         speed:       longitudinal speed [m/s] (ignored if speed_obs is disabled)
         history:     ActionHistory (required if action_history.length > 0)
         speed_limit: cap on the commanded speed [m/s]; None = no cap (max_speed)
+        preview:     track preview features (utils/preview.py TrackPreview.features), required if enabled
     '''
     obs = process_scan(raw_scan, **cfg['lidar'])
     if cfg['speed']['enabled']:
@@ -119,6 +125,8 @@ def make_observation(raw_scan, speed, cfg, history=None, speed_limit=None):
     if cfg.get('speed_limit', {}).get('enabled', False):
         lim = cfg['speed_limit']['max'] if speed_limit is None or speed_limit <= 0 else min(float(speed_limit), cfg['speed_limit']['max'])
         obs = np.append(obs, lim)
+    if cfg.get('preview', {}).get('enabled', False):
+        obs = np.concatenate([obs, np.asarray(preview, np.float32)])
     return obs.astype(np.float32)
 
 
