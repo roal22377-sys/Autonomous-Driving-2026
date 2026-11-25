@@ -1,0 +1,18 @@
+# Mapping drive: the car drives the course by itself, slowly, while the bag records the LiDAR for the map
+# (tools/map_session.sh = MODEL=mapping tools/drive_session.sh; src/f1tenth/MAP_TOOL.md).
+#   IL run 11: the steadiest at 2-3 m/s on the practice course converted from the 11/24 map
+#   (tools/check_track.py, Practice1124 both directions, caps 2 / 2.5 / 3, 3 seeds each: IL 11 18/18,
+#   PPO 12 u190 / u250 / u272 17/18, PPO 5 13/18) and it drove this course on the car on 11/24 without contact.
+#   2.0 m/s: the lowest trained cap (lower is outside training, agent_node warns); 5 cm between scans is plenty for
+#   the scan matching of tools/map_offline.py. Let it do 3 laps or more (more laps = more loop closures).
+agent_node:
+  ros__parameters:
+    name: imitation
+    algo_idx: 11
+    scan_topic: scan
+    drive_topic: drive
+    odom_topic: odom
+    speed_limit: 2.0
+    speed_min: 0.0
+    steer_gain_left: 1.0
+    steer_gain_right: 1.0

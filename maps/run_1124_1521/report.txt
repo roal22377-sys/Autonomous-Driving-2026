@@ -1,0 +1,4 @@
+log logs/run_1124_1521_extracted t 48.0-110.0 s, 943 keyframes, path 183.5 m
+sequential ICP fell back to odom on 52 keyframes
+loop closures 176; correction of the sequential path by the pose graph: median 1.714 m, max 3.904 m
+map 421 x 251 cells at 0.05 m, origin [-14.999, -3.236]

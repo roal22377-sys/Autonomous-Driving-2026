@@ -154,6 +154,12 @@ def get_args():
     p.add_argument('--open_train_share', type=float, default=0.0,
                    help='share of training episodes on open-space training tracks (a big dead-end bay at every corner, '
                         'eval_open_space.py --make_train; PPO 5: 0.2). The open-space test tracks stay unseen')
+    p.add_argument('--real_tracks', nargs='*', default=[],
+                   help='real-course tracks (tools/map_to_track.py .npz, both directions): reported at every evaluation '
+                        '(caps 8 and 4 from the start line), not part of the save gates. MAP_TOOL.md')
+    p.add_argument('--real_train_share', type=float, default=0.0,
+                   help='share of training episodes on --real_tracks (0 = evaluation only). For a course the car must '
+                        'race (the competition course once mapped); the practice course stays evaluation only')
     p.add_argument('--track_focus', type=float, default=3.0,
                    help='training track weight = 1 + this x the track\'s recent failure rate (0 = uniform)')
     p.add_argument('--focus_by_group', type=int, default=0,
@@ -281,7 +287,8 @@ def env_config(args):
                 WALL_MARGIN=args.wall_margin, LAT_COST=args.lat_cost, LAT_GRIP_SHARE=args.lat_grip_share,
                 LAP_BONUS=args.lap_bonus, uncapped_prob=args.uncapped_prob,
                 STUCK_TIME=args.stuck_time, STUCK_DIST=args.stuck_dist, BACKWARD_DIST=args.backward_dist,
-                HARD_PROB=args.hard_prob, HARD_FRAC=args.hard_frac, open_train=args.open_train_share > 0)
+                HARD_PROB=args.hard_prob, HARD_FRAC=args.hard_frac, open_train=args.open_train_share > 0,
+                real_train=list(args.real_tracks) if args.real_train_share > 0 else [])
 
 
 def open_train_tracks():
@@ -289,10 +296,11 @@ def open_train_tracks():
     return sorted(glob.glob(os.path.join(TRAIN_DIR, '*.npz')))
 
 
-def training_tracks(open_train):
-    '''generated training tracks (held-out variant excluded) + the open-space training tracks if used'''
+def training_tracks(open_train, real=()):
+    '''generated training tracks (held-out variant excluded) + the open-space training tracks if used
+    + real-course tracks if trained on (--real_train_share)'''
     tracks = [t for t in IL.list_variants(IL.MAPS) if IL.HOLDOUT not in t]
-    return tracks + (open_train_tracks() if open_train else [])
+    return tracks + (open_train_tracks() if open_train else []) + [os.path.abspath(t) for t in real]
 
 
 def base_track_weights(args):
@@ -302,7 +310,11 @@ def base_track_weights(args):
     if args.open_train_share > 0:
         op = [os.path.basename(t) for t in open_train_tracks()]
         s = args.open_train_share
-        base.update({n: s / (1.0 - s) * len(reg) / len(op) for n in op})
+        base.update({n: s / (1.0 - s - args.real_train_share) * len(reg) / len(op) for n in op})
+    if args.real_train_share > 0 and args.real_tracks:
+        s = args.real_train_share
+        base.update({os.path.basename(t): s / (1.0 - s - args.open_train_share) * len(reg) / len(args.real_tracks)
+                     for t in args.real_tracks})
     return base
 
 
@@ -338,9 +350,10 @@ def track_weights(tstat, focus, prior=2.0, base=None, by_group=False):
 def make_env(seed, cfg):
     args = IL.get_args([])
     args.seed = seed
-    env = F1Wrapper(args, IL.MAPS, obs_noise=True, sim_mode='train', tracks=training_tracks(cfg.get('open_train', False)))
+    env = F1Wrapper(args, IL.MAPS, obs_noise=True, sim_mode='train',
+                    tracks=training_tracks(cfg.get('open_train', False), cfg.get('real_train', [])))
     for k, v in cfg.items():
-        if k == 'open_train':
+        if k in ('open_train', 'real_train'):
             continue
         if k == 'uncapped_prob':
             env.sl_cfg['uncapped_prob'] = v
@@ -369,7 +382,7 @@ def main():
             raise FileNotFoundError('no open-space training tracks: run `python -u eval_open_space.py --make_train` first')
         from eval_open_space import require_fresh_open_train
         require_fresh_open_train(open_train_tracks())
-    base_w = base_track_weights(args) if args.open_train_share > 0 else None
+    base_w = base_track_weights(args) if args.open_train_share > 0 or args.real_train_share > 0 else None
 
     # IL policy (actor + frozen normalizer) and a frozen copy as the BC teacher
     il_dir = f'results/{args.il}'
@@ -741,6 +754,12 @@ def main():
             op = open_eval() if args.open_eval and gates else float('nan')
             open_ok = (not args.open_eval) or op >= il_open - 1e-9
             better = cand and worst_ok and open_ok
+            if args.real_tracks:
+                rs, rl, rres = IL.evaluate(eval_args, policy(), [os.path.abspath(t) for t in args.real_tracks], 'eval',
+                                           settings=((8.0, 'center'), (4.0, 'center')))
+                row.update(real_success=rs, real_lap=rl, real_res=rres)
+                cprint(f'[real course @ update {update}] 2-lap success {rs*100:.0f}% ({sum(r[1] for r in rres)}/{len(rres)}), '
+                       f'uncapped 2-lap time {rl:.1f} s', color='cyan')
             cprint(f'[eval @ update {update}] 2-lap success {succ*100:.1f}% (best {best["name"]} {best["succ"]*100:.1f}%) '
                    f'| vs best on {n_common} runs both finished: {gain:+.2f} s faster'
                    + (f' | worst-case success {worst*100:.1f}% (IL {il_worst*100:.1f}%)' if args.worst_eval and gates else '')

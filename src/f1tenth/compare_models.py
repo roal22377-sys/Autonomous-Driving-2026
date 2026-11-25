@@ -80,6 +80,9 @@ def main():
     p.add_argument('--quick', action='store_true', help='1 lap, eval cap 8 centerline + open cap 5 only, no worst')
     p.add_argument('--open_level', default='big')
     p.add_argument('--max_tracks', type=int, default=0, help='first N tracks of each set (smoke tests)')
+    p.add_argument('--extra_tracks', nargs='*', default=[],
+                   help='real-course tracks (tools/map_to_track.py .npz, both directions): own column, caps 8 / 4 / 2 '
+                        'from the start line (MAP_TOOL.md)')
     p.add_argument('--seeds', type=int, default=1,
                    help='runs per track and setting with different start noise (more = steadier numbers for close models)')
     p.add_argument('--low_caps', default='2,2.5,3,3.5,4',
@@ -107,6 +110,7 @@ def main():
         if low:
             jobs += [(m, t, low[(i + k) % len(low)], 'center', 'eval', laps, 'low', k) for i, t in enumerate(ev)]
         jobs += [(m, t, c, s, 'eval', laps, None, k) for c, s in op_set for t in op]
+        jobs += [(m, os.path.abspath(t), c, 'center', 'eval', laps, 'real', k) for c in (8.0, 4.0, 2.0) for t in a.extra_tracks]
     t0 = time.time()
     print(f'{len(jobs)} runs ({len(a.models)} models), {laps} lap(s), {a.workers} workers ...', flush=True)
     with mp.get_context('spawn').Pool(a.workers) as pool:
@@ -115,8 +119,9 @@ def main():
     lines = [f'# model comparison ({time.strftime("%Y-%m-%d %H:%M")}, {laps} lap(s), reference = {ref})', '',
              f'tracks: eval {len(ev)} x {ev_set}' + ('' if a.quick else f', worst-case {len(ev)} x cap 8 centerline')
              + f', open-space ({a.open_level}) {len(op)} x {op_set}', '',
-             '| model | eval success | low caps 2-4 m/s | worst-case success | open-space success | paired time vs ref (eval, uncapped) | mean speed | steering jitter |',
-             '|---|---|---|---|---|---|---|---|']
+             '| model | eval success | low caps 2-4 m/s | worst-case success | open-space success | paired time vs ref (eval, uncapped) | mean speed | steering jitter |'
+             + (' real course (caps 8/4/2) | real 2-lap time, cap 8 |' if a.extra_tracks else ''),
+             '|---|---|---|---|---|---|---|---|' + ('---|---|' if a.extra_tracks else '')]
     by = lambda m, g: [r for r in res if r['model'] == m and r['group'] == g]
     for m in a.models:
         e, w, o = by(m, 'eval'), by(m, 'worst'), by(m, 'open')
@@ -128,7 +133,9 @@ def main():
         gain = (f'{abs(g):.1f}% {"faster" if g >= 0 else "slower"} on {len(com)} runs'
                 if com and m != ref else ('reference' if m == ref else '-'))
         lines.append(f'| {m} | {sr(e)} | {sr(by(m, "low"))} | {sr(w)} | {sr(o)} | {gain} | {np.mean([r["v"] for r in e]):.2f} m/s | '
-                     f'{np.mean([r["jitter"] for r in e]):.4f} rad |')
+                     f'{np.mean([r["jitter"] for r in e]):.4f} rad |'
+                     + (f' {sr(by(m, "real"))} | ' + (f'{np.mean([r["t"] for r in by(m, "real") if r["ok"] and "@8/" in r["key"]]):.1f} s |'
+                        if any(r["ok"] and "@8/" in r["key"] for r in by(m, "real")) else '- |') if a.extra_tracks else ''))
     lines += ['', '## uncapped 2-lap time per track (centerline start; - = did not finish)', '',
               '| track | ' + ' | '.join(a.models) + ' |', '|---|' + '---|' * len(a.models)]
     keys = sorted({r['key'] for r in res if r['group'] == 'eval' and r['key'].endswith('@8/center')})

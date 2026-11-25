@@ -246,3 +246,11 @@ python3 tools/log_map.py logs/<run>_extracted out.png <시작 s> <끝 s> [표시
 python3 tools/log_view.py logs/<run>_extracted <출력 폴더>                               # 자율 구간마다 사고 0.5~2 s 전 LiDAR 장면
 ```
 odom만으로 그리면 방향 오차로 지도가 번지므로 `log_map.py`(스캔 매칭)를 씁니다. 차가 제자리에서 돌거나 끼어 있으면 매칭이 실패할 수 있습니다.
+
+### 실제 코스 지도 → 시뮬레이터 트랙 (11/25): [`MAP_TOOL.md`](MAP_TOOL.md)
+```bash
+tools/map_session.sh                     # 차가 스스로(IL 11, 2 m/s) 3바퀴 이상 돌며 기록
+tools/map_session.sh --finish NAME       # 기록 → 루프 클로저 지도(tools/map_offline.py) → 트랙(tools/map_to_track.py) → 시뮬레이터 확인(tools/check_track.py)
+```
+`log_map.py`와 달리 루프 클로저와 포즈 그래프로 바퀴마다 쌓인 오차를 펴서 벽이 한 겹이 됩니다.
+트랙은 `installation/maps_real/`에 생기고, `compare_models.py --extra_tracks`, `train_ppo_s2r.py --real_tracks [--real_train_share]`로 평가와 학습에 씁니다.
