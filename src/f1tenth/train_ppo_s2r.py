@@ -198,6 +198,10 @@ def get_args():
     p.add_argument('--crash_target', default='il', choices=('il', 'best'),
                    help="success the collision cost aims at: 'il' = the IL policy's (fixed); 'best' = ratchet, the "
                         "best saved model's (starts at IL, only goes up, so completion keeps being pushed past IL)")
+    p.add_argument('--crash_target_succ', type=float, default=0.0,
+                   help='> 0: this eval success is the collision cost\'s target instead (e.g. 0.91). 11/25 PPO 12: \'best\' '
+                        'stuck at an early 91.5 %% kept the cost at its cap and the policy slowed down; \'il\' (88.1 %%) '
+                        'let it fall towards 86 %%')
     p.add_argument('--crash_start', type=float, default=None,
                    help='collision cost at the start (default --collision_cost, which stays the floor), e.g. the cost '
                         'the --init checkpoint ended with, so its critic matches the rewards')
@@ -747,6 +751,8 @@ def main():
                 # completion as a constraint: the policy itself must find it worth staying safe
                 old = crash_cost
                 target = max(il_succ, best['succ']) if args.crash_target == 'best' else il_succ
+                if args.crash_target_succ > 0:
+                    target = args.crash_target_succ
                 # the worst-case / open-space checks count too when they ran (a model that reached the target on
                 # the eval tracks but is below IL there is not safe enough yet: 11/24 PPO 4 update 30)
                 gates_bad = gates and not (worst_ok and open_ok)
@@ -757,7 +763,7 @@ def main():
                 if crash_cost != old:
                     venv.set_attr('COLLISION_COST', crash_cost)
                     cprint(f'[crash cost] {old:.0f} -> {crash_cost:.0f} (eval {succ*100:.1f}% vs target {target*100:.1f}%'
-                           f' = {"best saved" if args.crash_target == "best" else "IL"}'
+                           f' = {"fixed" if args.crash_target_succ > 0 else ("best saved" if args.crash_target == "best" else "IL")}'
                            + (' | worst-case / open-space below IL' if gates_bad else '') + ')', color='yellow', bold=True)
             row['collision_cost'] = crash_cost
             torch.save({'actor': actor.state_dict(), 'critic': critic.state_dict(),
