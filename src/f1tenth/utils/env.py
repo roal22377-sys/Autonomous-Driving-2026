@@ -330,6 +330,12 @@ class F1Wrapper(gym.Wrapper):
                               # ~1 Hz changes the command only a little per 25 ms step, so a step-to-step cost misses it
     STRAIGHT_EMA_TIME = 0.5   # [s] time constant of that moving average (slow line changes stay cheap)
     STRAIGHT_CURV = 0.05      # [1/m] straight = |centerline curvature| below this 1, 3 and 6 m ahead (radius > 20 m)
+    # dead-end bays (PPO option, 0 = off): per step, per m the car's center is outside the smooth corridor
+    # (track_gen w_left / w_right: the width before pockets, rough walls and corner runoffs) by more than BAY_MARGIN.
+    # 11/25: a third of the IL crashes and most PPO 'stuck' endings were cars that drove into a bay; until now only
+    # the crash / stuck at its end was penalized. Simulator-only (not observed), like the straight-line cost.
+    BAY_COST = 0.0
+    BAY_MARGIN = 0.10
     STRAIGHT_V_REF = 0.0      # [m/s] > 0: that cost is per meter driven (x progress / (V_REF dt)), the same as per step at
                               # V_REF. 11/25 PPO 7 (per step, 15): a correction cost 2.7x more per meter at 3 m/s than at 8;
                               # update 60 stopped correcting drifts on straights at caps 3-4 (0/22 finished at cap 3)
@@ -365,6 +371,18 @@ class F1Wrapper(gym.Wrapper):
         s0 = float(self.position_frenet[0])
         return all(abs(float(cl.calc_curvature((s0 + d) % L))) < self.STRAIGHT_CURV for d in (1.0, 3.0, 6.0))
 
+    def out_of_corridor(self):
+        '''[m] how far the car's center is outside the smooth corridor (in a pocket / dead-end bay), 0 inside'''
+        tr = self._env.unwrapped.track
+        wl, wr = getattr(tr, 'w_left', None), getattr(tr, 'w_right', None)
+        if wl is None or wr is None:
+            return 0.0
+        L = float(tr.centerline.spline.s[-1])
+        n = len(wl)
+        i = int((float(self.position_frenet[0]) % L) / L * n) % n
+        ey = float(self.position_frenet[1])                  # + = left of the centerline
+        return max(0.0, abs(ey) - float(wl[i] if ey > 0 else wr[i]) - self.BAY_MARGIN)
+
     def calc_reward(self, action=None, lap_done=None):
         # forward reward: progress along the centerline (frenet s) this step [m].
         # Rewards speed, not mere survival; driving backwards gives a negative reward.
@@ -391,8 +409,11 @@ class F1Wrapper(gym.Wrapper):
         if lap_done is not None and self.LAP_BONUS > 0 and np.isfinite(self.ref_lap):
             lap_bonus = self.LAP_BONUS * max(0.0, self.ref_lap - lap_done)
 
+        bay_cost = self.BAY_COST * self.out_of_corridor() if self.BAY_COST > 0 else 0.0
+
         # final reward
-        reward = forward_reward - collision_cost - steer_cost - straight_cost - time_cost - wall_cost - lat_cost + lap_bonus
+        reward = (forward_reward - collision_cost - steer_cost - straight_cost - time_cost - wall_cost - lat_cost
+                  - bay_cost + lap_bonus)
         reward_dict = {'forward_reward': forward_reward,
                        'collision_cost': collision_cost,
                        'steer_cost': steer_cost,
@@ -400,6 +421,7 @@ class F1Wrapper(gym.Wrapper):
                        'time_cost': time_cost,
                        'wall_cost': wall_cost,
                        'lat_cost': lat_cost,
+                       'bay_cost': bay_cost,
                        'lap_bonus': lap_bonus}
         return reward, reward_dict
     # ======================================================================== #
