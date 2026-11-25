@@ -160,6 +160,12 @@ def get_args():
     p.add_argument('--real_train_share', type=float, default=0.0,
                    help='share of training episodes on --real_tracks (0 = evaluation only). For a course the car must '
                         'race (the competition course once mapped); the practice course stays evaluation only')
+    p.add_argument('--short_share', type=float, default=0.0,
+                   help='share of training episodes on the short (50-100 m) training courses of installation/maps_short '
+                        '(utils/track_short.py; the competition course is <= 100 m). IL 13: 0.5')
+    p.add_argument('--short_eval', type=int, default=0,
+                   help='evaluate the held-out short courses (Rand3xx, _w301; caps 8 / 5) at every evaluation and only '
+                        'save a model at least as good there as IL (one run of slack)')
     p.add_argument('--track_focus', type=float, default=3.0,
                    help='training track weight = 1 + this x the track\'s recent failure rate (0 = uniform)')
     p.add_argument('--focus_by_group', type=int, default=0,
@@ -288,7 +294,7 @@ def env_config(args):
                 LAP_BONUS=args.lap_bonus, uncapped_prob=args.uncapped_prob,
                 STUCK_TIME=args.stuck_time, STUCK_DIST=args.stuck_dist, BACKWARD_DIST=args.backward_dist,
                 HARD_PROB=args.hard_prob, HARD_FRAC=args.hard_frac, open_train=args.open_train_share > 0,
-                real_train=list(args.real_tracks) if args.real_train_share > 0 else [])
+                real_train=list(args.real_tracks) if args.real_train_share > 0 else [], short_train=args.short_share > 0)
 
 
 def open_train_tracks():
@@ -296,25 +302,32 @@ def open_train_tracks():
     return sorted(glob.glob(os.path.join(TRAIN_DIR, '*.npz')))
 
 
-def training_tracks(open_train, real=()):
+def short_train_tracks():
+    from utils.track_short import short_tracks
+    return short_tracks(holdout=False)
+
+
+def training_tracks(open_train, real=(), short=False):
     '''generated training tracks (held-out variant excluded) + the open-space training tracks if used
-    + real-course tracks if trained on (--real_train_share)'''
+    + real-course tracks if trained on (--real_train_share) + short courses (--short_share)'''
     tracks = [t for t in IL.list_variants(IL.MAPS) if IL.HOLDOUT not in t]
-    return tracks + (open_train_tracks() if open_train else []) + [os.path.abspath(t) for t in real]
+    return (tracks + (open_train_tracks() if open_train else []) + [os.path.abspath(t) for t in real]
+            + (short_train_tracks() if short else []))
 
 
 def base_track_weights(args):
     '''{track basename: weight} so that the open-space training tracks get --open_train_share of the episodes'''
     reg = [os.path.basename(t) for t in training_tracks(False)]
     base = {n: 1.0 for n in reg}
-    if args.open_train_share > 0:
-        op = [os.path.basename(t) for t in open_train_tracks()]
-        s = args.open_train_share
-        base.update({n: s / (1.0 - s - args.real_train_share) * len(reg) / len(op) for n in op})
-    if args.real_train_share > 0 and args.real_tracks:
-        s = args.real_train_share
-        base.update({os.path.basename(t): s / (1.0 - s - args.open_train_share) * len(reg) / len(args.real_tracks)
-                     for t in args.real_tracks})
+    rest = 1.0 - args.open_train_share - args.real_train_share - args.short_share     # share of the regular tracks
+    if rest <= 0:
+        raise SystemExit('--open_train_share + --real_train_share + --short_share must stay below 1')
+    groups = [(args.open_train_share, [os.path.basename(t) for t in open_train_tracks()] if args.open_train_share > 0 else []),
+              (args.real_train_share, [os.path.basename(t) for t in args.real_tracks]),
+              (args.short_share, [os.path.basename(t) for t in short_train_tracks()] if args.short_share > 0 else [])]
+    for s, names in groups:
+        if s > 0 and names:
+            base.update({n: s / rest * len(reg) / len(names) for n in names})
     return base
 
 
@@ -322,6 +335,8 @@ def track_group(name):
     '''failure-statistics group of a track file: map, direction, dead-end (open-space, seeds >= 200) or not.
     Montreal_rev.npz, Montreal_rev_w103.npz -> Montreal_rev; Montreal_rev_w201.npz -> Montreal_rev_open'''
     parts = os.path.basename(name)[:-4].split('_')
+    if any(q[:1] == 's' and q[1:].isdigit() for q in parts[1:]):          # short course <map>[_rev]_s<len>_w<seed>
+        return parts[0] + ('_rev' if 'rev' in parts else '') + '_short'
     seed = int(parts[-1][1:]) if parts[-1][:1] == 'w' and parts[-1][1:].isdigit() else None
     return parts[0] + ('_rev' if 'rev' in parts else '') + ('_open' if seed is not None and seed >= 200 else '')
 
@@ -351,9 +366,9 @@ def make_env(seed, cfg):
     args = IL.get_args([])
     args.seed = seed
     env = F1Wrapper(args, IL.MAPS, obs_noise=True, sim_mode='train',
-                    tracks=training_tracks(cfg.get('open_train', False), cfg.get('real_train', [])))
+                    tracks=training_tracks(cfg.get('open_train', False), cfg.get('real_train', []), cfg.get('short_train', False)))
     for k, v in cfg.items():
-        if k in ('open_train', 'real_train'):
+        if k in ('open_train', 'real_train', 'short_train'):
             continue
         if k == 'uncapped_prob':
             env.sl_cfg['uncapped_prob'] = v
@@ -382,7 +397,9 @@ def main():
             raise FileNotFoundError('no open-space training tracks: run `python -u eval_open_space.py --make_train` first')
         from eval_open_space import require_fresh_open_train
         require_fresh_open_train(open_train_tracks())
-    base_w = base_track_weights(args) if args.open_train_share > 0 or args.real_train_share > 0 else None
+    if args.short_share > 0 and not short_train_tracks():
+        raise FileNotFoundError('no short courses: run `python -m utils.track_short --random 8 --seeds 1 2 3 4 5 6 7` first')
+    base_w = base_track_weights(args) if args.open_train_share > 0 or args.real_train_share > 0 or args.short_share > 0 else None
 
     # IL policy (actor + frozen normalizer) and a frozen copy as the BC teacher
     il_dir = f'results/{args.il}'
@@ -433,6 +450,13 @@ def main():
                                 'run `python -u eval_open_space.py --make` first (or --open_eval 0)')
     open_settings = tuple((c, 'center') for c in args.open_caps)
     open_eval = lambda: IL.evaluate(eval_args, policy(), open_tracks, 'eval', settings=open_settings)[0]
+    short_tracks_eval = []
+    if args.short_eval:
+        from utils.track_short import short_tracks
+        short_tracks_eval = short_tracks(holdout=True)
+        if not short_tracks_eval:
+            raise FileNotFoundError('no held-out short courses: run `python -m utils.track_short --random 8 --seeds 3` first')
+    short_eval = lambda: IL.evaluate(eval_args, policy(), short_tracks_eval, 'eval', settings=IL.SHORT_SETTINGS)
 
     resume_path = f'{args.save_dir}/checkpoint/resume.pt'
     state = None
@@ -462,6 +486,7 @@ def main():
         for r, key in ((priv_rms, 'priv_rms'), (ret_rms, 'ret_rms')):
             r.mean, r.var, r.count = state[key]
         il_succ, il_lap, il_res, il_worst, il_open = (state['il'][k] for k in ('succ', 'lap', 'res', 'worst', 'open'))
+        il_short, il_short_res = state['il'].get('short', float('nan')), state['il'].get('short_res', [])
         best, log = state['best'], state['log']
         np.random.set_state(state['np_rng'])
         torch.set_rng_state(state['torch_rng'])
@@ -488,6 +513,7 @@ def main():
         if diff:
             raise SystemExit(f'--baseline_from {args.baseline_from}: not comparable ({diff}); evaluate the IL baseline again (drop the option)')
         il_succ, il_lap, il_res, il_worst, il_open = (src['il'][k] for k in ('succ', 'lap', 'res', 'worst', 'open'))
+        il_short, il_short_res = src['il'].get('short', float('nan')), src['il'].get('short_res', [])
         if (args.worst_eval and not np.isfinite(il_worst)) or (args.open_eval and not np.isfinite(il_open)):
             raise SystemExit(f'--baseline_from {args.baseline_from}: its worst-case / open-space baseline is missing')
         cprint(f'[baseline] IL evaluation reused from {args.baseline_from}', color='cyan')
@@ -495,6 +521,9 @@ def main():
         il_succ, il_lap, il_res = IL.evaluate(eval_args, policy(), eval_tracks, 'eval', settings=eval_settings)
         il_worst = IL.evaluate(eval_args, policy(), eval_tracks, 'worst')[0] if args.worst_eval else float('nan')
         il_open = open_eval() if args.open_eval else float('nan')
+        il_short, il_short_res = float('nan'), []
+    if args.short_eval and not il_short_res:
+        il_short, _, il_short_res = short_eval()
     if state is None and args.init:
         # after the IL baseline (evaluated with the IL actor): continue from an earlier PPO policy
         ck = torch.load(f'results/{args.init}', map_location='cpu', weights_only=False)
@@ -509,7 +538,8 @@ def main():
                f'(BC pulls towards it; the save gates still compare with IL {args.il})', color='cyan', bold=True)
     cprint(f'[IL {args.il}] eval 2-lap success {il_succ*100:.1f}% mean uncapped 2-lap time {il_lap:.1f}s'
            + (f' | worst-case success {il_worst*100:.1f}%' if args.worst_eval else '')
-           + (f' | open-space ({args.open_level}) 2-lap success {il_open*100:.1f}%' if args.open_eval else ''),
+           + (f' | open-space ({args.open_level}) 2-lap success {il_open*100:.1f}%' if args.open_eval else '')
+           + (f' | short courses 2-lap success {il_short*100:.1f}%' if args.short_eval else ''),
            color='cyan', bold=True)
     low = [f'eval {il_succ*100:.1f}% < {args.min_il_success*100:g}%'] if il_succ < args.min_il_success - 1e-9 else []
     if args.open_eval and il_open < args.min_il_open - 1e-9:
@@ -557,7 +587,8 @@ def main():
                   opt_actor=opt_actor.state_dict(), opt_critic=opt_critic.state_dict(),
                   **(dict(ccritic=ccritic.state_dict(), opt_ccritic=opt_ccritic.state_dict()) if ccritic is not None else {}),
                   priv_rms=(priv_rms.mean, priv_rms.var, priv_rms.count), ret_rms=(ret_rms.mean, ret_rms.var, ret_rms.count),
-                  il=dict(succ=il_succ, lap=il_lap, res=il_res, worst=il_worst, open=il_open),
+                  il=dict(succ=il_succ, lap=il_lap, res=il_res, worst=il_worst, open=il_open, short=il_short,
+                          short_res=il_short_res),
                   best=best, log=log, update=update, total=total, actor_start=actor_start, bc_boost=bc_boost,
                   crash_cost=crash_cost,
                   done_stats=done_stats[-200:], tstat=tstat, np_rng=np.random.get_state(), torch_rng=torch.get_rng_state())
@@ -753,7 +784,13 @@ def main():
             worst_ok = (not args.worst_eval) or worst >= il_worst - 1e-9
             op = open_eval() if args.open_eval and gates else float('nan')
             open_ok = (not args.open_eval) or op >= il_open - 1e-9
-            better = cand and worst_ok and open_ok
+            sh, sh_gain, short_ok = float('nan'), float('nan'), True
+            if args.short_eval and gates:
+                sh, sh_lap, sh_res = short_eval()
+                short_ok = sh >= il_short - 1.5 / max(len(sh_res), 1)          # one run of slack (32 runs)
+                sh_gain = IL.paired_gain(sh_res, il_short_res, IL.SHORT_SETTINGS[:1])[0]
+                row.update(short=sh, short_lap=sh_lap, short_gain=sh_gain)
+            better = cand and worst_ok and open_ok and short_ok
             if args.real_tracks:
                 rs, rl, rres = IL.evaluate(eval_args, policy(), [os.path.abspath(t) for t in args.real_tracks], 'eval',
                                            settings=((8.0, 'center'), (4.0, 'center')))
@@ -764,6 +801,7 @@ def main():
                    f'| vs best on {n_common} runs both finished: {gain:+.2f} s faster'
                    + (f' | worst-case success {worst*100:.1f}% (IL {il_worst*100:.1f}%)' if args.worst_eval and gates else '')
                    + (f' | open-space {op*100:.1f}% (IL {il_open*100:.1f}%)' if args.open_eval and gates else '')
+                   + (f' | short {sh*100:.1f}% (IL {il_short*100:.1f}%, {sh_gain:+.2f} s vs IL)' if args.short_eval and gates else '')
                    + ('' if gates else ' | not better than the best: worst-case / open-space checks skipped')
                    + ('  -> saved' if better else ''), color='green' if better else 'cyan', bold=True)
             row.update(eval_success=succ, eval_lap=lap, paired_gain=gain, worst=worst, open=op, res=res, saved=better)
@@ -778,7 +816,7 @@ def main():
                     target = args.crash_target_succ
                 # the worst-case / open-space checks count too when they ran (a model that reached the target on
                 # the eval tracks but is below IL there is not safe enough yet: 11/24 PPO 4 update 30)
-                gates_bad = gates and not (worst_ok and open_ok)
+                gates_bad = gates and not (worst_ok and open_ok and short_ok)
                 if succ < target - 0.02 or gates_bad:
                     crash_cost = min(crash_cost * args.crash_up, args.crash_max)
                 elif succ >= target - 1e-9 and gates:
