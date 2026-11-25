@@ -466,6 +466,27 @@ train_ppo_s2r.py --il imitation/11 --algo_idx 12 --force_start --sim_override co
 
 비교 평가(`compare_models.py`)도 이제 새 가속·제동 조건을 씁니다. 그래서 11/25 13:40 이전 보고서와는 수치를 직접 비교할 수 없습니다.
 
+### PPO 13 (11/25 15:30~16:06) — PPO 12 u272에서 시작, 새 제동 한계 + 막다른 공간 벌점. u25에서 잠시 멈춤
+`--init ppo_s2r/12/checkpoint/model_11968000.pt --sim_override configs/task/sim_override_car1125.yaml --bay_cost 2
+--cost_critic 1 --crash_target il --crash_target_succ 0.91 --full_eval 1 --straight_steer_cost 5 --straight_v_ref 4 --bc_steer_weight 15`
+- u10: 일반 89.2 %, 최악 조건 90.2 %, 막다른 공간 72.7 %, IL 11보다 49.5 s 빠름. u20: 89.2 / 88.6 / 73.9 %로 PPO 12 u190과 비슷했습니다.
+- IL 13(계획 B)이 메모리를 많이 써서 같이 돌릴 수 없습니다(15 GB PC). 그래서 u25 재개 지점(`checkpoint/resume.pt`)에서 멈췄습니다.
+- 이어 하려면 같은 명령에 `--resume`을 붙입니다. 계획 B가 우선이고, LiDAR 전용 모델이 다시 필요하면 이어 합니다.
+
+### IL 13 (11/25 16:06~) — 계획 B: 위치 정보(트랙 미리보기) 입력 + 짧은 코스
+대회 코스는 한 바퀴 100 m 이하이고, 대회 이틀 전에 지도를 딸 수 있습니다(11/25 확인). 그래서 지도와 위치 추정에서 나온 **앞 코스 정보**를 입력에 넣었습니다(`MAP_TOOL.md` 4절). 관측이 114에서 129로 바뀌어 IL부터 다시 학습합니다.
+```bash
+train_il_s2r.py --algo_idx 13 --workers 20 --task_config configs/task/f1tenth_preview.yaml --hidden_dim 512 \
+    --expert_steps 1.5e6 --dagger_steps 8e5 --dart_std 0.08 --grad_steps 20000 --open_train 1 --hard_prob 0.25 \
+    --short_share 0.5 --short_eval 1
+```
+- **짧은 코스:** `python -m utils.track_short --random 8 --seeds 1 2 3 4 5 6 7`(50–100 m 무작위 코스 56개 × 양방향)과 `--maps IMS --seeds 301`로 만들었습니다.
+  - expert가 완주 못 한 8개는 지웠습니다(`tools/check_short_tracks.py --remove_failed`).
+  - 학습용 90개(에피소드의 50 %, 스텝으로는 약 15 %)와 평가용 16개(`Rand3xx`, `_w301`, 상한 8 중앙 / 5 무작위 출발)로 나눴습니다.
+  - 점수는 일반, 막다른 공간, 짧은 코스 완주율의 평균입니다.
+- **expert 라운드 0:** 159만 스텝, 2랩 완주 94 %(짧은 코스와 어려운 조건 포함).
+- IL 13이 끝나면 Claude가 결과를 보고 PPO 14 설정을 정합니다(자동 시작 없음). 같은 관측으로 PPO를 하고, 짧은 코스 비중과 위치 끊김 대응을 보며 조정합니다.
+
 ### PPO 5 결과 (11/24) — 업데이트 100에서 처음으로 저장 (`results/ppo_s2r/5/README.md`, 태그 `model-il11-ppo5`)
 일반 93.2 % (IL 87.9), 처음 보는 변형 86 % (76), 최악 조건 89.4 % (83.3), 막다른 공간 67.0 % (67.0), 28.5 s 빠름, 흔들림 절반.
 실차: `MODEL=ilppo` (`agent_ilppo.yaml` algo_idx 5, 상한 2.0부터).

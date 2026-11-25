@@ -4,7 +4,7 @@
 agent_node:
   ros__parameters:
     name: ppo_s2r
-    algo_idx: 5          # 11/24: PPO 5 update 100 (results/ppo_s2r/5/README.md)
+    algo_idx: 12190      # 11/26: PPO 12 update 190 (stable; results/ppo_s2r/12190/README.md). Was 5 (PPO 5 u100)
     scan_topic: scan
     drive_topic: drive
     odom_topic: odom

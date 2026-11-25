@@ -20,6 +20,7 @@ from collections import deque
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
+from geometry_msgs.msg import PoseStamped
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 import numpy as np
 
@@ -78,6 +79,11 @@ class AgentNode(Node):
     self.declare_parameter('steer_gain_right', 1.0)
     # servo calibration, to clip steering to what the servo can reach (relative to ~/ros2_ws like sim_path)
     self.declare_parameter('vesc_config', 'src/f1tenth_ros/f1tenth_stack/config/vesc.yaml')
+    # plan B (MAP_TOOL.md): models with the track-preview input need the course and its map (tools/map_session.sh)
+    self.declare_parameter('course', '')          # e.g. src/f1tenth/installation/maps_real/Practice1126.npz
+    self.declare_parameter('map_dir', '')         # e.g. maps/run_1126_1030 (map.yaml / map.pgm of the same run)
+    self.declare_parameter('laser_x', 0.13)       # [m] base_link -> laser (bringup_launch.py static transform)
+    self.declare_parameter('loc_stride', 3)       # every n-th beam for the scan matching (4 if a step takes > 10 ms)
 
     self.scan_topic = self.get_parameter('scan_topic').value
     self.drive_topic = self.get_parameter('drive_topic').value
@@ -170,6 +176,29 @@ class AgentNode(Node):
     # last commands this node sent (normalized), same as ActionHistory in utils/env.py
     self.history = ActionHistory(self.obs_cfg['history']['length'])
 
+    # track preview (plan B): localization on the course map -> race line / speed plan ahead (utils/localizer.py)
+    self.carpv, self.odom_pose = None, None
+    self.loc_pub = None
+    if self.obs_cfg['preview']['enabled']:
+      course, map_dir = self.get_parameter('course').value, self.get_parameter('map_dir').value
+      if not course or not map_dir:
+        raise RuntimeError('this model uses the track preview: set the course (.npz) and map_dir parameters '
+                           '(agent_preview.yaml, MAP_TOOL.md)')
+      from utils.localizer import CarPreview
+      dyn = os.path.join(backup_dir, 'dynamic.yaml')
+      lidar_off = 0.17
+      if os.path.exists(dyn):
+        with open(dyn) as f:
+          lidar_off = float(YAML().load(f).get('lidar_pos_offset', 0.17))
+      t0 = time.monotonic()
+      self.carpv = CarPreview(course, map_dir, self.obs_cfg['preview'], laser_x=float(self.get_parameter('laser_x').value),
+                              lidar_pos_offset=lidar_off, log=self.get_logger().info,
+                              stride=int(self.get_parameter('loc_stride').value))
+      self.get_logger().info(f'[preview] course {course}, map {map_dir} ({len(self.carpv.loc.pts)} wall cells, '
+                             f'{time.monotonic() - t0:.1f} s); the start pose is searched at the first scan')
+      self.loc_pub = self.create_publisher(PoseStamped, 'loc_pose', 10)
+      self.loc_last_report = time.monotonic()
+
     # load algorithm
     try:
       self.obs_rms = RunningMeanStd('agent_obs', self.obs_dim)
@@ -195,7 +224,7 @@ class AgentNode(Node):
     self.teleop_sub = self.create_subscription(AckermannDriveStamped, self.get_parameter('teleop_topic').value,
                                                self.teleopCallback, 10)
     self.odom_speed, self.odom_time = None, None
-    if self.use_speed:
+    if self.use_speed or self.obs_cfg['preview']['enabled']:
       self.odom_sub = self.create_subscription(Odometry, self.odom_topic, self.odomCallback, 10)
 
     # publish
@@ -210,6 +239,10 @@ class AgentNode(Node):
   def odomCallback(self, odom_msg: Odometry):
     self.odom_speed = odom_msg.twist.twist.linear.x
     self.odom_time = time.monotonic()
+    if self.carpv is not None:
+      q = odom_msg.pose.pose.orientation
+      self.odom_pose = (odom_msg.pose.pose.position.x, odom_msg.pose.pose.position.y,
+                        float(np.arctan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))))
 
   def scanCallback(self, scan_msg: LaserScan):
     # the model needs the current speed; without a fresh reading, don't drive
@@ -232,7 +265,13 @@ class AgentNode(Node):
 
     # make obs
     raw_scan = np.array(scan_msg.ranges[:1080])
-    obs = self.getObs(raw_scan, self.odom_speed)
+    preview = None
+    if self.carpv is not None:
+      preview = self.trackPreview(scan_msg)
+      if preview is None:
+        self.history.reset()
+        return                    # no start pose yet: don't drive
+    obs = self.getObs(raw_scan, self.odom_speed, preview)
 
     # model inference
     with torch.no_grad():
@@ -287,7 +326,41 @@ class AgentNode(Node):
       return max(s, 0.0) * lo / vmin
     return lo + (s - vmin) * (cap - lo) / (cap - vmin)
 
-  def getObs(self, raw_scan: np.ndarray, speed=None):
+  def trackPreview(self, scan_msg):
+    '''localization + preview features (utils/localizer.CarPreview); None until the start pose is found'''
+    if self.odom_pose is None:
+      self.get_logger().warn('[preview] no odom pose yet', throttle_duration_sec=1.0)
+      return None
+    ranges = np.asarray(scan_msg.ranges, np.float64)
+    angles = scan_msg.angle_min + np.arange(len(ranges)) * scan_msg.angle_increment
+    if not self.carpv.started:
+      t0 = time.monotonic()
+      ok, msg = self.carpv.start(ranges, angles, self.odom_pose)
+      (self.get_logger().info if ok else self.get_logger().error)(f'[preview] {msg} ({time.monotonic() - t0:.2f} s)')
+      if not ok:
+        return None
+    t0 = time.monotonic()
+    cap = self.speed_limit if self.speed_limit > 0 else None
+    feat, pose, valid, info = self.carpv.features(ranges, angles, self.odom_pose, cap)
+    dt = time.monotonic() - t0
+    if pose is not None:
+      m = PoseStamped()
+      m.header.stamp = scan_msg.header.stamp
+      m.header.frame_id = 'map' if valid else 'map_lost'
+      m.pose.position.x, m.pose.position.y = float(pose[0]), float(pose[1])
+      m.pose.position.z = float(info.get('res', 0.0)) if np.isfinite(info.get('res', np.inf)) else -1.0   # ICP residual [m]
+      m.pose.orientation.z, m.pose.orientation.w = float(np.sin(pose[2] / 2)), float(np.cos(pose[2] / 2))
+      self.loc_pub.publish(m)
+    if not valid:
+      self.get_logger().warn('[preview] localization lost: driving on LiDAR only (preview valid = 0)',
+                             throttle_duration_sec=1.0)
+    if time.monotonic() - self.loc_last_report > 5.0:
+      self.loc_last_report = time.monotonic()
+      self.get_logger().info(f'[preview] valid {self.carpv.n_valid / max(self.carpv.n, 1) * 100:.1f}% of {self.carpv.n} scans, '
+                             f'e_y {feat[0]:+.2f} m, step {dt * 1e3:.1f} ms')
+    return feat
+
+  def getObs(self, raw_scan: np.ndarray, speed=None, preview=None):
     '''
       Same processing as getObs in src/f1tenth/utils/env.py (without sim noise).
       speed: /odom linear.x [m/s], used only if the model has a speed input.
@@ -295,7 +368,7 @@ class AgentNode(Node):
     # models trained with a speed-limit input are told the cap (agent.yaml speed_limit; <= 0 = none)
     speed = self.car_to_policy_speed(speed) if speed is not None else 0.0
     observation = make_observation(raw_scan, speed, self.obs_cfg, self.history,
-                                   self.speed_limit if self.speed_limit > 0 else None)
+                                   self.speed_limit if self.speed_limit > 0 else None, preview)
     return observation
 
 def main(args=None):

@@ -1,4 +1,6 @@
-# 실제 코스 지도 따기 → 시뮬레이터 트랙 → 평가·학습 (사용 설명서, 11/25)
+# 실제 코스 지도 따기 → 시뮬레이터 트랙 → 평가·학습 → 지도 기반 주행 (사용 설명서, 11/25)
+
+11/26(목) 실차 순서는 `CAR_PLAN_1126.md`에 있습니다.
 
 차가 **스스로 코스를 천천히 몇 바퀴 돌며 LiDAR를 기록**합니다. PC에서 **루프 클로저 지도**를 만들고, 그 지도를 **시뮬레이터 트랙**으로 바꿔
 평가와 학습에 씁니다. 모든 명령은 저장소 루트(`~/Autonomous-Driving-2026`) 기준입니다.
@@ -125,20 +127,32 @@ git commit -m "map: practice course 11/26" && git push
 
 ---
 
-## 4. 다음 단계: 지도 기반 주행 (결정 대기)
+## 4. 지도 기반 주행 (계획 B, 11/25 결정·진행 중)
 
 지도와 차의 위치를 알면 LiDAR 10 m 너머의 코스를 미리 알 수 있습니다. 그러면 직선에서 더 빨리 달리고 늦게 제동할 수 있습니다. 11/25 분석에서 랩 손해의 70 %가 직선 최고 속도였습니다(PPO 5.3 m/s, expert 7.3 m/s).
 
-| 필요한 것 | 내용 |
-|---|---|
-| 실차 위치 추정 | 이 지도 위에서 파티클 필터(AMCL, `nav2_amcl`)나 slam_toolbox 위치 추정 모드를 씁니다. 40 Hz에 오차 5~10 cm가 목표입니다 |
-| 정책 입력 추가 | 위치 좌표 그대로가 아니라 **앞 코스 정보**를 넣습니다. 앞 5·10·20·30 m의 곡률, 다음 코너까지 거리, 레이스 라인에서 벗어난 거리와 방향 오차입니다. 트랙마다 의미가 같아 일반화됩니다 |
-| 시뮬레이터 | 같은 정보를 위치 추정 오차(잡음, 가끔 튐)와 함께 줍니다 |
-| 재학습 | 관측이 바뀌므로 IL부터 다시 하고(`obs_dim` 증가), 그다음 PPO를 합니다 |
-| 대비책 | 위치 추정이 불확실하면 지금 같은 LiDAR만 쓰는 정책으로 전환합니다 |
-| 다른 선택지 | 위치 추정만 되면 expert(레이스 라인 추종)를 실차에서 그대로 돌릴 수 있습니다. 시뮬레이터에서는 완주 100 %에 PPO 12보다 약 27 % 빠릅니다 |
+**지도를 만들 때는 SLAM**(스캔 매칭 + 루프 클로저 + 포즈 그래프, 이 문서의 `map_offline.py`)을 씁니다. **달릴 때는 지도를 고정하고 위치만 추정**합니다(localization). 그 위치로 앞 코스 정보를 계산해 정책에 넣습니다.
 
-대회에서 미리 지도를 딸 수 있는지(규정) 확인한 뒤 결정합니다.
+| 부분 | 파일 | 내용 |
+|---|---|---|
+| 정책 입력 (15개) | `utils/preview.py`, `configs/task/f1tenth_preview.yaml` (obs 114 → 129) | 레이스 라인에서 벗어난 거리와 방향 오차, 앞 2·4·6·8·10·15·20·30 m의 곡률, 앞 0·5·10·20 m의 목표 속도(명목 차량의 속도 계획, 속도 상한 적용), 위치 유효 표시. 좌표가 아니라 상대량이라 코스가 달라도 의미가 같습니다 |
+| 시뮬레이터 | `utils/env.py` (`track_preview`) | 위치 추정 오차를 흉내 냅니다: 천천히 떠도는 오프셋 5 cm·1°, 떨림 1 cm, 학습 때는 가끔 0.3 m 튐과 0.5–3 s 위치 끊김(에피소드의 15 %). 끊기면 유효 표시가 0이고 나머지 입력도 0이어서, 정책이 **LiDAR만으로 계속 달리도록** 배웁니다 |
+| 실차 위치 추정 | `utils/localizer.py` (`ScanLocalizer`, `CarPreview`) | 스캔마다 바퀴 odom으로 예측한 뒤, 지도 벽에 점-선 ICP로 맞춥니다(빔 3개 중 1개, 잔차 3 cm 미만, 60점 이상 맞으면 채택). 0.2 s 동안 못 맞추면 유효 표시를 0으로 하고 넓게 다시 찾습니다. 시작 위치는 첫 스캔에서 코스를 따라 0.5 m마다 양방향으로 찾습니다. 차가 반대로 서 있으면 `_rev` 코스를 씁니다 |
+| 차 노드 | `agent_node.py` (`course`, `map_dir`, `laser_x`, `loc_stride` 파라미터), `config/agent_preview.yaml` | 모델 설정에 `track_preview`가 있을 때만 켜집니다(기존 모델은 그대로). `/loc_pose`를 발행하고, bag에 기록합니다(frame_id `map`/`map_lost`, z = ICP 잔차) |
+| 학습 | `train_il_s2r.py --task_config configs/task/f1tenth_preview.yaml --short_share 0.5 --short_eval 1` | IL 13부터. 짧은 코스(50–100 m, `utils/track_short.py`, `installation/maps_short`)를 에피소드의 50 %로 학습하고, 따로 둔 짧은 코스 16개로 평가해 점수에 넣습니다 |
+
+**검증 (11/25)**
+
+| 시험 | 결과 |
+|---|---|
+| `tools/loc_test.py`, 11/24 실제 기록(4 m/s, 62 s) / 같은 날 지도 | 시작 위치 자동 탐색 0.3 s. 2475 스캔 모두 유효. 지도 도구 포즈와의 차이 중앙값 2.9 cm, p95 13 cm. 방향 0.6°. 스캔당 2.1 ms(PC) |
+| `tools/loc_test.py --sim`, 시뮬레이터 정답 비교: 상한 2로 딴 지도에서 상한 4–5로 다시 주행 | 연습 코스 2.8 cm(p95 5.8), Rand300 10.6 cm(지도 자체 오차 10.5 cm), IMS 축소판 6.6 cm. 모두 100 % 유효 |
+| `CarPreview` (agent_node와 같은 경로), 11/24 기록 | 정방향과 `_rev` 코스 모두 시작 성공(`_rev`는 자동 전환), 미리보기 15개, 스캔당 2.9 ms |
+| `tools/agent_replay.py` (ROS 없이 agent_node 전체를 기록으로 재생) | 파라미터, 모델 로드, 관측 크기, 위치 추정, 명령 발행까지 확인 |
+
+**대비책:** 위치 추정이 불안하면 LiDAR 전용 모델(`agent_ilppo.yaml`)로 돌아갑니다.
+
+**대회 주간:** 대회 코스를 2일 전에 땁니다(이 문서 2절과 같은 흐름) → `train_ppo_s2r.py --real_tracks ... --real_train_share 0.1~0.3`으로 그 코스에서 미세조정 → 전날 실차 확인 순서입니다.
 
 ---
 
@@ -151,6 +165,9 @@ git commit -m "map: practice course 11/26" && git push
 | `tools/sim_map_test.py [TRACK ...] [--out --laps --cap --workers --reuse_log]` | 정답 비교 검증(위 표). 시뮬레이터 지도 주행 → 차와 같은 잡음의 기록 → `map_offline.py` → `map_to_track.py` → 궤적·벽·폭 오차와 expert 완주 → `report.md`, `compare.png` |
 | `tools/map_to_track.py MAP --name NAME [--block --max_half 2.5 --close_gaps 0.3]` | 지도와 궤적으로 트랙을 만듭니다.<br>① 궤적과 이어진 빈 칸(경로에서 2.5 m 안, 벽의 0.6 m 이하 틈은 닫음)<br>② 한 바퀴 궤적을 좌우 벽 사이 가운데로 4번 다시 맞춘 중심선(0.1 m 간격)<br>③ 좌우 폭(1.5 m 중앙값 + 0.2 m 넘는 오목한 곳은 통로 폭에서 제외)<br>④ 생성 트랙과 같은 레이스 라인 최적화<br>⑤ 정방향과 역방향 `.npz`(`utils/track_gen.to_track` 형식) |
 | `tools/check_track.py TRACK [--models --caps --seeds --workers]` | 시뮬레이터에서 expert와 모델을 그 트랙에서 달려 완주 수, 2랩 시간, 실패 시각을 보여 주고 `_drive.png`를 만듭니다 |
+| `tools/loc_test.py LOG MAP [--track --truth --sim --map_truth --stride]` | 기록으로 위치 추정 시험(차와 같은 코드): 유효 비율, 끊김, 위치·방향 오차, 미리보기 입력 오차, 스캔당 시간, `loc_test.png` |
+| `tools/agent_replay.py LOG [--config --set k=v]` | ROS 없이 `agent_node`를 기록 위에서 그대로 실행(열린 루프). 차 세션 전에 설정·모델·위치 추정 오류를 잡습니다 |
+| `tools/check_short_tracks.py [WORKERS] [--remove_failed]` | `installation/maps_short`의 짧은 코스를 expert로 달려 보고, 완주 못 하는 코스를 지웁니다(11/25: 114개 중 8개 제거) |
 | `tools/log_map.py` | (분석용) 사고 구간 지도. 루프 클로저가 없어서 트랙으로는 쓰지 않습니다 |
 
 **트랙 파일 형식**(`utils/track_gen.py`와 같음): `occupancy`(행 0 = 최소 y, >128 빈 칸), `resolution`, `origin`, `centerline`(0.1 m 간격, 주행 방향),

@@ -6,6 +6,9 @@
 
         python -m utils.track_short [--maps ...] [--seeds 301 302] [--target 90] [--out installation/maps_short]
 
+    IL 13 / PPO set (11/25): `--random 8 --seeds 1 2 3 4 5 6 7` (Rand100-707, 50-100 m, both directions) and
+    `--maps IMS --seeds 301`. Seed 3 (Rand3xx) and _w301 are held out (is_holdout): eval and the map tool test.
+
     Names: <map>_s<target>_w<seed>[_rev]... -> utils/track_gen.variant_map / train_ppo_s2r.track_group still give
     the map name. Kept out of installation/maps_gen (no generator-signature change, not in the default training
     lists); used by tools/sim_map_test.py and, when chosen, by the training scripts.
@@ -20,6 +23,20 @@ from utils.raceline import resample_closed, curvature_smooth
 
 SHORT_DIR = os.path.join(os.path.dirname(tg.GEN_DIR), 'maps_short')
 MIN_RADIUS = 1.6          # [m] centerline radius after scaling (the car turns at >= 0.62 m; race-line margin 0.55)
+
+
+HOLDOUT_RANDOM_SEED = 3   # Rand3xx courses (and F1 maps scaled with seed 301) are kept out of training: eval only
+
+
+def is_holdout(path):
+    n = os.path.basename(path)
+    return n.startswith(f'Rand{HOLDOUT_RANDOM_SEED}') or '_w301' in n
+
+
+def short_tracks(holdout):
+    '''(sorted) .npz paths in SHORT_DIR: the held-out eval courses (holdout=True) or the training ones'''
+    import glob
+    return sorted(t for t in glob.glob(os.path.join(SHORT_DIR, '*.npz')) if is_holdout(t) == holdout)
 
 
 def scale_for(map_name, target):

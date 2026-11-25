@@ -15,7 +15,7 @@
 #   tools/map_session.sh --rebuild maps/<run> NAME [--block x0,y0,x1,y1 ...]
 #                                               # redo only the track from an existing map (after looking at the
 #                                               #   _check.png: --block areas that are not part of the course)
-# NAME: letters and digits only (no _), e.g. Practice1127. The run name is the bag's (run_MMDD_HHMM).
+# NAME: letters and digits only (no _), e.g. Practice1126. The run name is the bag's (run_MMDD_HHMM).
 set -e
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PY=python3
@@ -25,9 +25,14 @@ track() {  # map dir, name, extra args for map_to_track.py
   local MAP="$1" NAME="$2"; shift 2
   "$PY" "$REPO/tools/map_to_track.py" "$MAP" --name "$NAME" "$@"
   "$PY" "$REPO/tools/check_track.py" "$REPO/src/f1tenth/installation/maps_real/$NAME.npz" --models ppo_s2r/12190 --caps 8 4 2
+  # plan B: the preview model drives on this course next (MODEL=preview tools/drive_session.sh)
+  local CFG="$REPO/src/f1tenth_ros/f1tenth_stack/config/agent_preview.yaml"
+  sed -i -e "s|^\(    course:\).*|\1 src/f1tenth/installation/maps_real/$NAME.npz|" \
+         -e "s|^\(    map_dir:\).*|\1 maps/$(basename "$MAP")|" "$CFG"
+  echo "[preview] agent_preview.yaml -> course $NAME.npz, map maps/$(basename "$MAP")"
   echo "[next] look at maps_real/${NAME}_check.png and ${NAME}_drive.png; if a room / opening is part of the corridor:"
   echo "       tools/map_session.sh --rebuild $MAP $NAME --block x0,y0,x1,y1   (coordinates from the png)"
-  echo "       then commit: git add -f maps/$(basename "$MAP") src/f1tenth/installation/maps_real/$NAME* && git commit && git push"
+  echo "       then commit: git add -f maps/$(basename "$MAP") src/f1tenth/installation/maps_real/$NAME* src/f1tenth_ros/f1tenth_stack/config/agent_preview.yaml && git commit && git push"
 }
 
 case "$1" in

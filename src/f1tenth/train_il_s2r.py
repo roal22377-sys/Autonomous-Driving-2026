@@ -139,6 +139,12 @@ def get_args(argv=None):
                                                               '(run 8-10: 0.3, straight-line weaving)')
     p.add_argument('--caps_s', type=float, default=0.3, help='spatial smoothness weight (0 = off)')
     p.add_argument('--caps_sigma', type=float, default=0.05, help='spatial noise std in normalized obs units')
+    p.add_argument('--short_share', type=float, default=0.0,
+                   help='share of training EPISODES on the short (50-100 m) courses of installation/maps_short '
+                        '(utils/track_short.py; competition course <= 100 m). Their episodes are ~5x shorter in steps')
+    p.add_argument('--short_eval', type=int, default=0,
+                   help='also evaluate on the held-out short courses (Rand3xx, IMS_s90_w301; caps 8 and 5) '
+                        'and put their 2-lap success into the score (mean of eval, open-space, short)')
     p.add_argument('--hist_noise', type=float, default=0.0,
                    help='gaussian noise (normalized obs units) on the action-history inputs during BC: the student\'s '
                         'own jittery commands are in its input, noise keeps it from copying them (11/23)')
@@ -225,6 +231,13 @@ def rollout_worker(job):
     np.random.seed(seed)
     env = F1Wrapper(args, MAPS, obs_noise=True, sim_mode='train', tracks=tracks)
     env.HARD_PROB = float(os.environ.get('F1_HARD_PROB', '0'))     # --hard_prob (workers only see the environment)
+    short_share = float(os.environ.get('F1_SHORT_SHARE', '0'))     # --short_share
+    if short_share > 0:
+        from utils.track_short import SHORT_DIR
+        short = [os.path.basename(t) for t in tracks if os.path.dirname(os.path.abspath(t)) == os.path.abspath(SHORT_DIR)]
+        n_o = len(tracks) - len(short)
+        if short and n_o:
+            env.set_track_weights({b: short_share * n_o / ((1 - short_share) * len(short)) for b in short}, default=1.0)
     actor = None
     if policy is not None:
         actor = actor_from_state(policy[0])
@@ -311,6 +324,7 @@ def eval_worker(job):
 # Starts like the car's (11/23): centerline, and one mildly disturbed start (utils/env.py START_MAX_*)
 EVAL_SETTINGS = ((8.0, 'center'), (5.0, 'center'), (8.0, 'random'))
 EVAL_CAPS = tuple(c for c, _ in EVAL_SETTINGS)
+SHORT_SETTINGS = ((8.0, 'center'), (5.0, 'random'))     # --short_eval (held-out 50-100 m courses)
 
 
 def evaluate(args, policy, tracks, mode='eval', settings=EVAL_SETTINGS):
@@ -321,8 +335,9 @@ def evaluate(args, policy, tracks, mode='eval', settings=EVAL_SETTINGS):
     res = run_pool(eval_worker, jobs, min(args.workers, len(jobs)), len(jobs), 'eval', 'episodes')
     succ = np.mean([r[1] for r in res])
     held = [r[1] for r in res if HOLDOUT in r[0]]
-    print(f'      held-out tracks ({HOLDOUT}, never trained on): success {np.mean(held)*100:.1f}% '
-          f'| training geometries: {np.mean([r[1] for r in res if HOLDOUT not in r[0]])*100:.1f}%', flush=True)
+    if held:
+        print(f'      held-out tracks ({HOLDOUT}, never trained on): success {np.mean(held)*100:.1f}% '
+              f'| training geometries: {np.mean([r[1] for r in res if HOLDOUT not in r[0]])*100:.1f}%', flush=True)
     fast = [r for r in res if r[0].endswith(f'@{settings[0][0]:g}/{settings[0][1]}') and r[1]]
     lap = np.mean([r[2] for r in fast]) if fast else float('nan')
     return succ, lap, res
@@ -466,6 +481,22 @@ def main():
         require_fresh_open_train(extra)
         train_tracks += extra
         print(f'[tracks] {len(train_tracks)} training tracks incl. {len(extra)} open-space ones', flush=True)
+    if args.short_share > 0:
+        from utils.track_short import short_tracks
+        st = short_tracks(holdout=False)
+        if not st:
+            raise FileNotFoundError('no short courses: run `python -m utils.track_short --random 8 --seeds 1 2 3 4 5 6 7` first')
+        train_tracks += st
+        print(f'[tracks] + {len(st)} short training courses, {args.short_share*100:.0f}% of the episodes', flush=True)
+    os.environ['F1_SHORT_SHARE'] = str(args.short_share)
+    short_eval = []
+    if args.short_eval:
+        from utils.track_short import short_tracks
+        short_eval = short_tracks(holdout=True)
+        if not short_eval:
+            raise FileNotFoundError('no held-out short courses: run `python -m utils.track_short --random 8 --seeds 3` '
+                                    'and `--maps IMS --seeds 301` first')
+        cprint(f'[data] short-course check: {len(short_eval)} held-out courses x caps {list(c for c, _ in SHORT_SETTINGS)}, 2 laps', bold=True)
     os.environ['F1_HARD_PROB'] = str(args.hard_prob)
     eval_tracks = sorted([t for t in all_tracks if variant_map(t) in EVAL_MAPS
                           and (HOLDOUT in t or os.path.basename(t)[:-4] in [m + s for m in EVAL_MAPS for s in ('', '_rev')])])
@@ -556,16 +587,21 @@ def main():
         save(args, actor, rms, tag=f'round{rnd}')
         succ, lap, res = evaluate(args, policy, eval_tracks, 'eval')
         op = evaluate(args, policy, open_tracks, 'eval', settings=open_settings)[0] if args.open_eval else float('nan')
-        score = 0.5 * (succ + op) if args.open_eval else succ
+        sh, sh_lap = evaluate(args, policy, short_eval, 'eval', settings=SHORT_SETTINGS)[:2] if short_eval else (float('nan'), float('nan'))
+        parts = [succ] + ([op] if args.open_eval else []) + ([sh] if short_eval else [])
+        score = float(np.mean(parts))
         cprint(f'[round {rnd}] data {n_data} | bc val {vl:.5f} ({time.time()-t0:.0f}s) | '
                f'EVAL ({eval_desc}): 2-lap success {succ*100:.1f}% '
                f'mean uncapped 2-lap time {lap:.1f}s'
-               + (f' | open-space ({args.open_level}) 2-lap success {op*100:.1f}% | score {score*100:.1f}' if args.open_eval else ''),
+               + (f' | open-space ({args.open_level}) 2-lap success {op*100:.1f}%' if args.open_eval else '')
+               + (f' | short courses 2-lap success {sh*100:.1f}% ({sh_lap:.1f}s)' if short_eval else '')
+               + f' | score {score*100:.1f}',
                color='cyan', bold=True)
         for r in res:
             if not r[1]:
                 print(f'      fail {r[0]:28s} {r[2]:6.1f}s')
         entry = {'round': rnd, 'data': n_data, 'val': vl, 'success': succ, 'lap': lap, 'open': op, 'score': score,
+                 'short': sh, 'short_lap': sh_lap,
                  'jitter': round_jitter(res), 'res': res}
         log.append(entry)
         better, noticeable, why = judge_round(entry, best, args)

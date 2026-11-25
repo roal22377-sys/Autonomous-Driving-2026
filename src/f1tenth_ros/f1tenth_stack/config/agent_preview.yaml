@@ -1,0 +1,22 @@
+# Plan B (src/f1tenth/MAP_TOOL.md section 4): a model with the track-preview input. It localizes on the course map
+# (utils/localizer.py, every scan) and gets the race line / speed plan ahead (utils/preview.py).
+#   MODEL=preview tools/drive_session.sh
+# course / map_dir: the last mapped course, written by tools/map_session.sh --finish / --rebuild (commit + push them,
+# the car reads them from its checkout). Put the car anywhere on the course: the start pose is searched along it at the
+# first scan (agent log: "[preview] localization: start at ..."); facing the other way, <course>_rev.npz is used.
+# If the localization is lost (agent log "[preview] localization lost"), the model drives on LiDAR alone.
+agent_node:
+  ros__parameters:
+    name: imitation
+    algo_idx: 13
+    scan_topic: scan
+    drive_topic: drive
+    odom_topic: odom
+    speed_limit: 2.5
+    speed_min: 0.0
+    steer_gain_left: 1.0
+    steer_gain_right: 1.0
+    course: src/f1tenth/installation/maps_real/Practice1124.npz
+    map_dir: maps/run_1124_1521
+    laser_x: 0.13
+    loc_stride: 3

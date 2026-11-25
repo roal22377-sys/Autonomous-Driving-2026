@@ -1,0 +1,14 @@
+# IL + PPO, the faster PPO 12 checkpoint (update 272, ~12 % faster than u190 in the simulator, CAR_PLAN_1126.md).
+#   MODEL=ilppo_fast tools/drive_session.sh   or      MODEL=ilppo_fast tools/run_car.sh use_agent:=true
+# Set algo_idx to the PPO run that was saved (results/ppo_s2r/<algo_idx>/sim2real) before driving.
+agent_node:
+  ros__parameters:
+    name: ppo_s2r
+    algo_idx: 12272      # PPO 12 update 272 (results/ppo_s2r/12272/README.md)
+    scan_topic: scan
+    drive_topic: drive
+    odom_topic: odom
+    speed_limit: 2.0    # [m/s] 11/24 calibrated car: 2.0 first (as IL 11), then 4.0, 5.0; competition 8.0
+    speed_min: 0.0
+    steer_gain_left: 1.0
+    steer_gain_right: 1.0

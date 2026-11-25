@@ -17,6 +17,7 @@
 #   tools/drive_session.sh --fetch    # extract the newest bag on the car -> logs/<bag>_extracted/
 #   tools/drive_session.sh --agent    # (re)start only the agent in this terminal (bringup keeps running)
 #   MODEL=il tools/drive_session.sh   # IL only (config/agent_il.yaml);  MODEL=ilppo: IL + PPO (agent_ilppo.yaml)
+#   MODEL=preview tools/drive_session.sh  # plan B model on the last mapped course (agent_preview.yaml, MAP_TOOL.md)
 #                                     # without MODEL: config/agent.yaml as before
 # ros2 run uses /usr/bin/python3, so torch comes from PYTHONPATH (venv site-packages), not from activate.
 # The agent tab waits for Enter, so press 's' in the teleop tab first (holds the car stopped);
@@ -119,7 +120,7 @@ EOF
 mktab bringup  ""                 'ros2 launch f1tenth_stack bringup_launch.py vesc_config:=$HOME/ros2_ws/src/f1tenth_ros/f1tenth_stack/config/vesc.yaml use_agent:=false'
 mktab teleop   "sleep 4"          'ros2 run key_teleop key_teleop'
 # a session restarted within the same minute would reuse the folder name and ros2 bag record would refuse -> add seconds then
-mktab bag      "sleep 6"          'mkdir -p ~/bags && N=run_$(date +%m%d_%H%M) && { [ ! -e ~/bags/$N ] || N=${N}_$(date +%S); } && ros2 bag record -o ~/bags/$N /scan /odom /drive /teleop /ackermann_cmd /sensors/core'
+mktab bag      "sleep 6"          'mkdir -p ~/bags && N=run_$(date +%m%d_%H%M) && { [ ! -e ~/bags/$N ] || N=${N}_$(date +%S); } && ros2 bag record -o ~/bags/$N /scan /odom /drive /teleop /ackermann_cmd /sensors/core /loc_pose'
 mktab status   "sleep 6"          'python3 tools/live_status.py'
 mktab monitor  "sleep 6"          'ros2 topic echo /ackermann_cmd'
 if [ $STRAIGHT = 1 ]; then
