@@ -66,7 +66,8 @@ from utils.color import cprint
 from eval_open_space import TEST_DIR as OPEN_TEST_DIR
 from algorithm.common.models import Critic, LOG_STD_MIN
 
-REWARD_KEYS = ('forward_reward', 'collision_cost', 'steer_cost', 'straight_cost', 'time_cost', 'wall_cost', 'lat_cost', 'bay_cost', 'lap_bonus')
+REWARD_KEYS = ('forward_reward', 'collision_cost', 'steer_cost', 'straight_cost', 'time_cost', 'wall_cost', 'lat_cost', 'bay_cost',
+               'line_cost', 'lap_bonus')
 
 # settings before 11/23, for the baseline run (--baseline)
 BASELINE = dict(hard_prob=0.0, open_train_share=0.0, track_focus=0.0, stuck_time=0.0, bc_speed=1.0, ret_norm=0, time_cost=0.0, steer_rate_cost=5.0, wall_cost=0.0, lat_cost=0.0, lap_bonus=0.0,
@@ -110,6 +111,10 @@ def get_args():
     # behavior cloning towards the IL actor
     p.add_argument('--bc_start', type=float, default=0.5)
     p.add_argument('--bc_end', type=float, default=0.02)
+    p.add_argument('--bc_lost_off', type=int, default=0,
+                   help='preview policies: no BC towards the IL teacher on steps without localization (preview valid '
+                        '= 0). IL 13 drives poorly there (whole run without localization: 36 %% eval / 69 %% short), '
+                        'so copying it holds the LiDAR-only fallback back')
     p.add_argument('--bc_steer_weight', type=float, default=0.0,
                    help='k > 0: the steering BC term of each state is weighted 1 + k x (teacher steering)^2, so the rare '
                         'states that need near full lock (hairpins) are not forgotten while the rest drifts freely. 11/25 '
@@ -137,6 +142,14 @@ def get_args():
                    help='[m/s] > 0: the straight-line cost is per meter (equal to per step at this speed), so slow '
                         'driving does not make corrections dearer (PPO 8: 4)')
     p.add_argument('--time_cost', type=float, default=0.1)
+    p.add_argument('--crash_gates', type=int, default=1,
+                   help='1: the crash cost also rises while the worst-case / open-space / short checks are below IL; '
+                        '0: only the eval success vs the target moves it (those checks still gate saving). 11/25 PPO 14: '
+                        'open-space line errors (not speed) pushed it 4000 -> 9000 in 20 updates and the car slowed')
+    p.add_argument('--line_cost', type=float, default=0.0,
+                   help='per step x (|offset from the race line| - --line_margin)^2 (true pose; utils/env.py LINE_COST). '
+                        '11/25 PPO 14 u20: open-space crashes were corner exits 0.35-0.4 m wide of the line')
+    p.add_argument('--line_margin', type=float, default=0.2, help='[m] free offset from the race line')
     p.add_argument('--bay_cost', type=float, default=0.0,
                    help='per step and m of the car outside the smooth corridor (a dead-end bay / pocket), utils/env.py '
                         'BAY_COST: an early signal before the crash or stuck ending it led to (PPO 13: 2)')
@@ -294,7 +307,7 @@ def env_config(args):
     '''the reward / training settings every worker applies to its env (spawned workers do not see args)'''
     return dict(PROGRESS_COEFF=args.progress_coeff, COLLISION_COST=args.crash_start or args.collision_cost,
                 STEER_RATE_COST=args.steer_rate_cost, STRAIGHT_STEER_COST=args.straight_steer_cost,
-                STRAIGHT_CURV=args.straight_curv, STRAIGHT_V_REF=args.straight_v_ref, BAY_COST=args.bay_cost, TIME_COST=args.time_cost, WALL_COST=args.wall_cost,
+                STRAIGHT_CURV=args.straight_curv, STRAIGHT_V_REF=args.straight_v_ref, BAY_COST=args.bay_cost, LINE_COST=args.line_cost, LINE_MARGIN=args.line_margin, TIME_COST=args.time_cost, WALL_COST=args.wall_cost,
                 WALL_MARGIN=args.wall_margin, LAT_COST=args.lat_cost, LAT_GRIP_SHARE=args.lat_grip_share,
                 LAP_BONUS=args.lap_bonus, uncapped_prob=args.uncapped_prob,
                 STUCK_TIME=args.stuck_time, STUCK_DIST=args.stuck_dist, BACKWARD_DIST=args.backward_dist,
@@ -410,6 +423,10 @@ def main():
 
     # IL policy (actor + frozen normalizer) and a frozen copy as the BC teacher
     il_dir = f'results/{args.il}'
+    from utils.observation import get_obs_config
+    preview_on = bool(get_obs_config(args)['preview']['enabled'])
+    if args.bc_lost_off and not preview_on:
+        raise SystemExit('--bc_lost_off: the IL model has no track-preview input')
     rms = RunningMeanStd('agent_obs', args.obs_dim)
     rms.load(f'{il_dir}/sim2real', required=True)
     actor = IL.actor_from_state(torch.load(f'{il_dir}/checkpoint/model.pt')['actor'])
@@ -706,6 +723,9 @@ def main():
             adv = adv - (crash_cost / r_scale) * advc         # same units as a collision cost inside the reward
         flat = lambda x: torch.as_tensor(x.reshape(T * N, *x.shape[2:]), dtype=torch.float32)
         S = flat(rms.normalize(B['obs']))
+        # BC mask: 1 = imitate the teacher on this step (--bc_lost_off: not where the preview is invalid; the
+        # valid flag is the last observation entry of a preview policy, utils/observation.make_observation)
+        BCM = (flat(B['obs'][..., -1:])[:, 0] > 0.5).float() if (args.bc_lost_off and preview_on) else None
         C = flat(np.concatenate([rms.normalize(B['obs']), priv_rms.normalize(B['priv'])], axis=-1))
         A, LP, R = flat(B['act']), flat(B['logp']), flat(ret)
         ADV = flat(adv)
@@ -750,12 +770,13 @@ def main():
                     t_mean = teacher(S[idx]).loc
                     clip_frac += float(((ratio - 1).abs() > args.clip).float().mean())
                     n_mb += 1
+                m = BCM[idx][:, None] if BCM is not None else 1.0
                 if args.bc_steer_weight > 0:
                     # rare large-steering states (hairpins) keep the teacher's lock: weight 1 + k x teacher steer^2
                     w = 1.0 + args.bc_steer_weight * t_mean[:, 0].clamp(-1, 1) ** 2
-                    bc = (((d.loc - t_mean) ** 2) * bc_dim * torch.stack([w, torch.ones_like(w)], -1)).mean()
+                    bc = (((d.loc - t_mean) ** 2) * bc_dim * torch.stack([w, torch.ones_like(w)], -1) * m).mean()
                 else:
-                    bc = (((d.loc - t_mean) ** 2) * bc_dim).mean()
+                    bc = (((d.loc - t_mean) ** 2) * bc_dim * m).mean()
                 opt_actor.zero_grad()
                 (pg + bc_w * bc).backward()
                 torch.nn.utils.clip_grad_norm_(actor_params, 0.5)
@@ -793,7 +814,8 @@ def main():
               + f' | per step: prog {rc["forward_reward"]:.2f} time -{rc["time_cost"]:.2f} steer -{rc["steer_cost"]:.3f}'
               + (f' straight -{rc["straight_cost"]:.3f}' if args.straight_steer_cost > 0 else '')
               + f' wall -{rc["wall_cost"]:.3f} lat -{rc["lat_cost"]:.3f}'
-              + (f' bay -{rc["bay_cost"]:.3f}' if args.bay_cost > 0 else '') + f' crash -{rc["collision_cost"]:.2f}'
+              + (f' bay -{rc["bay_cost"]:.3f}' if args.bay_cost > 0 else '')
+              + (f' line -{rc["line_cost"]:.3f}' if args.line_cost > 0 else '') + f' crash -{rc["collision_cost"]:.2f}'
               + f' | rollout {t_roll:.0f}s update {time.time()-t0-t_roll:.0f}s (total {IL._hms(time.time()-T_START)})',
               flush=True)
 
@@ -845,7 +867,7 @@ def main():
                     target = args.crash_target_succ
                 # the worst-case / open-space checks count too when they ran (a model that reached the target on
                 # the eval tracks but is below IL there is not safe enough yet: 11/24 PPO 4 update 30)
-                gates_bad = gates and not (worst_ok and open_ok and short_ok)
+                gates_bad = gates and not (worst_ok and open_ok and short_ok) and bool(args.crash_gates)
                 if succ < target - 0.02 or gates_bad:
                     crash_cost = min(crash_cost * args.crash_up, args.crash_max)
                 elif succ >= target - 1e-9 and gates:

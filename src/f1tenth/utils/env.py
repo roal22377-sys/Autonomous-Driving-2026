@@ -163,6 +163,20 @@ class F1Wrapper(gym.Wrapper):
         lock = self.steer_left_max if angle > 0 else self.steer_right_max
         return float(np.clip(angle / max(lock, 1e-6), -1.0, 1.0))
 
+    def _line_ref(self):
+        '''the course's race line as a TrackPreview (the preview's own when the policy has one; else built and cached)'''
+        if self.preview_cfg['enabled'] and self.preview is not None:
+            return self.preview
+        from utils.preview import TrackPreview, get_preview_config
+        key = ('line', self.track_file or id(self._env.unwrapped.track))
+        if key not in self._preview_cache:
+            rl = self._env.unwrapped.track.raceline
+            self._preview_cache[key] = TrackPreview(np.stack([rl.xs, rl.ys], axis=1),
+                                                    get_preview_config({'track_preview': {'enabled': True}}))
+            if len(self._preview_cache) > MAX_TRACK_CACHE:
+                self._preview_cache.pop(next(iter(self._preview_cache)))
+        return self._preview_cache[key]
+
     def _reset_preview(self):
         '''race line + speed plan of this course (cached) and this episode's localization error'''
         from utils.preview import TrackPreview, LocalizationNoise
@@ -363,6 +377,12 @@ class F1Wrapper(gym.Wrapper):
     # the crash / stuck at its end was penalized. Simulator-only (not observed), like the straight-line cost.
     BAY_COST = 0.0
     BAY_MARGIN = 0.10
+    # off the race line (PPO option, 0 = off): per step, LINE_COST x (|offset| - LINE_MARGIN)^2 for the TRUE pose's
+    # offset from the course's race line [m]. 11/25 PPO 14 u20: the open-space crashes were corner exits run 0.35-0.4 m
+    # wide of the line into the outer wall and slides with 0.6-1.9 rad heading error; nothing in the reward looked at
+    # the line (wall cost only inside 0.3 m). Simulator-only (not observed).
+    LINE_COST = 0.0
+    LINE_MARGIN = 0.20
     STRAIGHT_V_REF = 0.0      # [m/s] > 0: that cost is per meter driven (x progress / (V_REF dt)), the same as per step at
                               # V_REF. 11/25 PPO 7 (per step, 15): a correction cost 2.7x more per meter at 3 m/s than at 8;
                               # update 60 stopped correcting drifts on straights at caps 3-4 (0/22 finished at cap 3)
@@ -437,10 +457,15 @@ class F1Wrapper(gym.Wrapper):
             lap_bonus = self.LAP_BONUS * max(0.0, self.ref_lap - lap_done)
 
         bay_cost = self.BAY_COST * self.out_of_corridor() if self.BAY_COST > 0 else 0.0
+        line_cost = 0.0
+        if self.LINE_COST > 0:
+            st = self.vehicle_state()
+            off = abs(self._line_ref().lateral(float(st[0]), float(st[1])))
+            line_cost = self.LINE_COST * max(0.0, off - self.LINE_MARGIN) ** 2
 
         # final reward
         reward = (forward_reward - collision_cost - steer_cost - straight_cost - time_cost - wall_cost - lat_cost
-                  - bay_cost + lap_bonus)
+                  - bay_cost - line_cost + lap_bonus)
         reward_dict = {'forward_reward': forward_reward,
                        'collision_cost': collision_cost,
                        'steer_cost': steer_cost,
@@ -449,6 +474,7 @@ class F1Wrapper(gym.Wrapper):
                        'wall_cost': wall_cost,
                        'lat_cost': lat_cost,
                        'bay_cost': bay_cost,
+                       'line_cost': line_cost,
                        'lap_bonus': lap_bonus}
         return reward, reward_dict
     # ======================================================================== #

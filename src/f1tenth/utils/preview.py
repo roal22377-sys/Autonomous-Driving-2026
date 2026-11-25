@@ -100,6 +100,12 @@ class TrackPreview:
         _, i = self.tree.query([x, y])
         return int(i)
 
+    def lateral(self, x, y):
+        '''signed offset from the race line [m] (+ = left of it), unclipped (simulator reward: utils/env.py LINE_COST)'''
+        i = self.project(x, y)
+        h = self.heading[i]
+        return float(-np.sin(h) * (x - self.xy[i, 0]) + np.cos(h) * (y - self.xy[i, 1]))
+
     def features(self, x, y, yaw, speed_cap=None, valid=True, hint=None):
         if not valid:
             return np.zeros(self.dim, np.float32)
