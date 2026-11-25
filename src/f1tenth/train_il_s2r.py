@@ -78,7 +78,8 @@ def expert_kwargs(env):
     '''
     grip = float(EXPERT_MU if EXPERT_MU else env.params['mu']) * 9.81
     a_max = float(env.params['a_max'])
-    return dict(EXPERT, a_lat=EXPERT_GRIP_SHARE * grip, a_acc=a_max, a_brake=min(a_max, EXPERT_GRIP_SHARE * grip),
+    a_brk = float(getattr(env, 'a_brake', None) or a_max)     # sim2real.a_brake (11/25) when the config has it
+    return dict(EXPERT, a_lat=EXPERT_GRIP_SHARE * grip, a_acc=a_max, a_brake=min(a_brk, EXPERT_GRIP_SHARE * grip),
                 a_lat_steer=EXPERT_STEER_GRIP_SHARE * grip, steer_speed_mode=EXPERT_STEER_SPEED_MODE,
                 lad_off_gain=EXPERT_LAD_OFF_GAIN, sim_agent=env._env.unwrapped.sim.agents[0])
 STEER_LOSS_WEIGHT = 2.0         # steering errors matter more than speed errors

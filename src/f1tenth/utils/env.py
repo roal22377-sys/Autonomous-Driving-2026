@@ -106,7 +106,7 @@ class F1Wrapper(gym.Wrapper):
 
     # ---------------------------------------------------------------- sim2real
     # sim_mode='worst': which end of each range is the harder one (0 = low end, 1 = high end)
-    WORST_END = {'steer_delay': 1, 'speed_delay': 1, 'a_max': 0, 'mu_scale': 0, 'noise_scale': 1,
+    WORST_END = {'steer_delay': 1, 'speed_delay': 1, 'a_max': 0, 'a_brake': 0, 'mu_scale': 0, 'noise_scale': 1,
                  'steer_scale_left': 0, 'steer_scale_right': 0, 'steer_left_max': 0, 'steer_right_max': 0}
 
     # training episodes with several gaps at their hard side at once (PPO 5): with HARD_PROB, every sim2real
@@ -128,6 +128,7 @@ class F1Wrapper(gym.Wrapper):
 
     def _apply_sim2real(self):
         params = dict(self.base_params)
+        self.a_brake = None
         if self.sim_mode == 'ideal':
             self.steer_delay_steps = self.speed_delay_steps = 0
             self.steer_left_max = self.steer_right_max = self.max_steer
@@ -140,9 +141,15 @@ class F1Wrapper(gym.Wrapper):
             self.steer_delay_steps = int(round(self._rand('steer_delay', 0.0) / self.timestep))
             self.speed_delay_steps = int(round(self._rand('speed_delay', 0.0) / self.timestep))
             params['a_max'] = self._rand('a_max', params['a_max'])
+            # separate braking limit (sim2real.a_brake, 11/25): the car accelerates at 2.7-3.0 but brakes at 3.4-4.2 m/s^2
+            # (CAR_RESULTS_1124); one a_max for both made braking as weak as accelerating. Without the key: unchanged.
+            if 'a_brake' in self.s2r:
+                self.a_brake = self._rand('a_brake', params['a_max'])
             if self.sim_mode in ('train', 'worst') and 'mu_scale' in self.s2r:
                 params['mu'] = params['mu'] * self._rand('mu_scale', 1.0)
-        self._env.unwrapped.sim.update_params(params)
+        self.a_acc = float(params['a_max'])
+        # the simulator gets its own copy: with a_brake its a_max is switched every step (env.params stays = accel)
+        self._env.unwrapped.sim.update_params(dict(params) if self.a_brake is not None else params)
         self.params = params
         self.steer_queue = deque([0.0] * self.steer_delay_steps)
         self.speed_queue = deque([0.0] * self.speed_delay_steps)
@@ -464,6 +471,10 @@ class F1Wrapper(gym.Wrapper):
             self.speed_queue.append(speed)
             speed = self.speed_queue.popleft()
         _action = np.array([steer, speed], dtype=np.float32)
+        if self.a_brake is not None:                     # braking (speed command below the speed) -> brake limit
+            lim = self.a_brake if speed < float(self.vehicle_state()[3]) - 1e-3 else self.a_acc
+            for ag in self._env.unwrapped.sim.agents:
+                ag.params['a_max'] = lim
 
         obs_dict, _, terminate, truncate, info = self._env.step(_action)
         self._step_pose(obs_dict)
@@ -581,7 +592,7 @@ class F1Wrapper(gym.Wrapper):
         curv = [float(cl.calc_curvature((s0 + d) % L)) for d in (1.0, 3.0, 6.0, 10.0)]
         yaw_err = (float(self.yaw_frenet) + np.pi) % (2*np.pi) - np.pi
         return np.array([float(self.position_frenet[1]), yaw_err, st[3], st[2], st[5], st[6],
-                         self.steer_delay_steps*self.timestep, self.params['a_max'], self.params['mu'],
+                         self.steer_delay_steps*self.timestep, self.a_acc, self.params['mu'],
                          self.speed_cap, self.steer_left_max] + curv, dtype=np.float32)
 
     # ---------------------------------------------------------------- expert support

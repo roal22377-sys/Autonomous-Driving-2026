@@ -70,9 +70,10 @@ sim2real:
   steer_scale_right_nominal: 0.90
   speed_delay: [0.0, 0.05]    # [s] speed command -> wheel speed (real ~0.03 s)
   speed_delay_nominal: 0.03
-  a_max: [2.6, 4.3]           # [m/s^2] 11/24 car: accel 2.7-3.0, brake 3.4-4.2 (was [2.5, 4.5], 3.0). accel = brake limit; 11/17 log p95 2.7 was driven at <= 3 m/s (likely below the
-                              # motor limit) -> widened up until measured (tools/speed_analysis.py); sim default 9.51
-  a_max_nominal: 3.3
+  a_max: [2.6, 3.2]           # [m/s^2] ACCELERATION limit. 11/24 car: accel 2.7-3.0 (was [2.6, 4.3], 3.3 for accel and brake together)
+  a_max_nominal: 2.9
+  a_brake: [3.3, 4.3]         # [m/s^2] BRAKING limit (utils/env.py, 11/25). 11/24 car: 3.4-4.2 (wheels locking, CAR_RESULTS_1124).
+  a_brake_nominal: 3.7        #   One limit for both made braking as weak as accelerating; PPO 12 cruised at 5.3 vs the expert's 7.3 m/s
   mu_scale: [0.8, 1.3]        # x dynamic.yaml mu 0.65 = 0.52-0.85 (11/24 4 m/s drive: 5.3 m/s^2 p99 without sliding -> >= 0.54) (11/24: >= 0.43 from the calibrated drive, the 11/23 fit
                               #   0.41-0.44 used the 1.35x-low odom speed -> ~0.75-0.8; not measured yet)
   noise_scale: [0.5, 2.0]     # per-episode multiplier on the lidar noise above
