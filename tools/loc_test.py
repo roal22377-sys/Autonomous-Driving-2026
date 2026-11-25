@@ -67,6 +67,33 @@ def align(map_poses, truth):
     return lambda P: np.column_stack([P[:, :2] @ Rm.T + tm, wrap(P[:, 2] + dth)])
 
 
+def stress(a, R, ts, ang, od, to_ref, Q, laser_x):
+    k0 = len(ts) // 2
+    for case, kick in (('no LiDAR 1.5 s', None), ('forced 1.2 m / 20 deg off', (1.2, 0.0, 0.35)),
+                       ('forced 6 m / 115 deg off', (6.0, 2.0, 2.0))):
+        loc = ScanLocalizer(a.map, laser_x=laser_x, stride=a.stride)
+        loc.global_init(R[0], ang, course_candidates(a.track), od[0])
+        V, E, T = [], [], []
+        for k in range(len(ts)):
+            r = R[k]
+            if kick is None and k0 <= k < k0 + 60:
+                r = np.full_like(r, np.inf)
+            if kick is not None and k == k0:
+                loc.pose = loc.pose + np.array(kick)
+            t0 = time.perf_counter()
+            p, v, _ = loc.step(r, ang, od[k])
+            T.append(time.perf_counter() - t0)
+            V.append(v), E.append(float(np.hypot(*(to_ref(p[None])[0, :2] - Q[k, :2]))))
+        V, E, T = np.array(V), np.array(E), np.array(T)
+        after = slice(k0, None)
+        wrong_valid = int((V[after] & (E[after] > 0.5)).sum())
+        inv = np.nonzero(~V[after])[0]
+        back = (inv[-1] + 1) / 40.0 if len(inv) else 0.0
+        print(f'[stress] {case}: valid again {back:.2f} s after the event, error then median '
+              f'{np.median(E[k0 + int(back * 40) + 5:]) * 100:.1f} cm, scans VALID while > 0.5 m off: {wrong_valid}, '
+              f'max step {T.max() * 1e3:.1f} ms')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('log')
@@ -80,6 +107,9 @@ def main():
     ap.add_argument('--laser_x', type=float, default=None)
     ap.add_argument('--stride', type=int, default=3)
     ap.add_argument('--out', default=None)
+    ap.add_argument('--stress', action='store_true',
+                    help='also: 1.5 s without LiDAR, and the pose forced 1.2 m / 20 deg and 6 m / 115 deg off, in the '
+                         'middle of the log (needs --track and --truth): is it found again, and never valid while wrong?')
     a = ap.parse_args()
     laser_x = a.laser_x if a.laser_x is not None else (0.17 if a.sim else 0.13)
     R, ts, ang, od = load_log(a.log, a.t0, a.t1)
@@ -94,9 +124,10 @@ def main():
     t_start = time.time()
     if a.track:
         cand = course_candidates(a.track)
-        p0, res0, sh0 = loc.global_init(R[0], ang, cand, od[0])
+        p0, res0, ex0, alt = loc.global_init(R[0], ang, cand, od[0])
         print(f'[init] global search over {len(cand)} poses along the course: {p0.round(3) if p0 is not None else None}, '
-              f'residual {res0*100:.1f} cm, matched {sh0*100:.0f}% ({time.time()-t_start:.2f} s)')
+              f'residual {res0*100:.1f} cm, {ex0*100:.0f}% of the scan on the map, valid {loc.valid}'
+              + (f', AMBIGUOUS with {alt[0].round(2)}' if alt is not None else '') + f' ({time.time()-t_start:.2f} s)')
     elif ref is not None and not a.sim:
         loc.reset(interp_pose(ts[:1], ref)[0], od[0])
         print('[init] reference pose')
@@ -146,6 +177,8 @@ def main():
                   f'speed@0 median {np.median(d[:, 10]):.2f} m/s')
         np.savetxt(f'{out}/loc.csv', np.column_stack([ts, P, V, A, e]), delimiter=',', header='t,x,y,yaw,valid,accepted,err',
                    comments='', fmt='%.4f')
+    if a.stress and a.track and ref is not None:
+        stress(a, R, ts, ang, od, to_ref, interp_pose(ts, ref), laser_x)
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt

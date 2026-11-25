@@ -99,7 +99,20 @@ class ScanLocalizer:
                    res_ok=0.03,         # [m] mean |point-to-line residual| of an accepted match (11/24 log: 1.0 cm median)
                    min_inliers=60,      # matched beams (of ~360; 11/24 log: 100-300)
                    jump_max=0.5,        # [m] correction vs the odom prediction above this -> rejected
-                   hold=8)              # scans in a row without an accepted match before valid = False (0.2 s)
+                   hold=8,              # scans in a row without an accepted match before valid = False (0.2 s)
+                   local_tries=14,      # lost: this many scans of local search (one ICP per scan), then the
+                                        # start candidates along the course nearest the prediction first, one per scan
+                   explained_ok=0.8,    # re-found pose: share of the scan within 10 cm of a map wall (correct poses:
+                                        # median 1.00; wrong ones that passed residual + inliers: median 0.53, 11/24 log)
+                   confirm_local=8,     # ... then tracked this many scans before it counts as valid (0.2 s)
+                   confirm_global=40,   # ... 1 s when found by the course-wide search (a straight looks the same
+                                        # a few meters further: one scan cannot tell, the motion through a corner can)
+                   ambiguous_gap=0.05,  # start: another pose > 1.5 m away explaining the scan within this -> refuse
+                   confirm_cons=0.1,    # ... and only scans that fix both directions count (not along a straight:
+                                        # a pose re-found 1 m off along a straight stayed "right" there, sim test 11/25)
+                   explained_track=0.45)  # tracking: running mean (10 scans) of the explained share below this -> lost.
+                                        # 11/24 log, correct poses: never below 0.58; a wrong pose that kept matching
+                                        # (forced 6 m / 115 deg off): median 0.33
 
     def __init__(self, map_dir, laser_x=0.13, **cfg):
         self.cfg = dict(self.DEFAULT, **cfg)
@@ -108,8 +121,11 @@ class ScanLocalizer:
         self.tree = cKDTree(self.pts)
         self.n, self.ok = normals(self.pts, self.tree)
         self.pose, self.last_odom = None, None
-        self.bad, self.valid = 0, False
-        self.stats = dict(steps=0, accepted=0)
+        self.bad, self.valid, self.confirm = 0, False, 0
+        self.lost, self.k_lost, self.ema = False, 0, 1.0
+        self.last_cons = 0.0
+        self.candidates, self.sweep = None, None
+        self.stats = dict(steps=0, accepted=0, recovered=0)
 
     # -------------------------------------------------------------- scan -> points (base_link frame)
     def points(self, ranges, angles):
@@ -118,45 +134,72 @@ class ScanLocalizer:
         ok = np.isfinite(r) & (r > self.cfg['r_min']) & (r < self.cfg['r_max'])
         return np.column_stack([self.laser_x + r[ok] * np.cos(a[ok]), r[ok] * np.sin(a[ok])])
 
+    def explained(self, src, pose, d=0.10):
+        '''share of the scan points within d of a map wall cell'''
+        dist, _ = self.tree.query(transform(src, pose), distance_upper_bound=d)
+        return float(np.isfinite(dist).mean()) if len(dist) else 0.0
+
     def match(self, src, init):
         c = self.cfg
         pose, res, n_in, cons = icp(src, self.pts, self.tree, self.n, self.ok, init, iters=c['iters'])
+        self.last_cons = cons
         good = res < c['res_ok'] and n_in >= c['min_inliers']
         return pose, res, n_in, good
 
-    def recover(self, src, pred):
-        '''after `hold` failed scans: wider ICP from the prediction and from heading offsets (odom yaw drifts)'''
-        best = None
-        for dth in (0.0, 0.1, -0.1, 0.25, -0.25):
-            p0 = pred + np.array([0.0, 0.0, dth])
-            p, res, n_in, _ = icp(src, self.pts, self.tree, self.n, self.ok, p0, iters=12, d_max=(1.0, 0.5, 0.25, 0.12))
-            if res < self.cfg['res_ok'] and n_in >= self.cfg['min_inliers'] and (best is None or res < best[1]):
-                best = (p, res, n_in)
-        return best
+    YAW_TRIES = (0.0, 0.1, -0.1, 0.25, -0.25, 0.45, -0.45)
+
+    def recover(self, src, pred, k):
+        '''lost for k scans past `hold`: ONE wide ICP per scan, so a lost scan costs about what a normal one does
+        (all tries in one scan took 19 ms on the PC, 11/25: the policy would have slowed from 40 Hz while lost).
+        First around the prediction with heading offsets (the odom heading drifts), then the course candidates.'''
+        local = k < self.cfg['local_tries'] or self.candidates is None
+        if local:
+            p0 = pred + np.array([0.0, 0.0, self.YAW_TRIES[k % len(self.YAW_TRIES)]])
+        else:
+            j = (k - self.cfg['local_tries']) % len(self.candidates)
+            if j == 0 or self.sweep is None:      # a new sweep: nearest to the prediction first (position, then heading)
+                c = self.candidates
+                d = np.hypot(c[:, 0] - pred[0], c[:, 1] - pred[1]) + 1.0 * np.abs(wrap(c[:, 2] - pred[2]))
+                self.sweep = np.argsort(d)
+            p0 = self.candidates[self.sweep[j]]
+        p, res, n_in, _ = icp(src, self.pts, self.tree, self.n, self.ok, p0, iters=12, d_max=(1.0, 0.5, 0.25, 0.12))
+        if (res < self.cfg['res_ok'] and n_in >= self.cfg['min_inliers'] * 1.5        # stricter than tracking
+                and self.explained(src, p) >= self.cfg['explained_ok']):
+            return p, res, n_in, self.cfg['confirm_local' if local else 'confirm_global']
+        return None
 
     # -------------------------------------------------------------- start
     def global_init(self, ranges, angles, candidates, odom=None):
-        '''best ICP match from candidate poses (N, 3), e.g. course_candidates(); sets the pose. returns (pose, res, share)'''
+        '''best ICP match from candidate poses (N, 3), e.g. course_candidates(); sets the pose.
+        returns (pose, residual, explained share, alternative): alternative = (pose, explained) of the best pose
+        > 1.5 m / 45 deg away when it explains the scan almost as well (ambiguous start: valid stays False)'''
         src = self.points(ranges, angles)
-        best = None
+        self.candidates = np.asarray(candidates, float)
+        hyp = []
         for c0 in candidates:
             p, res, n_in, _ = icp(src, self.pts, self.tree, self.n, self.ok, c0, iters=6, d_max=(1.0, 0.5, 0.25))
-            if not np.isfinite(res):
-                continue
-            score = n_in - 2000.0 * res
-            if best is None or score > best[0]:
-                best = (score, p)
-        if best is None:
-            return None, np.inf, 0.0
-        p, res, n_in, good = self.match(src, best[1])
+            if np.isfinite(res) and res < 2 * self.cfg['res_ok'] and n_in >= self.cfg['min_inliers']:
+                hyp.append((self.explained(src, p) - 2.0 * res, p))
+        if not hyp:
+            return None, np.inf, 0.0, None
+        hyp.sort(key=lambda h: -h[0])
+        p, res, n_in, good = self.match(src, hyp[0][1])
+        ex = self.explained(src, p)
+        alt = None
+        for sc, q in hyp[1:]:
+            if np.hypot(*(q[:2] - p[:2])) > 1.5 or abs(wrap(q[2] - p[2])) > np.pi / 4:
+                if sc >= hyp[0][0] - self.cfg['ambiguous_gap']:
+                    alt = (q, sc)
+                break
         self.reset(p, odom)
-        self.valid = bool(good)
-        return p, res, n_in / max(len(src), 1)
+        self.valid = bool(good) and ex >= self.cfg['explained_ok'] and alt is None
+        return p, res, ex, alt
 
     def reset(self, pose, odom=None):
         self.pose = np.array(pose, float)
         self.last_odom = None if odom is None else np.array(odom, float)
-        self.bad, self.valid = 0, True
+        self.bad, self.valid, self.confirm = 0, True, 0
+        self.lost, self.k_lost, self.ema = False, 0, 1.0
 
     # -------------------------------------------------------------- every scan
     def step(self, ranges, angles, odom):
@@ -169,26 +212,43 @@ class ScanLocalizer:
         src = self.points(ranges, angles)
         self.stats['steps'] += 1
         info = dict(n=len(src))
+        good, pose, res, n_in = False, pred, np.inf, 0
         if len(src) < 50:
-            good, pose, res, n_in = False, pred, np.inf, 0
-        else:
+            pass                                            # no usable scan: odom only
+        elif not self.lost:                                 # tracking
             pose, res, n_in, good = self.match(src, pred)
             jump = float(np.hypot(*(pose[:2] - pred[:2])))
             info['jump'] = jump
             if jump > self.cfg['jump_max']:
                 good = False
-            if not good and self.bad + 1 >= self.cfg['hold']:
-                rec = self.recover(src, pred)
-                if rec is not None:
-                    (pose, res, n_in), good = rec, True
-                    info['recovered'] = True
+            if good:
+                self.ema = 0.9 * self.ema + 0.1 * self.explained(src, pose)
+                if self.ema < self.cfg['explained_track']:  # keeps matching, but the scan does not fit the map: wrong place
+                    good, self.lost = False, True
+                    info['mismatch'] = True
+        else:                                               # lost: one search try per scan
+            rec = self.recover(src, pred, self.k_lost)
+            self.k_lost += 1
+            if rec is not None:
+                pose, res, n_in, self.confirm = rec
+                good, self.lost, self.k_lost = True, False, 0
+                self.ema = self.explained(src, pose)
+                info['recovered'] = True
+                self.stats['recovered'] += 1
         info.update(res=res, inliers=n_in, accepted=bool(good))
         if good:
-            self.pose, self.bad = pose, 0
+            if not info.get('recovered') and self.last_cons >= self.cfg['confirm_cons']:
+                self.confirm = max(self.confirm - 1, 0)
+            self.pose, self.bad, self.sweep = pose, 0, None
             self.stats['accepted'] += 1
         else:
             self.pose, self.bad = pred, self.bad + 1
-        self.valid = self.bad < self.cfg['hold']
+            if self.bad >= self.cfg['hold'] or self.confirm > 0:   # (a re-found pose that does not hold up: lost again)
+                if not self.lost:
+                    self.lost, self.k_lost = True, 0
+                self.confirm = 0
+        self.valid = not self.lost and self.bad < self.cfg['hold'] and self.confirm == 0
+        info['confirming'] = self.confirm
         return self.pose.copy(), self.valid, info
 
 
@@ -232,11 +292,17 @@ class CarPreview:
     def start(self, ranges, angles, odom):
         '''global start along the course; returns (ok, message)'''
         from utils.preview import TrackPreview
-        p, res, share = self.loc.global_init(ranges, angles, course_candidates(self.course), odom)
-        if p is None or not self.loc.valid:
-            return False, f'localization: no start pose found (best residual {res*100:.1f} cm)'
+        p, res, ex, alt = self.loc.global_init(ranges, angles, course_candidates(self.course), odom)
+        if p is None:
+            return False, 'localization: no start pose found (no candidate matched the scan)'
+        if alt is not None:
+            return False, (f'localization: ambiguous start, x {p[0]:.2f} y {p[1]:.2f} or x {alt[0][0]:.2f} y {alt[0][1]:.2f} '
+                           'explain the scan about equally: move the car where it sees a corner')
+        if not self.loc.valid:
+            return False, f'localization: no reliable start pose (residual {res*100:.1f} cm, {ex*100:.0f}% of the scan on the map)'
         f = self.tp.features(*self.ref_pose(p), None, True)
-        msg = f'localization: start at x {p[0]:.2f} y {p[1]:.2f} yaw {np.degrees(p[2]):.0f} deg (residual {res*100:.1f} cm)'
+        msg = (f'localization: start at x {p[0]:.2f} y {p[1]:.2f} yaw {np.degrees(p[2]):.0f} deg (residual {res*100:.1f} cm, '
+               f'{ex*100:.0f}% of the scan on the map)')
         if abs(f[1]) > np.pi / 2:
             rev = self.course[:-4] + '_rev.npz' if not self.course.endswith('_rev.npz') else self.course[:-8] + '.npz'
             if not os.path.exists(rev):
