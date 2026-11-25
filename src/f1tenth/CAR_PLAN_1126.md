@@ -128,6 +128,20 @@ MODEL=preview_robust tools/drive_session.sh   # 강건 모델: PPO 17 u30 (ppo_s
 
 ---
 
+## 5-1. 접지력 측정 (원선회 공간이 없을 때: 주행 기록으로)
+
+PPO가 느려지는 주원인은 바닥 접지력을 모르는 것입니다. 바닥은 연습장과 대회장이 같으므로, 한 번 재면 학습 범위를 좁힐 수 있습니다.
+- **주행 순서:** 3번 LiDAR PPO 주행을 상한 4 → 5 → 6 순서로, 각각 3바퀴 이상 합니다.
+  - 벽 접촉이나 차가 밀리는 모습이 보이면 그 상한에서 멈춥니다.
+- **분석 (PC, 주행마다):**
+  ```bash
+  python3 tools/grip_from_log.py logs/run_1126_XXXX_extracted maps/run_1126_YYYY --track src/f1tenth/installation/maps_real/Practice1126.npz
+  ```
+  - 나오는 `LOWER BOUND`(충돌 없이 낸 횡가속, mu 하한)와 10초 구간별 최대 횡가속을 봅니다.
+  - 상한을 올려도 같은 코너의 최대 횡가속이 더 오르지 않으면, 그 값이 접지력입니다.
+- **11/24 기록 결과:** 상한 4 m/s에서 mu ≥ 0.40까지만 알 수 있었습니다(한계까지 안 감). 시뮬레이터 명목은 0.65, PPO 18은 0.55 이상을 가정합니다.
+- **원선회 공간이 있으면:** `tools/drive_session.sh --circle`(조향 양 끝 2개, 약 10분)이 더 정확합니다. 타이어가 닳으니 마지막에 합니다.
+
 ## 6. 결과 보내기
 
 - 커밋과 push: 지도(`maps/run_1126_*`), 트랙(`maps_real/Practice1126*`), 주행 기록. 기록은 `git add -f logs/run_1126_*_extracted`로 넣습니다.
