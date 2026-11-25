@@ -29,13 +29,14 @@ import numpy as np
 
 def run(job):
     model, path, cap, start, mode, laps = job[:6]
+    k = job[7] if len(job) > 7 else 0                   # seed index (--seeds): another start pose / noise per track
     import torch
     import train_il_s2r as IL
     from evaluate_s2r import model_args
     from utils.env import F1Wrapper, normalize_speed
     from utils.vectorize import RunningMeanStd
     torch.set_num_threads(1)
-    seed = sum(map(ord, os.path.basename(path)))
+    seed = sum(map(ord, os.path.basename(path))) + 1000 * k
     np.random.seed(seed)
     args = IL.get_args([]) if model == 'expert' else model_args(model)
     args.seed = seed
@@ -67,8 +68,8 @@ def run(job):
         v.append(float(env.vehicle_state()[3]))
         st.append(float(np.clip(a[0], -1, 1)) * env.max_steer)
         done = term or trunc
-    group = job[6] if len(job) > 6 else ('open' if 'maps_open_test' in path else ('worst' if mode == 'worst' else 'eval'))
-    return dict(model=model, group=group, key=f'{os.path.basename(path)[:-4]}@{cap:g}/{start}', ok=bool(env.success),
+    group = job[6] if len(job) > 6 and job[6] else ('open' if 'maps_open_test' in path else ('worst' if mode == 'worst' else 'eval'))
+    return dict(model=model, group=group, key=f'{os.path.basename(path)[:-4]}@{cap:g}/{start}' + (f'#{k}' if k else ''), ok=bool(env.success),
                 t=float(env.elapsed), v=float(np.mean(v)), jitter=float(np.abs(np.diff(st)).mean()) if len(st) > 1 else 0.0)
 
 
@@ -79,6 +80,8 @@ def main():
     p.add_argument('--quick', action='store_true', help='1 lap, eval cap 8 centerline + open cap 5 only, no worst')
     p.add_argument('--open_level', default='big')
     p.add_argument('--max_tracks', type=int, default=0, help='first N tracks of each set (smoke tests)')
+    p.add_argument('--seeds', type=int, default=1,
+                   help='runs per track and setting with different start noise (more = steadier numbers for close models)')
     p.add_argument('--low_caps', default='2,2.5,3,3.5,4',
                    help="one more centerline run per eval track at these caps in turn (the car's 2-4 m/s; '' = off), "
                         "like train_ppo_s2r.py --eval_low_caps")
@@ -96,13 +99,14 @@ def main():
     op_set = [(5.0, 'center')] if a.quick else [(8.0, 'center'), (5.0, 'center')]
     jobs = []
     for m in a.models:
-        jobs += [(m, t, c, s, 'eval', laps) for c, s in ev_set for t in ev]
+      for k in range(a.seeds):
+        jobs += [(m, t, c, s, 'eval', laps, None, k) for c, s in ev_set for t in ev]
         if not a.quick:
-            jobs += [(m, t, 8.0, 'center', 'worst', laps) for t in ev]
+            jobs += [(m, t, 8.0, 'center', 'worst', laps, None, k) for t in ev]
         low = [float(c) for c in a.low_caps.split(',') if c.strip()] if not a.quick else []
         if low:
-            jobs += [(m, t, low[i % len(low)], 'center', 'eval', laps, 'low') for i, t in enumerate(ev)]
-        jobs += [(m, t, c, s, 'eval', laps) for c, s in op_set for t in op]
+            jobs += [(m, t, low[(i + k) % len(low)], 'center', 'eval', laps, 'low', k) for i, t in enumerate(ev)]
+        jobs += [(m, t, c, s, 'eval', laps, None, k) for c, s in op_set for t in op]
     t0 = time.time()
     print(f'{len(jobs)} runs ({len(a.models)} models), {laps} lap(s), {a.workers} workers ...', flush=True)
     with mp.get_context('spawn').Pool(a.workers) as pool:
