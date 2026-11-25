@@ -87,13 +87,17 @@ def cast(free, res, org, p, n, max_d):
     return steps[first_bad]
 
 
-def first_lap(path):
+def first_lap(path, near=2.0):
+    '''the path up to where it first comes back past its start (closest point of the first return within `near`
+    m: on later laps the car drives its own line and passes the start 0.5-1 m off the first spot)'''
     s = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(path, axis=0).T))])
     d0 = np.hypot(*(path - path[0]).T)
-    back = np.where((s > 15.0) & (d0 < 0.6))[0]
-    if len(back) == 0:
+    idx = np.where((s > 15.0) & (d0 < near))[0]
+    if len(idx) == 0:
         raise SystemExit('[error] the path never returns to its start: drive one full lap (back past the start point)')
-    return path[:back[0]]
+    gap = np.where(np.diff(idx) > 1)[0]
+    seg = idx[:gap[0] + 1] if len(gap) else idx
+    return path[:seg[np.argmin(d0[seg])]]
 
 
 def build(free_raw, res, org, path, max_half, close_gaps=0.3, blocks=(), ds=0.1):

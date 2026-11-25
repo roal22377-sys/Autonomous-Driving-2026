@@ -70,8 +70,9 @@ def normals(pts, tree, k=14):
     cov = np.einsum('nki,nkj->nij', nb, nb)
     w, v = np.linalg.eigh(cov)
     n = v[:, :, 0]                                   # smallest eigenvalue -> normal
-    flat = w[:, 0] / (w[:, 1] + 1e-9) < 0.2         # only well-defined lines (k=14: ~0.3 m of wall; 6 failed once
-                                                    # a few scans thickened the wall to a 4-6 cm band)
+    flat = w[:, 0] / (w[:, 1] + 1e-9) < 0.3         # only well-defined lines (k=14: ~0.3 m of wall; 6 failed once
+                                                    # a few scans thickened the wall to a 4-6 cm band; 0.2 dropped half
+                                                    # of the rough walls of the generated tracks)
     return n, flat
 
 
@@ -99,8 +100,11 @@ def icp(src, tgt, tgt_tree, tgt_n, tgt_ok, init, iters=25, d_max=(0.6, 0.3, 0.15
         dx = -np.linalg.solve(H, J.T @ r)
         pose = np.array([pose[0] + dx[0], pose[1] + dx[1], wrap(pose[2] + dx[2])])
         res, share = float(np.mean(np.abs(r))), int(keep.sum())
+        Ht = J[:, :2].T @ J[:, :2]
+        cons = float(np.linalg.eigvalsh(Ht)[0] / (np.trace(Ht) + 1e-9))    # 0 = slides along a corridor, 0.5 = fixed
         if np.abs(dx[:2]).max() < 1e-4 and abs(dx[2]) < 1e-4:
             break
+    icp.constraint = cons
     return pose, res, share
 
 
@@ -114,6 +118,18 @@ class Submap:
 
 
 # ------------------------------------------------------------------ pose graph
+def distinct(cloud, k=10):
+    '''how well a scan pins down the position: 0 = straight corridor (normals all parallel), 0.5 = corner'''
+    if len(cloud) < 30:
+        return 0.0
+    n, ok = normals(cloud, cKDTree(cloud), k=k)
+    n = n[ok]
+    if len(n) < 20:
+        return 0.0
+    M = n.T @ n / len(n)
+    return float(np.linalg.eigvalsh(M)[0])
+
+
 def optimize(poses, edges, fix=0):
     '''edges: (a, b, z (rel pose of b in a), w_xy, w_th). Least squares over all poses but `fix`.'''
     N = len(poses)
@@ -142,7 +158,9 @@ def optimize(poses, edges, fix=0):
         for node in (a, b):
             if node in col:
                 S[3 * e:3 * e + 3, 3 * col[node]:3 * col[node] + 3] = 1
-    sol = least_squares(resid, x0[free].ravel(), jac_sparsity=S, method='trf', x_scale='jac', max_nfev=60, verbose=0)
+    # soft_l1: an occasional wrong loop closure is down-weighted instead of bending the whole map
+    sol = least_squares(resid, x0[free].ravel(), jac_sparsity=S, method='trf', x_scale='jac', max_nfev=80, verbose=0,
+                        loss='soft_l1', f_scale=2.0)
     return unpack(sol.x), float(np.sqrt(np.mean(sol.fun ** 2)))
 
 
@@ -208,15 +226,33 @@ def cloud(r, ang, blocked, rmax=R_MAX):
     return np.column_stack([LASER_X + r[ok] * np.cos(ang[ok]), r[ok] * np.sin(ang[ok])])
 
 
+def set_laser_x(x):
+    global LASER_X
+    LASER_X = float(x)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('log'), ap.add_argument('out')
     ap.add_argument('--t0', type=float, default=0.0), ap.add_argument('--t1', type=float, default=1e9)
     ap.add_argument('--res', type=float, default=0.05, help='[m/cell] map resolution')
+    ap.add_argument('--laser_x', type=float, default=LASER_X, help='[m] pose reference -> laser along x (car: 0.13 '
+                    'base_link; simulator: 0.17 from the CG, tools/sim_map_test.py)')
     ap.add_argument('--kf_dist', type=float, default=0.15), ap.add_argument('--kf_ang', type=float, default=5.0)
-    ap.add_argument('--loop_dist', type=float, default=1.5, help='[m] loop-closure search radius')
+    ap.add_argument('--loop_dist', type=float, default=1.5, help='[m] loop-closure search radius (after the drift is fixed)')
+    ap.add_argument('--loop_drift', type=float, default=0.04,
+                    help='[m/m] drift allowed per m driven between two passes (phase A search radius)')
+    ap.add_argument('--loop_max', type=float, default=12.0, help='[m] phase A search radius cap')
+    ap.add_argument('--loop_res', type=float, default=0.015, help='[m] loop closure: mean ICP residual below this')
+    ap.add_argument('--loop_inliers', type=float, default=0.25, help='loop closure: share of the scan matched (>= 80 points)')
+    ap.add_argument('--loop_prune', type=float, default=0.25,
+                    help='[m] after optimizing, loop closures off by more than this are dropped')
+    ap.add_argument('--distinct', type=float, default=0.12,
+                    help='phase A uses keyframes whose wall normals point in several directions (corners): '
+                         'smallest eigenvalue of the mean n n^T above this (0 straight corridor, 0.5 corner)')
     ap.add_argument('--loop_gap', type=float, default=15.0, help='[s] minimum time between the two passes')
     a = ap.parse_args()
+    set_laser_x(a.laser_x)
     T0 = time.time()
     R, ts, ang, od, blocked = load(a.log, a.t0, a.t1)
     # keyframes on odom motion
@@ -247,9 +283,68 @@ def main():
     odom_poses = np.array([compose(np.zeros(3), relative(od[kf[0]], od[i])) for i in kf])
     print(f'[map] sequential ICP done ({seq_bad} keyframes fell back to odom) {time.time()-T0:.0f}s', flush=True)
 
-    # 2) loop closures + pose graph, twice (the second round finds more after the first correction)
-    loops = []
-    for rnd in range(2):
+    # 2) loop closures + pose graph.
+    # Phase A (big drift, 11/25 sim test: 280-460 m laps drifted > 1.5 m and found no closure at all): at distinctive
+    # keyframes (corners; a straight corridor lets ICP slide along it), try "k is the same place as j" for earlier
+    # distinctive keyframes j within the drift a pass that far back can have (loop_dist + loop_drift x distance
+    # driven, <= loop_max); ICP starts from j's pose; keep the best tight, well-constrained fit. Then optimize.
+    # Phase B (small residual drift): nearest keyframe within loop_dist, ICP from k's own pose, until none is new.
+    s_kf = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(poses[:, :2], axis=0).T))])
+    dist_k = np.array([distinct(c) for c in clouds])
+    dk, last = [], -1e9
+    for i in np.where(dist_k > a.distinct)[0]:          # distinctive keyframes, >= 2 m apart along the path
+        if s_kf[i] - last >= 2.0:
+            dk.append(i)
+            last = s_kf[i]
+    dk = np.array(dk, int)
+    loops, have = [], set()
+
+    def try_close(j, k, guess, d_max):
+        ids = [i for i in range(max(0, j - 6), min(len(kf), j + 7))]
+        sm = Submap(clouds, poses, ids)
+        p, res, n_in = icp(clouds[k], sm.pts, sm.tree, sm.n, sm.ok, guess, iters=40, d_max=d_max)
+        return p, res, n_in, icp.constraint
+
+    def good(res, n_in, n, cons, cons_min):
+        # a true revisit matches to < 1 cm (sim test 11/25: 0.6-0.9 cm); share alone failed on rough walls
+        return res < a.loop_res and n_in >= max(80, a.loop_inliers * n) and cons > cons_min
+
+    def solve(poses, loops):
+        '''optimize, then drop loop closures the optimized map disagrees with (> loop_prune m) and redo'''
+        for _ in range(3):
+            P, rms = optimize(poses, edges + loops)
+            bad = [l for l in loops if np.hypot(*relative(relative(P[l[0]], P[l[1]]), l[2])[:2]) > a.loop_prune]
+            if not bad:
+                return P, rms, loops
+            loops = [l for l in loops if l not in bad]
+            print(f'[map] dropped {len(bad)} loop closure(s) the map disagrees with', flush=True)
+        return optimize(poses, edges + loops) + (loops,)
+
+    found_a = 0
+    for k in dk:
+        if ts[kf[k]] - ts[kf[0]] < a.loop_gap:
+            continue
+        dd = np.hypot(*(poses[dk, :2] - poses[k, :2]).T)
+        ok = ((ts[kf[k]] - ts[kf[dk]] > a.loop_gap)
+              & (dd <= np.minimum(a.loop_max, a.loop_dist + a.loop_drift * (s_kf[k] - s_kf[dk])))
+              & (np.abs(wrap(poses[k, 2] - poses[dk, 2])) < np.radians(45)))
+        cand = dk[ok][np.argsort(dd[ok])][:8]
+        best = None
+        for j in cand:
+            guess = np.array([poses[j, 0], poses[j, 1], poses[j, 2] + wrap(0.0)])
+            p, res, n_in, cons = try_close(j, k, guess, (1.0, 0.5, 0.25, 0.1))
+            if good(res, n_in, len(clouds[k]), cons, 0.05) and (best is None or res < best[1]):
+                best = (j, res, p)
+        if best is not None and (best[0], k) not in have:
+            j, _, p = best
+            loops.append((j, k, relative(poses[j], p), 20.0, 40.0))
+            have.add((j, k))
+            found_a += 1
+    if loops:
+        poses, rms, loops = solve(poses, loops)
+        have = {(l[0], l[1]) for l in loops}
+    print(f'[map] phase A: {len(dk)} distinctive keyframes, +{found_a} loop closures {time.time()-T0:.0f}s', flush=True)
+    for rnd in range(4):
         tree = cKDTree(poses[:, :2])
         found = 0
         for k in range(0, len(kf), 2):
@@ -258,16 +353,17 @@ def main():
             if not cand:
                 continue
             j = min(cand, key=lambda c: np.hypot(*(poses[c, :2] - poses[k, :2])))
-            if any(l[0] == j and l[1] == k for l in loops):
+            if (j, k) in have:
                 continue
-            ids = [i for i in range(max(0, j - 6), min(len(kf), j + 7))]
-            sm = Submap(clouds, poses, ids)
-            p, res, share = icp(clouds[k], sm.pts, sm.tree, sm.n, sm.ok, poses[k], iters=30, d_max=(1.0, 0.5, 0.2, 0.1))
-            if res < 0.03 and share >= 0.6 * len(clouds[k]) and np.hypot(*(p[:2] - poses[k, :2])) < 1.2:
+            p, res, n_in, cons = try_close(j, k, poses[k], (1.0, 0.5, 0.2, 0.1))
+            if good(res, n_in, len(clouds[k]), cons, 0.02) and np.hypot(*(p[:2] - poses[k, :2])) < 1.2:
                 loops.append((j, k, relative(poses[j], p), 20.0, 40.0))
+                have.add((j, k))
                 found += 1
-        poses, rms = optimize(poses, edges + loops)
-        print(f'[map] round {rnd + 1}: +{found} loop closures (total {len(loops)}), graph rms {rms:.3f} {time.time()-T0:.0f}s', flush=True)
+        if found == 0:
+            break
+        poses, rms, loops = solve(poses, loops)
+        print(f'[map] phase B round {rnd + 1}: +{found} loop closures (total {len(loops)}), graph rms {rms:.3f} {time.time()-T0:.0f}s', flush=True)
 
     # 3) maps
     full = [cloud(R[i], ang, blocked) for i in kf]

@@ -32,9 +32,32 @@
 | PPO 12 u190 / u250 / u272 | 17/18 각각 | u190·u272: 정방향 상한 2, 출발 3.7 s 같은 자리 / u250: 역방향 상한 3 |
 | PPO 5 (지금 실차 모델) | 13/18 | 정방향 상한 2에서 0/3, 2.5와 3에서 1번씩 → **실차 저속 시험 때 주의** |
 
+### 정답이 있는 시뮬레이션 검증 (11/25, `tools/sim_map_test.py`)
+벽 위치를 아는 시뮬레이터 트랙에서 목요일과 같은 지도 주행(IL 11, 상한 2 m/s, 3바퀴)을 하고, 차처럼 기록했습니다.
+- LiDAR: 10 m까지, 잡음 0.8 cm, 0.3 % 빠짐.
+- odom: 속도 ×1.03, 회전 속도 ×0.85 + 0.02 rad/s 치우침. 11/24 실차 odom처럼 꽃잎 모양이 되는 조건입니다.
+
+그 기록을 지도로 만들고, 다시 트랙으로 바꿔 **정답과 비교**했습니다. 대회 코스(한 바퀴 100 m 이하)와 비슷한 50–90 m 생성 코스(`utils/track_short.py`)와 연습 코스로 했습니다.
+
+| 코스 | 길이 | 루프 클로저 | 궤적 오차 중앙값 | 벽 오차 중앙값 / p90 | 실제 벽 덮음 | 변환 트랙에서 expert |
+|---|---|---|---|---|---|---|
+| Practice1124 (11/24 실제 코스) | 34 m | 243 | 2.4 cm | 3.3 / 6.6 cm | 97 % | 완주 |
+| Rand303 | 61 m | 492 | 5.4 cm | 5.6 / 11.3 cm | 100 % | 완주 |
+| Rand300 | 83 m | 618 | 10.5 cm | 7.6 / 15.6 cm | 94 % | 완주 |
+| Rand302 | 88 m | 714 | 7.5 cm | 5.9 / 11.6 cm | 100 % | 완주 |
+| IMS 축소판 | 90 m | 723 | 6.8 cm | 6.2 / 11.9 cm | 100 % | 완주 |
+
+- **고친 점:** 첫 버전은 짧은 코스에서 루프 클로저를 0–2개밖에 못 찾았습니다. 그래서 벽 오차가 10–63 cm였고(Rand302는 지도가 휘어 63 cm), IMS 축소판에서는 expert가 실패했습니다.
+  - 원인은 ICP 정합이 아니었습니다. 정합은 0.6–1.5 cm로 정확했습니다. 문제는 합격 기준인 "스캔 점의 60 % 이상이 맞아야 함"이었습니다. 거친 벽은 직선 법선이 안 잡혀 점이 많이 빠졌습니다.
+  - 기준을 **잔차 1.5 cm 미만 + 25 % 이상(최소 80점)**으로 바꿨습니다.
+  - 잘못된 클로저는 **최적화 뒤 지도와 25 cm 넘게 어긋나면 버리고 다시 최적화**해서 막습니다.
+- **11/24 실제 기록으로 다시 만든 결과:** 스캔 매칭 실패가 52개에서 3개로, 루프 클로저가 176개에서 393개로 바뀌었습니다. 보정량 중앙값은 1.7 m에서 0.45 m로 줄었고, 벽은 한 겹입니다.
+- 생성 코스의 남은 오차 5–8 cm는 주로 일부러 거칠게 만든 벽(울퉁불퉁한 장애물) 때문입니다. 매끈한 벽인 연습 코스는 3 cm입니다.
+- 다시 돌리기: `tools/sim_map_test.py --workers 3`. 기본값은 연습 코스와 짧은 코스 4개입니다. 짧은 코스를 먼저 만들어야 합니다: `cd src/f1tenth && python -m utils.track_short --random 4 --seeds 3` 그리고 `python -m utils.track_short --maps IMS --seeds 301`. 지도 도구만 바꿨다면 `--reuse_log`로 같은 기록에서 지도만 다시 만듭니다.
+
 ---
 
-## 2. 목요일 순서
+## 2. 목요일(11/26) 순서
 
 ### 준비 (PC)
 ```bash
@@ -57,12 +80,12 @@ tools/map_session.sh          # git push + 차 git pull, 탭 6개: bringup / TEL
 
 ### PC에서 지도와 트랙 만들기
 ```bash
-tools/map_session.sh --finish Practice1127          # NAME: 영문·숫자만 (_ 없이)
+tools/map_session.sh --finish Practice1126          # NAME: 영문·숫자만 (_ 없이)
 ```
-- 하는 일: 정지 → bag 가져오기(`logs/run_MMDD_HHMM_extracted`) → `eval_drive.py` → `map_offline.py` → `maps/run_MMDD_HHMM/` → `map_to_track.py` → `src/f1tenth/installation/maps_real/Practice1127(_rev).npz` → `check_track.py` 순서입니다.
+- 하는 일: 정지 → bag 가져오기(`logs/run_MMDD_HHMM_extracted`) → `eval_drive.py` → `map_offline.py` → `maps/run_MMDD_HHMM/` → `map_to_track.py` → `src/f1tenth/installation/maps_real/Practice1126(_rev).npz` → `check_track.py` 순서입니다.
 - 손으로 옮긴 구간을 빼려면 자율 주행 구간만 씁니다. 시각은 `eval.txt`의 start/dur로 압니다.
   ```bash
-  tools/map_session.sh --finish Practice1127 --t0 12 --t1 140
+  tools/map_session.sh --finish Practice1126 --t0 12 --t1 140
   ```
 - 다른 PC에서 기록만 받아 둔 경우는 `python3 tools/map_offline.py logs/<run>_extracted maps/<run>` 다음에 `tools/map_session.sh --rebuild maps/<run> NAME`을 실행합니다.
 
@@ -71,7 +94,7 @@ tools/map_session.sh --finish Practice1127          # NAME: 영문·숫자만 (_
 2. `maps_real/<NAME>_check.png`: 흰 영역이 **코스 통로만**인지, 중심선(파랑)과 레이스 라인(빨강)이 통로 안에 있는지 봅니다.
    - 방이나 열린 곳이 붙어 있으면 그 사각형 좌표를 그림에서 읽고 다시 만듭니다.
      ```bash
-     tools/map_session.sh --rebuild maps/<run> Practice1127 --block=-10.5,4.75,-7,6.5
+     tools/map_session.sh --rebuild maps/<run> Practice1126 --block=-10.5,4.75,-7,6.5
      ```
      `--block`은 여러 번 쓸 수 있습니다. 음수로 시작하는 좌표는 `=`로 붙여 씁니다.
 3. `check_track.py` 출력: **expert가 모든 상한, 양방향에서 완주**하면 쓸 수 있는 트랙입니다.
@@ -81,9 +104,9 @@ tools/map_session.sh --finish Practice1127          # NAME: 영문·숫자만 (_
 
 ### 저장
 ```bash
-git add maps/<run> src/f1tenth/installation/maps_real/Practice1127*
+git add maps/<run> src/f1tenth/installation/maps_real/Practice1126*
 git add -f logs/<run>_extracted          # logs/는 .gitignore에 있음
-git commit -m "map: practice course 11/27" && git push
+git commit -m "map: practice course 11/26" && git push
 ```
 
 ---
@@ -92,9 +115,9 @@ git commit -m "map: practice course 11/27" && git push
 
 | 용도 | 명령 | 비고 |
 |---|---|---|
-| 모델 비교에 실제 코스 열 추가 | (src/f1tenth에서) `python -u compare_models.py ppo_s2r/5 ppo_s2r/12190 --seeds 2 --extra_tracks installation/maps_real/Practice1127.npz installation/maps_real/Practice1127_rev.npz` | 상한 8·4·2, 출발선에서 2랩. "real course" 열과 상한 8의 2랩 시간 |
-| 실차 전에 한 트랙만 빨리 확인 | `python3 tools/check_track.py src/f1tenth/installation/maps_real/Practice1127.npz --models ppo_s2r/12190 --caps 2 3 4 --seeds 3` | 상한마다 완주 수, 2랩 시간, 실패 시각 |
-| PPO 평가마다 실제 코스 보고 | `train_ppo_s2r.py ... --real_tracks installation/maps_real/Practice1127.npz installation/maps_real/Practice1127_rev.npz` | 저장 기준에는 안 들어가고 기록만 합니다(`[real course @ update N]`, `train_log.pkl`의 `real_success`) |
+| 모델 비교에 실제 코스 열 추가 | (src/f1tenth에서) `python -u compare_models.py ppo_s2r/5 ppo_s2r/12190 --seeds 2 --extra_tracks installation/maps_real/Practice1126.npz installation/maps_real/Practice1126_rev.npz` | 상한 8·4·2, 출발선에서 2랩. "real course" 열과 상한 8의 2랩 시간 |
+| 실차 전에 한 트랙만 빨리 확인 | `python3 tools/check_track.py src/f1tenth/installation/maps_real/Practice1126.npz --models ppo_s2r/12190 --caps 2 3 4 --seeds 3` | 상한마다 완주 수, 2랩 시간, 실패 시각 |
+| PPO 평가마다 실제 코스 보고 | `train_ppo_s2r.py ... --real_tracks installation/maps_real/Practice1126.npz installation/maps_real/Practice1126_rev.npz` | 저장 기준에는 안 들어가고 기록만 합니다(`[real course @ update N]`, `train_log.pkl`의 `real_success`) |
 | **그 코스로 학습** (대회 코스용) | 위 옵션에 `--real_train_share 0.1` 추가 | 에피소드의 10 %를 그 코스에서 학습합니다. 연습 코스는 대회 코스와 다르니 **평가만** 하고, 대회 코스를 따면 이 옵션으로 짧게 미세조정합니다 |
 
 - 실제 코스 트랙은 `installation/maps_real/`에 따로 둡니다. 생성 트랙 학습 목록(`maps_gen`)에 섞이지 않아서, 옵션을 주지 않으면 학습에 쓰이지 않습니다.
@@ -124,7 +147,8 @@ git commit -m "map: practice course 11/27" && git push
 | 도구 | 하는 일 |
 |---|---|
 | `tools/map_session.sh` | 차 세션(= `MODEL=mapping tools/drive_session.sh`). `--finish NAME`은 기록 → 지도 → 트랙 → 확인까지, `--rebuild`는 트랙만 다시 만듭니다 |
-| `tools/map_offline.py LOG OUT [--t0 --t1 --res --loop_dist --loop_gap]` | 오프라인 2D SLAM입니다.<br>① 키프레임(0.15 m / 5°)마다 1081개 빔을 점-선 ICP로 주변 지도에 맞춤(odom을 초기값으로)<br>② 같은 곳을 15 s 이상 뒤에 다시 지나면 두 스캔을 맞춰 "같은 위치" 조건 추가(잔차 3 cm 미만만)<br>③ 포즈 그래프 최소제곱(scipy)으로 전체 궤적 보정, ②~③을 2번<br>④ 광선 추적으로 점유 격자를 만들어 `map.pgm`/`map.yaml`(ROS map_server 형식)로 저장. `poses.csv`, `preview.png`, `report.txt`도 남김 |
+| `tools/map_offline.py LOG OUT [--t0 --t1 --res --laser_x --loop_res --loop_inliers --loop_prune]` | 오프라인 2D 그래프 SLAM입니다.<br>① 키프레임(0.15 m / 5°)마다 1081개 빔을 점-선 ICP로 주변 지도에 맞춤(odom을 초기값으로)<br>② 루프 클로저 A: 모양이 뚜렷한 키프레임(코너 등)을 쌓인 오차 반경(이동 거리 × 4 %, 최대 12 m) 안에서 찾아 맞춤<br>③ 루프 클로저 B: 보정된 궤적 기준 1.2 m 안의 재방문을 모두 맞춤(반복)<br>④ 합격: 잔차 1.5 cm 미만, 스캔의 25 % 이상(80점 이상), 방향이 퇴화하지 않음. 포즈 그래프 최소제곱(soft_l1) 뒤 25 cm 넘게 어긋나는 클로저는 버리고 다시 최적화<br>⑤ 광선 추적으로 점유 격자를 만들어 `map.pgm`/`map.yaml`(ROS map_server 형식)로 저장. `poses.csv`, `preview.png`, `report.txt`도 남김 |
+| `tools/sim_map_test.py [TRACK ...] [--out --laps --cap --workers --reuse_log]` | 정답 비교 검증(위 표). 시뮬레이터 지도 주행 → 차와 같은 잡음의 기록 → `map_offline.py` → `map_to_track.py` → 궤적·벽·폭 오차와 expert 완주 → `report.md`, `compare.png` |
 | `tools/map_to_track.py MAP --name NAME [--block --max_half 2.5 --close_gaps 0.3]` | 지도와 궤적으로 트랙을 만듭니다.<br>① 궤적과 이어진 빈 칸(경로에서 2.5 m 안, 벽의 0.6 m 이하 틈은 닫음)<br>② 한 바퀴 궤적을 좌우 벽 사이 가운데로 4번 다시 맞춘 중심선(0.1 m 간격)<br>③ 좌우 폭(1.5 m 중앙값 + 0.2 m 넘는 오목한 곳은 통로 폭에서 제외)<br>④ 생성 트랙과 같은 레이스 라인 최적화<br>⑤ 정방향과 역방향 `.npz`(`utils/track_gen.to_track` 형식) |
 | `tools/check_track.py TRACK [--models --caps --seeds --workers]` | 시뮬레이터에서 expert와 모델을 그 트랙에서 달려 완주 수, 2랩 시간, 실패 시각을 보여 주고 `_drive.png`를 만듭니다 |
 | `tools/log_map.py` | (분석용) 사고 구간 지도. 루프 클로저가 없어서 트랙으로는 쓰지 않습니다 |
