@@ -111,8 +111,12 @@ python3 tools/loc_test.py logs/run_1126_XXXX_extracted maps/run_1126_YYYY --trac
 ## 5. 위치 정보 모델 주행 (계획 B, 30분) — 4번이 통과했을 때만
 
 ```bash
-MODEL=preview tools/drive_session.sh      # agent_preview.yaml: 아침에 Claude가 넣은 모델 (PPO 14 또는 IL 13)
+MODEL=preview tools/drive_session.sh          # 기본 = 빠른 모델: IL 13 (또는 아침에 Claude가 넣은 PPO 18 후보)
+MODEL=preview_robust tools/drive_session.sh   # 강건 모델: PPO 17 u30 (ppo_s2r/1730), 아래 경우에 바꿔 탐
 ```
+- **강건 모델로 바꾸는 경우:** 기본 모델이 같은 상한에서 미끄러지거나 벽에 닿는 경우입니다(특히 코너 출구에서 바깥 벽).
+  - PPO 17 u30은 시뮬레이터 최악 조건(지연·접지력·조향이 모두 나쁜 쪽) 완주가 94.7 %입니다(IL 13은 83.3 %). 명목 조건에서는 약 3.5 % 느립니다.
+  - 두 모델 설정의 `course` / `map_dir`은 `map_session.sh`가 함께 바꿉니다.
 - `speed_limit` 2.5에서 시작해 3 → 4 → 5로 올립니다. 매번 3바퀴 이상 돌고 `--finish`로 기록합니다.
 - **위치를 0.3 s 넘게 잃으면 차가 스스로 멈춥니다**(속도 0, 조향은 모델 그대로). 위치를 다시 찾으면 이어서 달립니다. 로그에는 `[preview] localization lost: stopping after 0.3 s`가 나옵니다.
   - 이유: 11/25 점검에서 IL 13은 위치 없이 처음부터 끝까지 달리면 완주가 일반 트랙 9 %, 짧은 코스 53 %였습니다(위치가 있으면 93 %, 97 %). 학습 때 끊김을 0.5–3 s로 짧게만 넣었기 때문입니다.
