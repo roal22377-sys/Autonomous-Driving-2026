@@ -1,0 +1,17 @@
+# PPO simulator override for preview policies, 11/25 PPO 16: between IL 13's training (15 % of the episodes with
+# 0.5-3 s losses) and PPO 14/15 (35 %, 0.5-8 s, 10 % without any localization). PPO 14 and 15 slowed down
+# 4-8 % everywhere within 20-30 updates; on the car a loss > 0.3 s stops the car (agent_preview.yaml lost_stop),
+# so speed with localization comes first and LiDAR-only driving only has to bridge short gaps.
+track_preview:
+  noise:
+    xy_std: 0.05
+    yaw_std_deg: 1.0
+    corr_time: 0.5
+    jitter_xy: 0.01
+    jump_prob: 0.0005
+    jump_std: 0.3
+    jump_time: 1.0
+    lost_episode_prob: 0.25
+    lost_rate: 0.05
+    lost_len: [0.5, 4.0]
+    lost_full_prob: 0.03

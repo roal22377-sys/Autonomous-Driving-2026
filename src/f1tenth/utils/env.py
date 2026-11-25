@@ -332,6 +332,7 @@ class F1Wrapper(gym.Wrapper):
         self.progress, self.elapsed, self.success, self.lap_times = 0.0, 0.0, False, []
         self.stuck, self.stuck_ref, self.max_progress = False, (0.0, 0.0), 0.0
         self.steer_ema = 0.0
+        self._pv = self._pv_prev = True
         obs_dict, info = self._env.reset(options=options, **kwargs)
         # enough steps for all laps even at a slow 1.6 m/s
         if self.s2r.get('laps_steps', False) and self.sim_mode != 'ideal':
@@ -383,6 +384,10 @@ class F1Wrapper(gym.Wrapper):
     # the line (wall cost only inside 0.3 m). Simulator-only (not observed).
     LINE_COST = 0.0
     LINE_MARGIN = 0.20
+    # ... only while the policy sees the line (preview valid when it chose the action), at most LINE_CAP per step.
+    # 11/25 PPO 15: charged in the episodes without localization too, it was 10-70x the calibrated 0.01 per step
+    # (-0.1 .. -0.7), the returns spread (scale 138 -> 220), KL jumped to 0.06-0.07 and the car slowed every update
+    LINE_CAP = 0.5
     STRAIGHT_V_REF = 0.0      # [m/s] > 0: that cost is per meter driven (x progress / (V_REF dt)), the same as per step at
                               # V_REF. 11/25 PPO 7 (per step, 15): a correction cost 2.7x more per meter at 3 m/s than at 8;
                               # update 60 stopped correcting drifts on straights at caps 3-4 (0/22 finished at cap 3)
@@ -458,10 +463,10 @@ class F1Wrapper(gym.Wrapper):
 
         bay_cost = self.BAY_COST * self.out_of_corridor() if self.BAY_COST > 0 else 0.0
         line_cost = 0.0
-        if self.LINE_COST > 0:
+        if self.LINE_COST > 0 and getattr(self, '_pv_prev', True):
             st = self.vehicle_state()
             off = abs(self._line_ref().lateral(float(st[0]), float(st[1])))
-            line_cost = self.LINE_COST * max(0.0, off - self.LINE_MARGIN) ** 2
+            line_cost = min(self.LINE_COST * max(0.0, off - self.LINE_MARGIN) ** 2, self.LINE_CAP)
 
         # final reward
         reward = (forward_reward - collision_cost - steer_cost - straight_cost - time_cost - wall_cost - lat_cost
@@ -684,6 +689,7 @@ class F1Wrapper(gym.Wrapper):
             x, y, yaw, valid = (self.loc_noise.step(st[0], st[1], st[4]) if self.loc_noise is not None
                                 else (st[0], st[1], st[4], True))
             preview = self.preview.features(x, y, yaw, self.speed_cap, valid)
+            self._pv_prev, self._pv = getattr(self, '_pv', True), bool(valid)     # line cost: what the policy saw
         observation = make_observation(scan, speed, self.obs_cfg, self.history, self.speed_cap, preview)
 
         return observation
