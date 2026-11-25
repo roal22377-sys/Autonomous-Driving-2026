@@ -1,0 +1,1 @@
+ppo_s2r/19 checkpoint at update 20 (model_880000.pt), IL imitation/13 normalizer. PPO 19 u20 (small exploration noise): eval 99.4 %, 0.34 s FASTER than IL 13 over 2 laps, short 100 % (0.20 s faster), worst-case 81.8 %, open-space 92.0 %, LiDAR-only 62.5 / 66 %, practice course 4/4 19.0 s
