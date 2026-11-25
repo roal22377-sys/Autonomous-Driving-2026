@@ -481,6 +481,8 @@ def main():
         require_fresh_open_train(extra)
         train_tracks += extra
         print(f'[tracks] {len(train_tracks)} training tracks incl. {len(extra)} open-space ones', flush=True)
+    if not 0.0 <= args.short_share < 1.0:
+        raise SystemExit(f'--short_share {args.short_share}: must be in [0, 1)')
     if args.short_share > 0:
         from utils.track_short import short_tracks
         st = short_tracks(holdout=False)

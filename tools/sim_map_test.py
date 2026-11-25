@@ -183,7 +183,8 @@ def evaluate(path, out, rec):
     twl = np.minimum(twl, ndimage.median_filter(twl, size=k, mode='wrap') + 0.2)
     twr = np.minimum(twr, ndimage.median_filter(twr, size=k, mode='wrap') + 0.2)
     off, j = cKDTree(tc).query(c_true)
-    same_dir = np.dot((np.roll(c_true, -1, 0) - c_true).mean(0), (np.roll(tc[j], -1, 0) - tc[j]).mean(0)) >= 0
+    # (a mean of the steps of a closed loop is 0: compare the steps one by one, 11/25 review)
+    same_dir = np.sum((np.roll(c_true, -1, 0) - c_true) * (np.roll(tc, -1, 0)[j] - tc[j])) >= 0
     wl_t, wr_t = (twl[j], twr[j]) if same_dir else (twr[j], twl[j])
     L_true = float(np.sum(np.hypot(*np.diff(np.vstack([tc, tc[:1]]), axis=0).T)))
     return dict(rec=rec, n_kf=len(est), pos_med=float(np.median(pos_err)), pos_max=float(pos_err.max()),
@@ -250,6 +251,7 @@ def main():
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--reuse_log', action='store_true', help='skip the drive when <out>/<track>/log exists (map tool changes)')
     a = ap.parse_args()
+    a.out = os.path.abspath(a.out)          # record() changes into src/f1tenth
     tracks = [os.path.abspath(t if os.path.isabs(t) or os.path.exists(t) else os.path.join(SRC, t))
               for t in (a.tracks or DEFAULT_TRACKS)]
     missing = [t for t in tracks if not os.path.exists(t)]

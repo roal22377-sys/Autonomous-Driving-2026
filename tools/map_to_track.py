@@ -92,7 +92,14 @@ def first_lap(path, near=2.0):
     m: on later laps the car drives its own line and passes the start 0.5-1 m off the first spot)'''
     s = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(path, axis=0).T))])
     d0 = np.hypot(*(path - path[0]).T)
-    idx = np.where((s > 15.0) & (d0 < near))[0]
+    # ... driving the same way: a neighbouring straight across one barrier (hairpin, ~2 m away) runs the other way
+    # (11/25 review: without this a 45.6 m hairpin course was cut at 32.7 m and closed through the barrier)
+    i0 = np.searchsorted(s, s - 0.5).clip(0, len(path) - 1)
+    i1 = np.searchsorted(s, s + 0.5).clip(0, len(path) - 1)
+    tan = path[i1] - path[i0]
+    tan /= np.maximum(np.hypot(*tan.T), 1e-9)[:, None]
+    same_way = tan @ tan[0] > 0.7
+    idx = np.where((s > 15.0) & (d0 < near) & same_way)[0]
     if len(idx) == 0:
         raise SystemExit('[error] the path never returns to its start: drive one full lap (back past the start point)')
     gap = np.where(np.diff(idx) > 1)[0]

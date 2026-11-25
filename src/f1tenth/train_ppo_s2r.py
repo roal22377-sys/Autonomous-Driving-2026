@@ -166,6 +166,10 @@ def get_args():
     p.add_argument('--short_eval', type=int, default=0,
                    help='evaluate the held-out short courses (Rand3xx, _w301; caps 8 / 5) at every evaluation and only '
                         'save a model at least as good there as IL (one run of slack)')
+    p.add_argument('--lost_eval', type=int, default=0,
+                   help='plan B: also report the held-out short courses (caps 8 / 5) and the eval tracks at cap 5 with '
+                        'the localization lost for the whole run (LiDAR only; F1_LOC_LOST=1). Report only, no gate. '
+                        'IL 13 round 3: 53 % short / 9 %% eval at cap 8')
     p.add_argument('--track_focus', type=float, default=3.0,
                    help='training track weight = 1 + this x the track\'s recent failure rate (0 = uniform)')
     p.add_argument('--focus_by_group', type=int, default=0,
@@ -250,7 +254,8 @@ def get_args():
     return args
 
 
-OVERRIDABLE = {'sim2real': None, 'speed_limit': {'range', 'uncapped_prob', 'nominal'}}
+OVERRIDABLE = {'sim2real': None, 'speed_limit': {'range', 'uncapped_prob', 'nominal'},
+               'track_preview': {'noise'}}     # simulated localization error only (not what the policy observes)
 
 
 def merge_sim_override(il_task, override, save_dir):
@@ -319,6 +324,8 @@ def base_track_weights(args):
     '''{track basename: weight} so that the open-space training tracks get --open_train_share of the episodes'''
     reg = [os.path.basename(t) for t in training_tracks(False)]
     base = {n: 1.0 for n in reg}
+    if args.real_train_share > 0 and not args.real_tracks:
+        raise SystemExit('--real_train_share needs --real_tracks')
     rest = 1.0 - args.open_train_share - args.real_train_share - args.short_share     # share of the regular tracks
     if rest <= 0:
         raise SystemExit('--open_train_share + --real_train_share + --short_share must stay below 1')
@@ -458,6 +465,17 @@ def main():
             raise FileNotFoundError('no held-out short courses: run `python -m utils.track_short --random 8 --seeds 3` first')
     short_eval = lambda: IL.evaluate(eval_args, policy(), short_tracks_eval, 'eval', settings=IL.SHORT_SETTINGS)
 
+    def lost_eval():
+        '''LiDAR-only fallback of a preview policy: (short-course success, eval-track success at cap 5)'''
+        from utils.track_short import short_tracks
+        os.environ['F1_LOC_LOST'] = '1'          # read by utils/preview.LocalizationNoise in the eval workers
+        try:
+            ls = IL.evaluate(eval_args, policy(), short_tracks(holdout=True), 'eval', settings=IL.SHORT_SETTINGS)[0]
+            le = IL.evaluate(eval_args, policy(), eval_tracks, 'eval', settings=((5.0, 'center'),))[0]
+        finally:
+            os.environ.pop('F1_LOC_LOST', None)
+        return ls, le
+
     resume_path = f'{args.save_dir}/checkpoint/resume.pt'
     state = None
     if args.resume:
@@ -487,6 +505,10 @@ def main():
             r.mean, r.var, r.count = state[key]
         il_succ, il_lap, il_res, il_worst, il_open = (state['il'][k] for k in ('succ', 'lap', 'res', 'worst', 'open'))
         il_short, il_short_res = state['il'].get('short', float('nan')), state['il'].get('short_res', [])
+        if args.short_eval and not il_short_res:
+            # the actor is the resumed PPO policy now: it must not become the IL baseline (11/25 review)
+            raise SystemExit('--resume with --short_eval: the stopped run has no IL short-course baseline; '
+                             'resume without --short_eval or start a new run')
         best, log = state['best'], state['log']
         np.random.set_state(state['np_rng'])
         torch.set_rng_state(state['torch_rng'])
@@ -514,6 +536,8 @@ def main():
             raise SystemExit(f'--baseline_from {args.baseline_from}: not comparable ({diff}); evaluate the IL baseline again (drop the option)')
         il_succ, il_lap, il_res, il_worst, il_open = (src['il'][k] for k in ('succ', 'lap', 'res', 'worst', 'open'))
         il_short, il_short_res = src['il'].get('short', float('nan')), src['il'].get('short_res', [])
+        if src['il'].get('short_tracks') != [os.path.basename(t) for t in short_tracks_eval]:
+            il_short, il_short_res = float('nan'), []          # other short courses: measured again below
         if (args.worst_eval and not np.isfinite(il_worst)) or (args.open_eval and not np.isfinite(il_open)):
             raise SystemExit(f'--baseline_from {args.baseline_from}: its worst-case / open-space baseline is missing')
         cprint(f'[baseline] IL evaluation reused from {args.baseline_from}', color='cyan')
@@ -588,7 +612,7 @@ def main():
                   **(dict(ccritic=ccritic.state_dict(), opt_ccritic=opt_ccritic.state_dict()) if ccritic is not None else {}),
                   priv_rms=(priv_rms.mean, priv_rms.var, priv_rms.count), ret_rms=(ret_rms.mean, ret_rms.var, ret_rms.count),
                   il=dict(succ=il_succ, lap=il_lap, res=il_res, worst=il_worst, open=il_open, short=il_short,
-                          short_res=il_short_res),
+                          short_res=il_short_res, short_tracks=[os.path.basename(t) for t in short_tracks_eval]),
                   best=best, log=log, update=update, total=total, actor_start=actor_start, bc_boost=bc_boost,
                   crash_cost=crash_cost,
                   done_stats=done_stats[-200:], tstat=tstat, np_rng=np.random.get_state(), torch_rng=torch.get_rng_state())
@@ -791,6 +815,11 @@ def main():
                 sh_gain = IL.paired_gain(sh_res, il_short_res, IL.SHORT_SETTINGS[:1])[0]
                 row.update(short=sh, short_lap=sh_lap, short_gain=sh_gain)
             better = cand and worst_ok and open_ok and short_ok
+            if args.lost_eval and gates:
+                lost_s, lost_e = lost_eval()
+                row.update(lost_short=lost_s, lost_eval=lost_e)
+                cprint(f'[localization lost @ update {update}] LiDAR only: short courses {lost_s*100:.1f}%, '
+                       f'eval tracks at cap 5 {lost_e*100:.1f}%', color='cyan')
             if args.real_tracks:
                 rs, rl, rres = IL.evaluate(eval_args, policy(), [os.path.abspath(t) for t in args.real_tracks], 'eval',
                                            settings=((8.0, 'center'), (4.0, 'center')))

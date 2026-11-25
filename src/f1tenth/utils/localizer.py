@@ -207,6 +207,8 @@ class ScanLocalizer:
         if self.pose is None:
             return None, False, {}
         odom = np.array(odom, float)
+        if not np.all(np.isfinite(odom)):           # a broken odom message: no motion assumed for this scan
+            odom = self.last_odom if self.last_odom is not None else np.zeros(3)
         pred = self.pose if self.last_odom is None else compose(self.pose, relative(self.last_odom, odom))
         self.last_odom = odom
         src = self.points(ranges, angles)
@@ -268,30 +270,53 @@ class CarPreview:
         car side of plan B: localization on the course map + the track preview features (utils/preview.py),
         built exactly like the simulator's (utils/env.py). One per run.
 
-        course_npz  the course from tools/map_to_track.py (map frame), in the driving direction; if the car
-                    stands the other way round, <name>_rev.npz is used (and the switch is reported)
+        course_npz  the course from tools/map_to_track.py (map frame); <name>_rev.npz (the other direction) is
+                    loaded too. The direction is chosen from the car's heading at every (re)start of the
+                    localization and switched while driving if the car heads against the race line for
+                    REV_SCANS scans in a row (11/25: carried around before the start, the car once started
+                    "facing the other way" and kept the wrong direction after it was put down at the start line)
         laser_x     base_link -> laser on the car (bringup_launch.py: 0.13 m)
         lidar_pos_offset  the simulator's pose -> laser (dynamic.yaml: 0.17 m): the preview uses the same reference point
     '''
+    REV_SCANS = 10          # 0.25 s heading > REV_ANGLE off the race line -> the other direction
+    REV_ANGLE = 2.0         # [rad] (115 deg)
 
     def __init__(self, course_npz, map_dir, preview_cfg, laser_x=0.13, lidar_pos_offset=0.17, log=print, **loc_cfg):
         from utils.preview import TrackPreview
         self.log = log
         self.cfg = preview_cfg
-        self.course = course_npz
         self.loc = ScanLocalizer(map_dir, laser_x=laser_x, **loc_cfg)
         self.shift = float(laser_x) - float(lidar_pos_offset)      # base_link -> sim pose reference, along x
-        self.tp = TrackPreview(np.asarray(np.load(course_npz)['raceline'], float), preview_cfg)
+        other = course_npz[:-8] + '.npz' if course_npz.endswith('_rev.npz') else course_npz[:-4] + '_rev.npz'
+        self.tps = {c: TrackPreview(np.asarray(np.load(c)['raceline'], float), preview_cfg)
+                    for c in (course_npz, other) if os.path.exists(c)}
+        self.other = {course_npz: other, other: course_npz}
+        self.course, self.tp = course_npz, self.tps[course_npz]
         self.started = False
+        self.hint = None                # race-line index of the last valid pose (projection stays in this corridor)
+        self.was_valid = True
+        self.rev = 0
         self.n, self.n_valid = 0, 0
 
     def ref_pose(self, pose):
         c, s = np.cos(pose[2]), np.sin(pose[2])
         return pose[0] + self.shift * c, pose[1] + self.shift * s, pose[2]
 
+    def orient(self, ref):
+        '''pick the course direction the car faces at ref (visible race line); returns a message or None'''
+        self.hint = self.visible_index(ref)
+        f = self.tp.features(*ref, None, True, hint=self.hint)
+        if abs(f[1]) <= np.pi / 2:
+            return None
+        other = self.other[self.course]
+        if other not in self.tps:
+            return f'the car faces against {os.path.basename(self.course)} and {other} does not exist'
+        self.course, self.tp = other, self.tps[other]
+        self.hint = self.visible_index(ref)
+        return f'car faces the other way: using {os.path.basename(other)}'
+
     def start(self, ranges, angles, odom):
         '''global start along the course; returns (ok, message)'''
-        from utils.preview import TrackPreview
         p, res, ex, alt = self.loc.global_init(ranges, angles, course_candidates(self.course), odom)
         if p is None:
             return False, 'localization: no start pose found (no candidate matched the scan)'
@@ -300,18 +325,27 @@ class CarPreview:
                            'explain the scan about equally: move the car where it sees a corner')
         if not self.loc.valid:
             return False, f'localization: no reliable start pose (residual {res*100:.1f} cm, {ex*100:.0f}% of the scan on the map)'
-        f = self.tp.features(*self.ref_pose(p), None, True)
         msg = (f'localization: start at x {p[0]:.2f} y {p[1]:.2f} yaw {np.degrees(p[2]):.0f} deg (residual {res*100:.1f} cm, '
                f'{ex*100:.0f}% of the scan on the map)')
-        if abs(f[1]) > np.pi / 2:
-            rev = self.course[:-4] + '_rev.npz' if not self.course.endswith('_rev.npz') else self.course[:-8] + '.npz'
-            if not os.path.exists(rev):
-                return False, msg + f'; the car faces against {os.path.basename(self.course)} and {rev} does not exist'
-            self.course = rev
-            self.tp = TrackPreview(np.asarray(np.load(rev)['raceline'], float), self.cfg)
-            msg += f'; car faces the other way: using {os.path.basename(rev)}'
+        note = self.orient(self.ref_pose(p))
+        if note is not None and 'does not exist' in note:
+            return False, msg + '; ' + note
         self.started = True
-        return True, msg
+        self.was_valid = True
+        return True, msg + ('; ' + note if note else '')
+
+    def visible_index(self, ref):
+        '''nearest race-line point the car can see (no map wall on the straight line to it): next to a thin barrier
+        the other corridor's line (driven the other way) can be nearer than this corridor's (11/25 review)'''
+        d = np.hypot(self.tp.xy[:, 0] - ref[0], self.tp.xy[:, 1] - ref[1])
+        for i in np.argsort(d)[:200]:
+            if d[i] > 3.0:
+                break
+            n = max(int(d[i] / 0.05), 2)
+            seg = np.linspace(ref[:2], self.tp.xy[i], n)
+            if np.all(self.loc.tree.query(seg)[0] > 0.06):
+                return int(i)
+        return int(np.argmin(d))
 
     def features(self, ranges, angles, odom, speed_cap=None):
         '''-> (preview features, base_link pose or None, valid, info)'''
@@ -320,4 +354,21 @@ class CarPreview:
         self.n_valid += int(bool(valid))
         if pose is None:
             return self.tp.features(0, 0, 0, None, False), None, False, info
-        return self.tp.features(*self.ref_pose(pose), speed_cap, valid), pose, valid, info
+        ref = self.ref_pose(pose)
+        if valid and (self.hint is None or not self.was_valid):     # (re)found: direction and line again
+            note = self.orient(ref)
+            if note:
+                info['switched'] = note
+        self.was_valid = bool(valid)
+        f = self.tp.features(*ref, speed_cap, valid, hint=self.hint)
+        if valid:
+            self.hint = self.tp.last_i
+            self.rev = self.rev + 1 if abs(f[1]) > self.REV_ANGLE else 0
+            if self.rev >= self.REV_SCANS:                          # heading against the line: other direction
+                self.rev = 0
+                note = self.orient(ref)
+                if note:
+                    info['switched'] = note
+                    f = self.tp.features(*ref, speed_cap, valid, hint=self.hint)
+                    self.hint = self.tp.last_i
+        return f, pose, valid, info

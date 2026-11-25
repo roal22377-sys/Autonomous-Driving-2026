@@ -128,6 +128,13 @@ def driving_table(dfs):
                                'pose.pose.position.y': 'y', 'yaw': 'yaw'})
     base = attach(base, dfs.get('/sensors/core'), {'state.speed': 'erpm', 'state.current_motor': 'motor_current',
                                                    'state.voltage_input': 'battery_v'})
+    # plan B: agent_node's localization on the course map (/loc_pose: frame_id map / map_lost, z = ICP residual)
+    loc = dfs.get('/loc_pose')
+    if loc is not None and 'pose.orientation.w' in loc:
+        loc = loc.assign(loc_yaw=2 * np.arctan2(loc['pose.orientation.z'], loc['pose.orientation.w']),
+                         loc_valid=(loc.get('header.frame_id', '') == 'map').astype(float))
+        base = attach(base, loc, {'pose.position.x': 'loc_x', 'pose.position.y': 'loc_y', 'loc_yaw': 'loc_yaw',
+                                  'pose.position.z': 'loc_res', 'loc_valid': 'loc_valid'}, tolerance=0.1)
 
     # mux: keyboard wins while it is publishing, otherwise the agent
     base.insert(1, 'mode', np.where(base['key_speed'].notna(), 'manual',

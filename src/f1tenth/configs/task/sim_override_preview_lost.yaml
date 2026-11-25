@@ -1,0 +1,17 @@
+# PPO simulator override for preview policies (plan B, train_ppo_s2r.py --sim_override): longer and more frequent
+# localization losses than IL 13 was trained with. 11/25: IL 13 (round 3) with the localization lost for a whole run
+# finished 9 % of the eval tracks at cap 8 and 53 % of the short courses (93 % / 97 % with it) -> the policy must
+# also drive on LiDAR alone. Only the simulated error changes, not what the policy observes.
+track_preview:
+  noise:
+    xy_std: 0.05              # [m] slowly wandering offset (as IL 13)
+    yaw_std_deg: 1.0
+    corr_time: 0.5            # [s]
+    jitter_xy: 0.01           # [m] per step
+    jump_prob: 0.0005         # per step: a 0.3 m jump for 1 s
+    jump_std: 0.3
+    jump_time: 1.0
+    lost_episode_prob: 0.35   # was 0.15
+    lost_rate: 0.08           # [1/s] was 0.05
+    lost_len: [0.5, 8.0]      # [s] was [0.5, 3.0]
+    lost_full_prob: 0.10      # new: whole episode without localization (LiDAR only)

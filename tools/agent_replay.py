@@ -33,9 +33,15 @@ class _Param:
 
 class _Logger:
     def __init__(self):
-        self.last = {}
+        self.last, self.sev = {}, {}
 
     def _p(self, lvl, msg, throttle_duration_sec=None, **_):
+        # like rclpy (Foxy): one call site must always log at the same severity, else ValueError
+        import inspect
+        f = inspect.currentframe().f_back.f_back
+        site = (f.f_code.co_filename, f.f_lineno)
+        if self.sev.setdefault(site, lvl) != lvl:
+            raise ValueError(f'Logger severity cannot be changed between calls ({site[0]}:{site[1]})')
         if throttle_duration_sec:
             t = time.monotonic()
             if t - self.last.get(msg[:40], -1e9) < throttle_duration_sec:
@@ -120,6 +126,7 @@ def main():
     ap.add_argument('--set', nargs='*', default=[], help='override parameters, e.g. algo_idx=13 speed_limit=3')
     ap.add_argument('--t0', type=float, default=-np.inf)
     ap.add_argument('--t1', type=float, default=np.inf)
+    ap.add_argument('--blackout', default=None, help='t0,t1: feed empty scans in this interval (localization lost)')
     a = ap.parse_args()
     from ruamel.yaml import YAML
     params = dict(YAML().load(open(a.config))['agent_node']['ros__parameters'])
@@ -134,6 +141,21 @@ def main():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     mod.TELEOP_HOLD = -1.0
+
+    class SimClock:
+        '''the node's time.monotonic() follows the log (+ the node's own processing time), so its timeouts,
+        throttles and the lost-stop timer behave as on the car; everything else is the real time module'''
+        def __init__(self):
+            self.now = 0.0
+
+        def monotonic(self):
+            return self.now + (time.perf_counter() - self.t_call)
+
+        def __getattr__(self, k):
+            return getattr(time, k)
+    clock = SimClock()
+    clock.t_call = time.perf_counter()
+    mod.time = clock
     node = mod.AgentNode()
     # log
     import pandas as pd
@@ -154,6 +176,7 @@ def main():
     odom_cb = node.subs.get('odom') or node.subs.get(params.get('odom_topic', 'odom'))
     scan_cb = node.subs[params.get('scan_topic', 'scan')]
     for k, t in enumerate(ts):
+        clock.now, clock.t_call = float(t), time.perf_counter()
         if odom_cb is not None:
             o = Odom()
             o.pose.pose.position.x, o.pose.pose.position.y = float(Q(t, d['x'])), float(Q(t, d['y']))
@@ -165,12 +188,23 @@ def main():
         s.header.stamp = float(t)
         rr = R[k].astype(float)
         rr[~np.isfinite(rr)] = np.inf
+        if a.blackout and float(a.blackout.split(',')[0]) <= t < float(a.blackout.split(',')[1]):
+            rr[:] = np.inf
         s.ranges = list(rr)
         t0 = time.perf_counter()
         scan_cb(s)
         T.append(time.perf_counter() - t0)
     drv = node.pubs[params.get('drive_topic', 'drive')].msgs
     T = np.array(T)
+    if a.blackout and drv:
+        b0, b1 = (float(x) for x in a.blackout.split(','))
+        tt = np.array([m.header.stamp for m in drv])
+        vv = np.array([m.drive.speed for m in drv])
+        for lo, hi, lab in ((b0 - 1, b0, 'before'), (b0, b0 + 0.3, 'first 0.3 s'), (b0 + 0.35, b1, 'rest of the blackout'),
+                            (b1, b1 + 2, '2 s after')):
+            m = (tt >= lo) & (tt < hi)
+            if m.any():
+                print(f'[replay] blackout {lab}: commanded speed {vv[m].min():.2f}..{vv[m].max():.2f} m/s')
     print(f'\n[replay] {len(ts)} scans -> {len(drv)} drive commands; scan callback median {np.median(T)*1e3:.1f} ms, '
           f'p99 {np.percentile(T, 99)*1e3:.1f} ms, max {T.max()*1e3:.0f} ms (this PC; first scan includes the start search)')
     if drv:

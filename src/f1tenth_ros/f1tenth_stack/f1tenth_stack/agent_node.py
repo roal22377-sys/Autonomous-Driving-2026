@@ -84,6 +84,10 @@ class AgentNode(Node):
     self.declare_parameter('map_dir', '')         # e.g. maps/run_1126_1030 (map.yaml / map.pgm of the same run)
     self.declare_parameter('laser_x', 0.13)       # [m] base_link -> laser (bringup_launch.py static transform)
     self.declare_parameter('loc_stride', 3)       # every n-th beam for the scan matching (4 if a step takes > 10 ms)
+    # localization lost longer than this [s] -> speed 0 (brake, the model keeps steering) until it is valid again.
+    # The 11/25 preview model drives poorly on LiDAR alone (IL 13 r3, whole run without localization: 9 % of the
+    # eval tracks at cap 8, 53 % of the short courses). <= 0: keep driving
+    self.declare_parameter('lost_stop', 0.3)
 
     self.scan_topic = self.get_parameter('scan_topic').value
     self.drive_topic = self.get_parameter('drive_topic').value
@@ -198,6 +202,9 @@ class AgentNode(Node):
                              f'{time.monotonic() - t0:.1f} s); the start pose is searched at the first scan')
       self.loc_pub = self.create_publisher(PoseStamped, 'loc_pose', 10)
       self.loc_last_report = time.monotonic()
+      self.start_try = -1e9               # last start search (they take 0.3 s+ each: at most every 0.5 s)
+      self.lost_since = None
+      self.lost_stop = float(self.get_parameter('lost_stop').value)
 
     # load algorithm
     try:
@@ -241,8 +248,10 @@ class AgentNode(Node):
     self.odom_time = time.monotonic()
     if self.carpv is not None:
       q = odom_msg.pose.pose.orientation
-      self.odom_pose = (odom_msg.pose.pose.position.x, odom_msg.pose.pose.position.y,
-                        float(np.arctan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))))
+      pose = (odom_msg.pose.pose.position.x, odom_msg.pose.pose.position.y,
+              float(np.arctan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))))
+      if np.all(np.isfinite(pose)):          # a broken message must not reach the localization
+        self.odom_pose = pose
 
   def scanCallback(self, scan_msg: LaserScan):
     # the model needs the current speed; without a fresh reading, don't drive
@@ -290,6 +299,10 @@ class AgentNode(Node):
     if self.speed_limit > 0:
       # cap after unnormalizing, so the model's output mapping stays as trained
       action[1] = min(action[1], self.speed_limit)
+    # plan B: localization lost too long -> brake (speed 0), keep the model's steering
+    if self.carpv is not None and self.lost_stop > 0 and self.lost_since is not None \
+            and time.monotonic() - self.lost_since > self.lost_stop:
+      action[1] = 0.0
     # starting from rest: the VESC can't start the motor with a small command (same as utils/env.py)
     action[1] = apply_start_kick(action[1], self.odom_speed, self.kick_cfg)
     
@@ -334,15 +347,23 @@ class AgentNode(Node):
     ranges = np.asarray(scan_msg.ranges, np.float64)
     angles = scan_msg.angle_min + np.arange(len(ranges)) * scan_msg.angle_increment
     if not self.carpv.started:
+      if time.monotonic() - self.start_try < 0.5:
+        return None
       t0 = time.monotonic()
       ok, msg = self.carpv.start(ranges, angles, self.odom_pose)
-      (self.get_logger().info if ok else self.get_logger().error)(f'[preview] {msg} ({time.monotonic() - t0:.2f} s)')
-      if not ok:
-        return None
+      self.start_try = time.monotonic()
+      # one call site per severity: rclpy (Foxy) raises if the same line logs at another severity (11/25 review)
+      if ok:
+        self.get_logger().info(f'[preview] {msg} ({time.monotonic() - t0:.2f} s)')
+      else:
+        self.get_logger().error(f'[preview] {msg} ({time.monotonic() - t0:.2f} s)', throttle_duration_sec=2.0)
+      return None             # this scan is old now (the search took a while): drive from the next one
     t0 = time.monotonic()
     cap = self.speed_limit if self.speed_limit > 0 else None
     feat, pose, valid, info = self.carpv.features(ranges, angles, self.odom_pose, cap)
     dt = time.monotonic() - t0
+    if info.get('switched'):
+      self.get_logger().warn(f"[preview] {info['switched']}")
     if pose is not None:
       m = PoseStamped()
       m.header.stamp = scan_msg.header.stamp
@@ -351,8 +372,13 @@ class AgentNode(Node):
       m.pose.position.z = float(info.get('res', 0.0)) if np.isfinite(info.get('res', np.inf)) else -1.0   # ICP residual [m]
       m.pose.orientation.z, m.pose.orientation.w = float(np.sin(pose[2] / 2)), float(np.cos(pose[2] / 2))
       self.loc_pub.publish(m)
+    if valid:
+      self.lost_since = None
+    elif self.lost_since is None:
+      self.lost_since = time.monotonic()
     if not valid:
-      self.get_logger().warn('[preview] localization lost: driving on LiDAR only (preview valid = 0)',
+      self.get_logger().warn('[preview] localization lost' + (f': stopping after {self.lost_stop:.1f} s'
+                             if self.lost_stop > 0 else ': driving on LiDAR only (preview valid = 0)'),
                              throttle_duration_sec=1.0)
     if time.monotonic() - self.loc_last_report > 5.0:
       self.loc_last_report = time.monotonic()

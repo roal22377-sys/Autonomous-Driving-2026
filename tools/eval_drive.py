@@ -118,6 +118,25 @@ def evaluate(log_dir):
     return rows
 
 
+def loc_summary(log_dir):
+    '''plan B runs (agent_preview.yaml): how often the car's localization was valid while driving itself'''
+    f = os.path.join(log_dir, 'driving.csv')
+    if not os.path.exists(f):
+        return
+    d = pd.read_csv(f)
+    if 'loc_valid' not in d or not d['loc_valid'].notna().any():
+        return
+    d = d[(d['mode'] == 'auto') & d['loc_valid'].notna()]
+    if d.empty:
+        return
+    v = d['loc_valid'].values > 0.5
+    edges = np.diff(np.r_[0, (~v).astype(int), 0])
+    runs = (np.nonzero(edges == -1)[0] - np.nonzero(edges == 1)[0]) if (~v).any() else np.array([0])
+    dt = float(np.median(np.diff(d['t']))) if len(d) > 1 else 0.025
+    print(f'   localization while driving: valid {v.mean()*100:.1f}% of {len(v)} scans, {int((edges == 1).sum())} lost '
+          f'stretches (longest {runs.max()*dt:.2f} s), ICP residual median {np.nanmedian(d["loc_res"])*100:.1f} cm')
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('log_dirs', nargs='+')
@@ -133,6 +152,7 @@ def main():
                   f"   {r['front_min']:5.2f}    {r['side_min']:5.2f}    {r['side_p10']:5.2f}  |"
                   f"  {r['weave_hz']:4.2f}  {r['weave_rms']:.3f} {r['steer_rate']:5.2f} {r['full_lock_pct']:5.1f} | {r['end']}")
         allrows += rows
+        loc_summary(ld)
     if allrows:
         df = pd.DataFrame(allrows)
         w = df.dur_s / df.dur_s.sum()
