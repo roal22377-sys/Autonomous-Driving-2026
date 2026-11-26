@@ -49,6 +49,19 @@ def main():
     if not map_dir:
         raise SystemExit(f'{yaml_rel} has no map_dir (map the course first: tools/map_session.sh)')
     walls, near_wall = read_walls(os.path.join(REPO, map_dir))
+    course = prm.get('course')
+    center = None
+    if course and os.path.exists(os.path.join(REPO, course)):
+        c = np.asarray(np.load(os.path.join(REPO, course))['centerline'], float)
+        t = np.roll(c, -1, 0) - np.roll(c, 1, 0)
+        center = np.column_stack([c, np.arctan2(t[:, 1], t[:, 0])])      # x, y, driving direction of the course
+
+    def course_heading(x, y):
+        '''driving direction of the course at the centerline point nearest (x, y) (a click without a drag)'''
+        if center is None:
+            return 0.0
+        i = int(np.argmin(np.hypot(center[:, 0] - x, center[:, 1] - y)))
+        return float(center[i, 2])
 
     import matplotlib
     matplotlib.use('QtAgg')
@@ -97,8 +110,8 @@ def main():
     car = {'arrow': None, 'hint': None}
     drag = {'p0': None, 'pose': None}
     info = fig.text(0.01, 0.01, '', fontsize=9, family='monospace')
-    fig.text(0.01, 0.97, 'Set the pose (car standing still, TELEOP s): press where the car is, drag toward its heading, '
-             'release -> Enter = send, Esc = cancel', fontsize=9)
+    fig.text(0.01, 0.97, 'Set the pose (car standing still, TELEOP s): CLICK where the car is (heading = course direction) '
+             'or press-drag toward its heading -> Enter = send, Esc = cancel', fontsize=10, color='tab:purple')
 
     def arrow(p, color, old):
         if old is not None:
@@ -137,10 +150,10 @@ def main():
         dx, dy = e.xdata - x0, e.ydata - y0
         drag['p0'] = None
         if np.hypot(dx, dy) < 0.15:
-            ax.set_xlabel('drag a little: press where the car is, release in the direction it faces')
-            fig.canvas.draw_idle()
-            return
-        drag['pose'] = np.array([x0, y0, np.arctan2(dy, dx)])
+            # a plain click: heading = the course's driving direction there (the direction the map was driven)
+            drag['pose'] = np.array([x0, y0, course_heading(x0, y0)])
+        else:
+            drag['pose'] = np.array([x0, y0, np.arctan2(dy, dx)])
         show_hint()
 
     def send(p):
