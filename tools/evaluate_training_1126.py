@@ -13,7 +13,9 @@ def main():
     p.add_argument('--normalizer_model')
     p.add_argument('--workers',type=int,default=4)
     p.add_argument('--output',help='separate report filename for a subset evaluation')
-    p.add_argument('--caps',type=float,nargs='+',help='diagnostic cap override, centerline starts only')
+    caps=p.add_mutually_exclusive_group()
+    caps.add_argument('--caps',type=float,nargs='+',help='diagnostic cap override, centerline starts only')
+    caps.add_argument('--cycle_caps',type=float,nargs='+',help='one center start per track, cycling caps as in PPO low-cap validation')
     p.add_argument('--seeds',type=int,nargs='+',default=[7])
     p.add_argument('--families',nargs='+',default=['regular','short','hall','real','2025','open'])
     cli=p.parse_args()
@@ -52,16 +54,20 @@ def main():
                          ((8.,'center'),(4.,'center')))})
     if cli.caps:
         sets={g:(tracks,tuple((cap,'center') for cap in cli.caps)) for g,(tracks,_) in sets.items()}
+    elif cli.cycle_caps:
+        sets={g:(tracks,((tuple(cli.cycle_caps),'center'),)) for g,(tracks,_) in sets.items()}
     out=dict(model=cli.model,tag=cli.tag,seeds=cli.seeds,checkpoint_sha256=hashlib.sha256(ckpath.read_bytes()).hexdigest(),
              dynamics_sha256=hashlib.sha256(Path('configs/task/dynamic.yaml').read_bytes()).hexdigest(),
              localization_forced_lost=os.environ.get('F1_LOC_LOST')=='1',
              diagnostic_caps=cli.caps,
+             diagnostic_cycle_caps=cli.cycle_caps,
              config=str(args.task_config),families={},notes='Real and 2025 geometries are in training; hall validation excludes 2025.')
     dest=Path('results/analysis1126');dest.mkdir(exist_ok=True)
     target=dest/(cli.output or f'{cli.model.replace("/","_")}_{cli.tag}_seeds{"-".join(map(str,cli.seeds))}.json')
     for name in cli.families:
         tracks,settings=sets[name]
-        jobs=[(str(Path(t).resolve()),policy,'eval',seed+i,cap,start)
+        jobs=[(str(Path(t).resolve()),policy,'eval',seed+i,
+               cap[i%len(cap)] if isinstance(cap,(tuple,list)) else cap,start)
               for seed in cli.seeds for cap,start in settings for i,t in enumerate(sorted(tracks))]
         res=IL.run_pool(IL.eval_worker,jobs,min(cli.workers,len(jobs)),len(jobs),name,'episodes')
         complete=[r for r in res if r[1]]
