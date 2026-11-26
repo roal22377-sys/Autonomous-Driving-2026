@@ -50,6 +50,7 @@ def main():
     p.add_argument('--recovery', choices=['baseline', 'temporal'], default='baseline')
     p.add_argument('--search-delay', type=float, default=.6,
                    help='Simulation-only delay before a temporal global-search result is available')
+    p.add_argument('--recovery-hypotheses', type=int, default=4)
     cli = p.parse_args()
     if not 0. <= cli.return_confirm <= 5.:
         raise ValueError('return-confirm must be between0 and5 seconds')
@@ -158,7 +159,8 @@ def main():
                         lidar_pos_offset=laser, log=lambda *_: None)
         if cli.recovery == 'temporal':
             from temporal_recovery_localizer_1126 import TemporalRecoveryLocalizer
-            pv.loc = TemporalRecoveryLocalizer(str(map_dir), laser_x=laser, search_delay=cli.search_delay)
+            pv.loc = TemporalRecoveryLocalizer(str(map_dir), laser_x=laser, search_delay=cli.search_delay,
+                                               max_hypotheses=cli.recovery_hypotheses)
         assert len(pv.tps) == 2
         state = env.vehicle_state()
         odom = np.asarray([state[0], state[1], state[4]], float)
@@ -284,13 +286,14 @@ def main():
                 'Original simulator observation augmentation is retained; no extra raycasts/noise draws for policy sensors.'))
         if cli.recovery == 'temporal':
             report['temporal_recovery'] = dict(search_delay_seconds=cli.search_delay,
+                max_hypotheses=pv.loc.max_hypotheses,
                 margin=pv.loc.margin, confirmation_seconds=pv.loc.confirmation,
                 events=pv.loc.events,
                 post_decision_truth_annotations=recovery_event_truth,
                 tracking_runtime_p99_ms=(float(np.quantile(pv.loc.tracking_runtime_ms,.99))
                                          if pv.loc.tracking_runtime_ms else None),
                 implementation_sha256=sha(ROOT/'tools/temporal_recovery_localizer_1126.py'),
-                qualification='Experimental simulation-only replacement after loss. Search latency is fixed and explicitly modeled; measured compute overruns are logged. Capture-to-result odometry compensation, then current-scan temporal confirmation; no past-scan replay. Four retained modes do not prove global uniqueness. During recovery raw odometry is used without the production skid extrapolator. Not ROS, real-time or vehicle qualification.')
+                qualification='Experimental simulation-only replacement after loss. Search latency is fixed and explicitly modeled; measured compute overruns are logged. Capture-to-result odometry compensation, then current-scan temporal confirmation; no past-scan replay. A pruned mode set does not prove global uniqueness. During recovery raw odometry is used without the production skid extrapolator. Not ROS, real-time or vehicle qualification.')
         (dest / 'report.json').write_text(json.dumps(report, indent=2, allow_nan=False) + '\n')
         print(json.dumps(report), flush=True)
     finally:

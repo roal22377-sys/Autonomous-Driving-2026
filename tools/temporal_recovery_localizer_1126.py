@@ -2,7 +2,7 @@
 
 Normal tracking delegates to the unchanged ScanLocalizer. After loss, a full
 search is modeled as a delayed result while the vehicle continues on fallback.
-Four globally ranked modes are then checked against subsequent scans. Fixed
+A bounded set of globally ranked modes is checked against subsequent scans. Fixed
 latency is an experimental assumption, not measured real-time scheduling.
 """
 import time
@@ -13,11 +13,14 @@ from analyze_localizer_hypotheses_1126 import rank_candidates
 
 
 class TemporalRecoveryLocalizer(ScanLocalizer):
-    def __init__(self, *args, search_delay=.6, margin=.05, confirmation=.5, **kwargs):
+    def __init__(self, *args, search_delay=.6, margin=.05, confirmation=.5, max_hypotheses=4, **kwargs):
         super().__init__(*args, **kwargs)
         if not all(np.isfinite(x) and x >= 0 for x in (search_delay, margin, confirmation)):
             raise ValueError('Invalid temporal recovery settings')
         self.search_delay, self.margin, self.confirmation = search_delay, margin, confirmation
+        if not isinstance(max_hypotheses, int) or max_hypotheses < 1:
+            raise ValueError('max_hypotheses must be a positive integer')
+        self.max_hypotheses = max_hypotheses
         self.now = 0.
         self.recovering = False
         self.pending = None
@@ -38,10 +41,10 @@ class TemporalRecoveryLocalizer(ScanLocalizer):
         start = time.perf_counter()
         ranked, accepted = rank_candidates(self, ranges, angles, initial)
         runtime_ms = (time.perf_counter()-start)*1000
-        self.pending = dict(release=self.now+self.search_delay, odom=odom.copy(), rows=ranked[:4])
+        self.pending = dict(release=self.now+self.search_delay, odom=odom.copy(), rows=ranked[:self.max_hypotheses])
         self.events.append(dict(kind='search', time=self.now, release_time=self.pending['release'],
             full_seed_count=len(initial), accepted_seeds=accepted, distinct_modes=len(ranked),
-            retained_modes=len(ranked[:4]), actual_compute_ms=runtime_ms,
+            retained_modes=len(ranked[:self.max_hypotheses]), actual_compute_ms=runtime_ms,
             initial_modes=ranked,
             compute_exceeded_assumed_delay=runtime_ms > self.search_delay*1000))
 
