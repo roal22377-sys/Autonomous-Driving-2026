@@ -40,7 +40,8 @@ def main():
     assert before==manifest['cache_sha256']
     with np.load(original/'replay_cache.npz',allow_pickle=False) as z:
         old = {k:z[k].copy() for k in z.files}
-    args = IL.get_args(['--task_config','results/imitation/1607/backup/f1tenth.yaml'])
+    task_config = Path('results/ppo_s2r/29/backup/f1tenth.yaml')
+    args = IL.get_args(['--task_config',str(task_config)])
     regular = [p for p in IL.list_variants(IL.MAPS) if IL.HOLDOUT not in p]
     training = groups_for(args,regular)
     allowed = {str(Path(p).resolve()) for paths in training.values() for p in paths}
@@ -130,6 +131,7 @@ def main():
     assert torch.isfinite(loss).item()
     assert sha(original/'replay_cache.npz')==before
     (output/'loader_audit.json').write_text(json.dumps(dict(status='passed',metadata=cache_object.metadata,
+        loader_task_config=str(task_config),loader_task_config_sha256=sha(task_config),
         normalized_loader_and_sampler_passed=True,normalization_samples_checked=4096,current_cache_unchanged=True,
         qualification='Production-loader structural check only; sampled loss is not a performance score.'),indent=2)+'\n')
     print(json.dumps({k:v for k,v in report.items() if k!='tracks'}),flush=True)
