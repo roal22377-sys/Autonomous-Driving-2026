@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Measure action drift on frozen successful old-policy trajectories; not lap evaluation."""
 import hashlib
+import argparse
 import json
 import os
 import sys
@@ -12,7 +13,16 @@ sys.path[:0] = [str(SRC), str(SRC / 'installation')]
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--updates', type=int, nargs='+', default=[10, 20, 30])
+    parser.add_argument('--output', default='results/analysis1126/ppo25_frozen_trajectory_retention_audit.json')
+    cli = parser.parse_args()
+    if any(u <= 0 for u in cli.updates) or len(set(cli.updates)) != len(cli.updates):
+        raise ValueError('Checkpoint updates must be distinct positive integers')
     os.chdir(SRC)
+    output = Path(cli.output)
+    if output.exists():
+        raise FileExistsError('Preserve prior evidence; choose a new --output')
     import numpy as np
     import torch
     import train_il_s2r as IL
@@ -25,7 +35,7 @@ def main():
     models = {'source2130_transferred': Path('results/imitation/14/checkpoint/model_init.pt'),
               'frozenIL1607': Path('results/imitation/16/checkpoint/model_round7.pt')}
     models.update({f'PPO25u{u}': Path(f'results/ppo_s2r/25/checkpoint/model_{u*44000}.pt')
-                   for u in (10, 20, 30)})
+                   for u in cli.updates})
     loaded = {}
     for name, path in models.items():
         ck = torch.load(path, map_location='cpu', weights_only=False)
@@ -82,7 +92,8 @@ def main():
         print(family, json.dumps(stats), flush=True)
     report['status'] = 'complete'
     report['decision'] = 'Use drift as one input to later retention ablation; require matched completion/pace tests before changing PPO.'
-    Path('results/analysis1126/ppo25_frozen_trajectory_retention_audit.json').write_text(json.dumps(report,indent=2)+'\n')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(report,indent=2)+'\n')
 
 
 if __name__ == '__main__':
