@@ -1,0 +1,62 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Map
+      Name: course map
+      Enabled: true
+      Alpha: 1
+      Color Scheme: map
+      Draw Behind: true
+      Topic:
+        Value: /loc_map
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/PointCloud2
+      Name: scan at localized pose
+      Enabled: true
+      Topic:
+        Value: /loc_scan
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Style: Flat Squares
+      Size (m): 0.06
+      Color Transformer: FlatColor
+      Color: 0; 200; 0
+      Alpha: 1
+      Decay Time: 0
+    - Class: rviz_default_plugins/Pose
+      Name: car pose
+      Enabled: true
+      Topic:
+        Value: /loc_pose
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Shape: Arrow
+      Color: 255; 25; 0
+      Shaft Length: 0.5
+      Shaft Radius: 0.05
+      Head Length: 0.2
+      Head Radius: 0.1
+  Global Options:
+    Fixed Frame: map
+    Background Color: 220; 220; 220
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: Current View
+      Scale: 40
+      X: 5
+      Y: 5
+  Enabled: true

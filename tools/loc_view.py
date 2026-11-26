@@ -9,6 +9,10 @@ Draws the map around the car (walls '.'), the current scan placed at the localiz
     CHECK    valid, but the scan fits worse (45-75 %; people / objects near the car also do this): look at the picture
     WRONG    < 45 % fits (the localizer's own 'lost' level): the pose is wrong -> restart the agent at the start spot
     LOST     the agent reports localization lost (it brakes after 0.3 s)
+RViz (same check, as a picture): this node also publishes the map (/loc_map, OccupancyGrid, latched) and the scan
+placed at the localized pose (/loc_scan, PointCloud2), both in frame 'map', no TF needed. On a PC with ROS 2 on the
+car's network: ROS_DOMAIN_ID=6 rviz2 -d tools/loc_view.rviz -> green scan points must lie on the black map walls.
+(/loc_pose is shown as an arrow; while lost its frame is 'map_lost' and RViz drops it.)
 If the pose is wrong at the start: press s in TELEOP, Ctrl-C the agent, put the car on the start spot (corner in
 view, nobody standing in the corridor), `tools/drive_session.sh --agent` (it searches the start pose again).
 
@@ -71,6 +75,25 @@ def read_walls(map_dir, d=0.10):
     return walls, near_wall
 
 
+def read_grid(map_dir):
+    '''map.pgm -> (resolution, origin, OccupancyGrid data rows from the lowest y: 100 wall, 0 free, -1 unknown)'''
+    meta = {}
+    for line in open(os.path.join(map_dir, 'map.yaml')):
+        if ':' in line:
+            k, v = line.split(':', 1)
+            meta[k.strip()] = v.strip()
+    res = float(meta['resolution'])
+    org = np.array([float(x) for x in meta['origin'].strip('[]').split(',')][:2])
+    raw = open(os.path.join(map_dir, meta.get('image', 'map.pgm')), 'rb').read()
+    hdr = raw.split(b'\n', 3)
+    W, H = map(int, hdr[1].split())
+    img = np.frombuffer(hdr[3][:W * H], np.uint8).reshape(H, W)[::-1]
+    occ = np.full(img.shape, -1, np.int8)
+    occ[img < 50] = 100
+    occ[img > 200] = 0
+    return res, org, occ
+
+
 def verdict(valid, ex):
     if not valid:
         return 'LOST'
@@ -106,6 +129,7 @@ def main():
     ap.add_argument('--map', default=None, help='map dir (default: map_dir of --yaml)')
     ap.add_argument('--rate', type=float, default=2.0, help='[Hz] screen refresh')
     ap.add_argument('--scale', type=float, default=0.15, help='[m] per character column')
+    ap.add_argument('--no_rviz', action='store_true', help='do not publish /loc_map and /loc_scan')
     ap.add_argument('--png', default=None, help='also save a picture of the whole map here every 2 s (needs matplotlib)')
     a = ap.parse_args()
     import rclpy
@@ -113,6 +137,9 @@ def main():
     from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
     from sensor_msgs.msg import LaserScan
     from geometry_msgs.msg import PoseStamped
+    from nav_msgs.msg import OccupancyGrid
+    from sensor_msgs.msg import PointCloud2, PointField
+    from rclpy.qos import DurabilityPolicy
     # no scipy / utils.localizer import: runs with the plain ROS python too
 
     prm = read_params(a.yaml) if os.path.exists(a.yaml) else {}
@@ -121,6 +148,7 @@ def main():
         raise SystemExit(f'no map: give --map or a --yaml with map_dir ({a.yaml})')
     laser_x = float(prm.get('laser_x', 0.13))
     walls, near_wall = read_walls(map_dir)
+    grid = read_grid(map_dir)
     state = dict(scan=None, pose=None, valid=False, t_pose=0.0, res=np.nan, last_png=0.0, ema=None)
 
     class LocView(Node):
@@ -130,6 +158,35 @@ def main():
             self.create_subscription(LaserScan, prm.get('scan_topic', 'scan'), self.on_scan, qos)
             self.create_subscription(PoseStamped, 'loc_pose', self.on_pose, 10)
             self.create_timer(1.0 / a.rate, self.draw)
+            if not a.no_rviz:
+                latched = QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST,
+                                     reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+                self.map_pub = self.create_publisher(OccupancyGrid, 'loc_map', latched)
+                self.cloud_pub = self.create_publisher(PointCloud2, 'loc_scan', 10)
+                self.publish_map()
+                self.create_timer(5.0, self.publish_map)
+
+        def publish_map(self):
+            res, org, occ = grid
+            m = OccupancyGrid()
+            m.header.frame_id = 'map'
+            m.header.stamp = self.get_clock().now().to_msg()
+            m.info.resolution = float(res)
+            m.info.width, m.info.height = int(occ.shape[1]), int(occ.shape[0])
+            m.info.origin.position.x, m.info.origin.position.y = float(org[0]), float(org[1])
+            m.info.origin.orientation.w = 1.0
+            m.data = occ.ravel().tolist()
+            self.map_pub.publish(m)
+
+        def publish_cloud(self, sw):
+            c = PointCloud2()
+            c.header.frame_id = 'map'
+            c.header.stamp = self.get_clock().now().to_msg()
+            c.height, c.width = 1, len(sw)
+            c.fields = [PointField(name=n, offset=4 * i, datatype=PointField.FLOAT32, count=1) for i, n in enumerate('xyz')]
+            c.is_bigendian, c.point_step, c.row_step, c.is_dense = False, 12, 12 * len(sw), True
+            c.data = np.column_stack([sw, np.zeros(len(sw))]).astype(np.float32).tobytes()
+            self.cloud_pub.publish(c)
 
         def on_scan(self, m):
             r = np.asarray(m.ranges, float)
@@ -155,6 +212,8 @@ def main():
                 p = state['pose']
                 sw = transform(state['scan'], p)
                 fit = near_wall(sw)
+                if not a.no_rviz:
+                    self.publish_cloud(sw)
                 ex1 = float(fit.mean()) if len(fit) else 0.0
                 k = min(1.0, 1.0 / a.rate)                         # ~1 s running mean
                 state['ema'] = ex1 if state['ema'] is None else (1 - k) * state['ema'] + k * ex1
