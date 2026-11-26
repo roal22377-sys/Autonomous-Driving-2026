@@ -12,9 +12,13 @@ def drive(job):
     import train_il_s2r as IL
     from utils.env import F1Wrapper,normalize_speed
     from utils.rule_based import RacelinePlanner
-    group,path,seed,cap,start=job;torch.set_num_threads(1);np.random.seed(seed);random.seed(seed)
+    group,path,seed,cap,start,*extra=job
+    mode=extra[0] if extra else 'eval'
+    if len(extra)>1 or mode not in ('eval','worst'):
+        raise ValueError('Expert screen expects eval or worst mode')
+    torch.set_num_threads(1);np.random.seed(seed);random.seed(seed)
     args=IL.get_args([]);args.seed=seed
-    env=F1Wrapper(args,IL.MAPS,obs_noise=True,sim_mode='eval',tracks=[path])
+    env=F1Wrapper(args,IL.MAPS,obs_noise=True,sim_mode=mode,tracks=[path])
     env.fixed_speed_cap=cap;env.start_mode=start
     try:
         env.reset(options={'track':path})

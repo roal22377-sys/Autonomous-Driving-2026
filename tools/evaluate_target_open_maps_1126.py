@@ -31,10 +31,10 @@ def worker(job):
     from evaluate_expert_1126 import drive
     row=dict(job)
     if row['controller']=='expert':
-        raw=drive(('target_open',row['path'],row['seed'],row['cap'],'center'))
+        raw=drive(('target_open',row['path'],row['seed'],row['cap'],'center',row['mode']))
         row.update(complete=raw['complete'],elapsed=raw['time'])
     else:
-        raw=IL.eval_worker((row['path'],POLICIES[row['controller']],'eval',row['seed'],row['cap'],'center'))
+        raw=IL.eval_worker((row['path'],POLICIES[row['controller']],row['mode'],row['seed'],row['cap'],'center'))
         row.update(complete=bool(raw[1]),elapsed=float(raw[2]),phases=raw[4])
     return row
 
@@ -44,6 +44,10 @@ def main():
     p.add_argument('--manifest',required=True)
     p.add_argument('--output',required=True)
     p.add_argument('--workers',type=int,default=2)
+    p.add_argument('--mode',choices=['eval','worst'],default='eval')
+    p.add_argument('--seeds',type=int,nargs='+',default=[7])
+    p.add_argument('--controllers',nargs='+',choices=['expert','440000','2200000'],
+                   default=['expert','440000','2200000'])
     cli=p.parse_args();os.chdir(SRC)
     manifest=Path(cli.manifest); generation=json.loads(manifest.read_text())
     assert generation['status']=='generated_static_checks_passed_not_applied'
@@ -56,18 +60,22 @@ def main():
         if 'sha256' in item:
             assert hashlib.sha256(Path(item['path']).read_bytes()).hexdigest()==item['sha256']
         # Same initial/noise seed for each source and all of its variants.
-        seed=7+sources.index(item['source'])
-        controllers=('expert',) if item['split']=='train' else ('expert','440000','2200000')
-        for cap in (8.,4.):
-            for controller in controllers:
-                jobs.append(dict(path=item['path'],source=item['source'],split=item['split'],
-                                 seed=seed,cap=cap,controller=controller))
+        controllers=[c for c in cli.controllers if item['split']!='train' or c=='expert']
+        for seed_base in cli.seeds:
+            seed=seed_base+sources.index(item['source'])
+            for cap in (8.,4.):
+                for controller in controllers:
+                    jobs.append(dict(path=item['path'],source=item['source'],split=item['split'],
+                                     seed=seed,seed_base=seed_base,cap=cap,controller=controller,mode=cli.mode))
     dest=Path(cli.output)
     if dest.exists():raise FileExistsError('Do not overwrite a previous evaluation')
-    result=dict(status='running',runs=[],total=len(jobs),manifest_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest(),
+    result=dict(status='running',runs=[],total=len(jobs),mode=cli.mode,seeds=cli.seeds,
+                config_sha256=hashlib.sha256(Path('results/ppo_s2r/25/backup/f1tenth.yaml').read_bytes()).hexdigest(),
+                dynamics_sha256=hashlib.sha256(Path('configs/task/dynamic.yaml').read_bytes()).hexdigest(),
+                manifest_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest(),
                 checkpoint_sha256={tag:hashlib.sha256(Path(f'results/ppo_s2r/25/checkpoint/model_{tag}.pt').read_bytes()).hexdigest()
                                    for tag in ('440000','2200000')},
-                qualification='Known geometries, unseen opening seeds in eval split. Expert is privileged; this single-seed screen is not final policy qualification.')
+                qualification='Known geometries, unseen opening seeds in eval split. Expert is privileged; this screen is not real-car qualification.')
     with mp.get_context('spawn').Pool(cli.workers,initializer=initialize) as pool:
         for row in pool.imap_unordered(worker,jobs):
             result['runs'].append(row)
