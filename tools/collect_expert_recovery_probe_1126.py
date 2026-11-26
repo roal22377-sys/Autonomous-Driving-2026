@@ -5,7 +5,7 @@ Writes separate raw diagnostic shards, not a replay cache or training dataset
 adoption. Full-episode student controls and exact-prefix checks accompany every
 handoff. Failed continuations are explicitly ineligible for future review.
 """
-import csv
+import argparse
 import hashlib
 import json
 import multiprocessing as mp
@@ -27,8 +27,10 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def initialize():
-    global IL, torch, np, ACTOR, MEAN, STD, COLS, EXPERT
+def initialize(destination, failed_only=False):
+    global IL, torch, np, ACTOR, MEAN, STD, COLS, EXPERT, DEST, FAILED_ONLY
+    DEST = Path(destination)
+    FAILED_ONLY = failed_only
     import numpy as np
     import torch
     import train_il_s2r as IL
@@ -90,11 +92,20 @@ def drive(job):
                 break
         baseline = dict(success=bool(env.success), collision=bool(env.collision),
             seconds=float(env.elapsed), steps=len(history), lap_times=[float(t) for t in env.lap_times])
+        lead_steps = int(round(2./env.timestep))
     finally:
         env.close()
     row = dict(family=family, track=track, track_sha256=sha(track), seed=seed,
         baseline=baseline, switch_step=switch_step, switch_reason=switch_reason,
         admissible_for_future_review=False)
+    if FAILED_ONLY:
+        if baseline['success']:
+            row.update(status='baseline_complete_no_handoff', switch_step=None, switch_reason=None)
+            return row
+        switch_step = max(0,len(history)-lead_steps)
+        switch_reason = '2s_before_training_failure'
+        row.update(switch_step=switch_step,switch_reason=switch_reason,
+                   handoff_at_reset=(switch_step==0))
     if switch_step is None:
         row['status'] = 'no_handoff_before_termination'
         return row
@@ -156,6 +167,13 @@ def drive(job):
 
 
 def main():
+    global DEST
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--failed_open',action='store_true',
+        help='Audit all184 open training tracks; branch2s before student failure only')
+    cli = parser.parse_args()
+    if cli.failed_open:
+        DEST = Path('results/expert_recovery_failures_1126')
     os.chdir(SRC)
     import numpy as np
     import train_il_s2r as IL
@@ -172,23 +190,34 @@ def main():
     assert len(originals)==46 and len(opens)==184
     rng = np.random.default_rng(SELECTION_SEED)
     jobs = []
-    for family,pool in [('regular',originals),('open',opens)]:
-        chosen = sorted(rng.choice(len(pool),12,replace=False).tolist())
-        for i in chosen:
-            jobs.append((family,pool[i],63000+len(jobs)))
-    IL.require_fresh_variants([p for family,p,_ in jobs if family=='regular'])
+    if cli.failed_open:
+        jobs = [('open',p,64000+i) for i,p in enumerate(opens)]
+    else:
+        for family,pool in [('regular',originals),('open',opens)]:
+            chosen = sorted(rng.choice(len(pool),12,replace=False).tolist())
+            for i in chosen:
+                jobs.append((family,pool[i],63000+len(jobs)))
+    regular_jobs = [p for family,p,_ in jobs if family=='regular']
+    if regular_jobs:
+        IL.require_fresh_variants(regular_jobs)
     require_fresh_open_train([p for family,p,_ in jobs if family=='open'])
     allowed = {str(Path(p).resolve()) for g in ('regular','open') for p in groups[g]}
-    assert len(jobs)==24 and all(p in allowed and IL.HOLDOUT not in p for _,p,_ in jobs)
+    assert len(jobs)==(184 if cli.failed_open else 24)
+    assert all(p in allowed and IL.HOLDOUT not in p for _,p,_ in jobs)
     (DEST/'shards').mkdir(parents=True)
     report = dict(status='running', purpose='Training-only recovery feasibility; not an adopted cache',
         student_checkpoint=STUDENT,student_sha256=sha(STUDENT),config_sha256=sha(CONFIG),
         normalizer_sha256=sha('results/imitation/1607/sim2real/agent_obs_scale.pkl'),
         dynamics_sha256=sha('configs/task/dynamic.yaml'),expert_config_sha256=sha('configs/task/f1tenth_preview_1126.yaml'),
-        planner_code_sha256=sha('utils/rule_based.py'),selection_seed=SELECTION_SEED,
+        planner_code_sha256=sha('utils/rule_based.py'),selection_seed=None if cli.failed_open else SELECTION_SEED,
+        protocol='all_training_open_failures' if cli.failed_open else 'balanced_early_continuations',
         jobs=[dict(family=f,track=p,seed=s,track_sha256=sha(p)) for f,p,s in jobs],
-        trigger='After2.5s: preview valid and nearcurvature>=.3, abs referenceheading>=.15 or abs lateraloffset>=.15; otherwise at30s.',
-        runs=[],qualification=('Predeclared random12 original training directions plus12 training opening variants. '
+        trigger=('For student failures only:2s before termination, or reset if the episode is shorter.' if cli.failed_open else
+                 'After2.5s: preview valid and nearcurvature>=.3, abs referenceheading>=.15 or abs lateraloffset>=.15; otherwise at30s.'),
+        runs=[],qualification=(('All184 training opening variants, fixed seeds64000+sortedindex. '
+            'Only failed student trajectories receive an expert continuation; successful controls produce no shards. '
+            'This is explicit training-failure mining, not a held-out performance comparison. ' if cli.failed_open else
+            'Predeclared random12 original training directions plus12 training opening variants. ')+
             'No held-out opening or w105 observations. Expert sees privileged pose/actuator queues; '
             'completed continuations prove simulator feasibility, not actor observability or a deployable '
             'policy. Shards contain only executed whole expert actions after an exact student prefix. '
@@ -197,10 +226,10 @@ def main():
     def save():
         temp=DEST/'collection.tmp';temp.write_text(json.dumps(report,indent=2,allow_nan=False)+'\n');temp.replace(DEST/'collection.json')
     save()
-    with mp.get_context('spawn').Pool(2,initializer=initialize) as pool:
+    with mp.get_context('spawn').Pool(2,initializer=initialize,initargs=(str(DEST),cli.failed_open)) as pool:
         for row in pool.imap_unordered(drive,jobs):
             report['runs'].append(row);save()
-            print('CASE',len(report['runs']),'/24',Path(row['track']).name,row.get('outcome',row['status']),flush=True)
+            print('CASE',len(report['runs']),'/',len(jobs),Path(row['track']).name,row.get('outcome',row['status']),flush=True)
     report['status']='complete_not_applied';save()
     print('Complete; inspect outcomes and provenance before any training use',flush=True)
 
