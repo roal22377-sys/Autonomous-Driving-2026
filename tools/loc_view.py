@@ -131,6 +131,9 @@ def main():
     ap.add_argument('--scale', type=float, default=0.15, help='[m] per character column')
     ap.add_argument('--no_rviz', action='store_true', help='do not publish /loc_map and /loc_scan')
     ap.add_argument('--png', default=None, help='also save a picture of the whole map here every 2 s (needs matplotlib)')
+    ap.add_argument('--stream', action='store_true',
+                    help='print one JSON line per refresh instead of the picture (scan in the car frame, pose, valid): '
+                         'for tools/loc_gui.py on the PC, which draws it on the map')
     a = ap.parse_args()
     import rclpy
     from rclpy.node import Node
@@ -202,6 +205,18 @@ def main():
             state['t_pose'] = time.monotonic()
 
         def draw(self):
+            if a.stream:
+                import json
+                fresh = state['pose'] is not None and time.monotonic() - state['t_pose'] <= 2.0
+                d = {'scan': None if state['scan'] is None else np.round(state['scan'][::2], 2).tolist(),
+                     'pose': np.round(state['pose'], 3).tolist() if fresh else None,
+                     'valid': bool(state['valid']) if fresh else False,
+                     'res': float(state['res']) if fresh and np.isfinite(state['res']) else None}
+                if fresh and not a.no_rviz and state['scan'] is not None:
+                    self.publish_cloud(transform(state['scan'], state['pose']))
+                sys.stdout.write(json.dumps(d, separators=(',', ':')) + '\n')
+                sys.stdout.flush()
+                return
             out = ['\033[H\033[2J']
             if state['scan'] is None:
                 out.append('waiting for /scan (bringup running?)')

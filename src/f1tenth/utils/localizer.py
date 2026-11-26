@@ -265,6 +265,12 @@ def course_candidates(track_npz, step=0.5, yaw_offsets=(0.0, np.pi)):
     return np.array([[c[i, 0], c[i, 1], wrap(h[i] + o)] for i in range(0, len(c), k) for o in yaw_offsets])
 
 
+def hint_candidates(hint, radius=0.6, step=0.3, yaw_offsets=(0.0, 0.2, -0.2, 0.4, -0.4)):
+    '''start candidates around a given pose (x, y, yaw): a small grid of positions and headings near it'''
+    o = np.arange(-radius, radius + 1e-6, step)
+    return np.array([[hint[0] + dx, hint[1] + dy, wrap(hint[2] + dh)] for dx in o for dy in o for dh in yaw_offsets])
+
+
 class CarPreview:
     '''
         car side of plan B: localization on the course map + the track preview features (utils/preview.py),
@@ -315,9 +321,13 @@ class CarPreview:
         self.hint = self.visible_index(ref)
         return f'car faces the other way: using {os.path.basename(other)}'
 
-    def start(self, ranges, angles, odom):
-        '''global start along the course; returns (ok, message)'''
-        p, res, ex, alt = self.loc.global_init(ranges, angles, course_candidates(self.course), odom)
+    def start(self, ranges, angles, odom, hint=None):
+        '''global start along the course, or only near `hint` (x, y, yaw in the map frame, e.g. RViz "2D Pose
+        Estimate"); returns (ok, message)'''
+        cand = course_candidates(self.course) if hint is None else hint_candidates(hint)
+        p, res, ex, alt = self.loc.global_init(ranges, angles, cand, odom)
+        if hint is not None:
+            self.loc.candidates = course_candidates(self.course)       # recovery sweeps search the whole course
         if p is None:
             return False, 'localization: no start pose found (no candidate matched the scan)'
         if alt is not None:

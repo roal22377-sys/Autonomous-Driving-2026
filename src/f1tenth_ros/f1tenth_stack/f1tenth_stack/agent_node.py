@@ -20,7 +20,7 @@ from collections import deque
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 import numpy as np
 
@@ -201,6 +201,9 @@ class AgentNode(Node):
       self.get_logger().info(f'[preview] course {course}, map {map_dir} ({len(self.carpv.loc.pts)} wall cells, '
                              f'{time.monotonic() - t0:.1f} s); the start pose is searched at the first scan')
       self.loc_pub = self.create_publisher(PoseStamped, 'loc_pose', 10)
+      # RViz "2D Pose Estimate" (or tools/loc_gui.py on a PC without ROS): search the start pose again, near this pose
+      self.pose_hint = None
+      self.create_subscription(PoseWithCovarianceStamped, 'initialpose', self.onInitialPose, 10)
       self.loc_last_report = time.monotonic()
       self.start_try = -1e9               # last start search (they take 0.3 s+ each: at most every 0.5 s)
       self.lost_since = None
@@ -339,6 +342,15 @@ class AgentNode(Node):
       return max(s, 0.0) * lo / vmin
     return lo + (s - vmin) * (cap - lo) / (cap - vmin)
 
+  def onInitialPose(self, m):
+    '''a pose given by hand (map frame): forget the current pose and search the start again around it'''
+    q = m.pose.pose.orientation
+    self.pose_hint = (float(m.pose.pose.position.x), float(m.pose.pose.position.y), float(2 * np.arctan2(q.z, q.w)))
+    self.carpv.started = False
+    self.start_try = -1e9
+    self.get_logger().info(f'[preview] initial pose from {m.header.frame_id or "?"}: x {self.pose_hint[0]:.2f} '
+                           f'y {self.pose_hint[1]:.2f} yaw {np.degrees(self.pose_hint[2]):.0f} deg -> searching near it')
+
   def trackPreview(self, scan_msg):
     '''localization + preview features (utils/localizer.CarPreview); None until the start pose is found'''
     if self.odom_pose is None:
@@ -350,8 +362,11 @@ class AgentNode(Node):
       if time.monotonic() - self.start_try < 0.5:
         return None
       t0 = time.monotonic()
-      ok, msg = self.carpv.start(ranges, angles, self.odom_pose)
+      ok, msg = self.carpv.start(ranges, angles, self.odom_pose, hint=self.pose_hint)
       self.start_try = time.monotonic()
+      if ok and self.pose_hint is not None:
+        msg += ' (near the given pose)'
+        self.pose_hint = None
       # one call site per severity: rclpy (Foxy) raises if the same line logs at another severity (11/25 review)
       if ok:
         self.get_logger().info(f'[preview] {msg} ({time.monotonic() - t0:.2f} s)')
