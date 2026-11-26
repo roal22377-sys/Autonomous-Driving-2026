@@ -345,6 +345,7 @@ class F1Wrapper(gym.Wrapper):
         self.progress, self.elapsed, self.success, self.lap_times = 0.0, 0.0, False, []
         self.stuck, self.stuck_ref, self.max_progress = False, (0.0, 0.0), 0.0
         self.steer_ema = 0.0
+        self._straight_prev = False
         self._pv = self._pv_prev = True
         obs_dict, info = self._env.reset(options=options, **kwargs)
         # enough steps for all laps even at a slow 1.6 m/s
@@ -384,6 +385,8 @@ class F1Wrapper(gym.Wrapper):
     STRAIGHT_STEER_COST = 0.0 # per (normalized steering command - its ~0.5 s moving average)^2 on straights: a weave of
                               # ~1 Hz changes the command only a little per 25 ms step, so a step-to-step cost misses it
     STRAIGHT_EMA_TIME = 0.5   # [s] time constant of that moving average (slow line changes stay cheap)
+    STRAIGHT_BACK = 0.0      # [m] also require the recent path to be straight (smoothed-raceline mode)
+    STRAIGHT_ENTRY_RESET = False # do not carry a corner's steering average into a new straight
     STRAIGHT_CURV = 0.05      # [1/m] straight = |centerline curvature| below this 1, 3 and 6 m ahead (radius > 20 m)
     # dead-end bays (PPO option, 0 = off): per step, per m the car's center is outside the smooth corridor
     # (track_gen w_left / w_right: the width before pockets, rough walls and corner runoffs) by more than BAY_MARGIN.
@@ -456,10 +459,25 @@ class F1Wrapper(gym.Wrapper):
         ahead = np.asarray(self.reward_geometry.get('straight_ahead', [0.0, 0.5, 1.0, 2.0]))
         idx = (j + np.round(ahead / line.ds).astype(int)) % line.n
         threshold = float(self.reward_geometry.get('straight_curvature', self.STRAIGHT_CURV))
-        info = dict(straight=bool(np.max(np.abs(line.k[idx])) < threshold), curvature=float(line.k[j]),
+        straight = bool(np.max(np.abs(line.k[idx])) < threshold)
+        if straight and self.STRAIGHT_BACK > 0:
+            back = (j - np.arange(int(round(self.STRAIGHT_BACK / line.ds)) + 1)) % line.n
+            straight = bool(np.max(np.abs(line.k[back])) < threshold)
+        info = dict(straight=straight, curvature=float(line.k[j]),
                     lateral=ey, heading=ep, future_curvature=float(np.max(np.abs(line.k[idx]))))
         self._reward_geom_cache = (key, info)
         return info
+
+    def straight_weave_cost(self, command):
+        straight = self.on_straight()
+        if self.STRAIGHT_ENTRY_RESET and straight and not getattr(self, '_straight_prev', False):
+            self.steer_ema = float(command)
+        self.steer_ema += (float(command)-self.steer_ema) * min(1.0,self.timestep/self.STRAIGHT_EMA_TIME)
+        self._straight_prev = straight
+        if not straight:
+            return 0.0
+        per_m = max(0.0,float(self.delta_s))/(self.STRAIGHT_V_REF*self.timestep) if self.STRAIGHT_V_REF > 0 else 1.0
+        return self.STRAIGHT_STEER_COST*(float(command)-self.steer_ema)**2*per_m
 
     def out_of_corridor(self):
         '''[m] how far the car's center is outside the smooth corridor (in a pocket / dead-end bay), 0 inside'''
@@ -489,10 +507,7 @@ class F1Wrapper(gym.Wrapper):
                 steer_cost *= float(self.reward_geometry.get('corner_steer_rate_scale', 1.0))
         straight_cost = 0.0
         if action is not None and self.STRAIGHT_STEER_COST > 0:
-            self.steer_ema += (float(action[0]) - self.steer_ema) * min(1.0, self.timestep / self.STRAIGHT_EMA_TIME)
-            if self.on_straight():
-                per_m = max(0.0, float(self.delta_s)) / (self.STRAIGHT_V_REF*self.timestep) if self.STRAIGHT_V_REF > 0 else 1.0
-                straight_cost = self.STRAIGHT_STEER_COST*(float(action[0]) - self.steer_ema)**2*per_m
+            straight_cost = self.straight_weave_cost(float(action[0]))
 
         straight_heading_cost = straight_offset_cost = 0.0
         if (self.STRAIGHT_HEADING_COST > 0 or self.STRAIGHT_OFFSET_COST > 0) and self.on_straight():

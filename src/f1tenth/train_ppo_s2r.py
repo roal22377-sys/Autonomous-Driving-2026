@@ -143,6 +143,8 @@ def get_args():
                    help='extra steering-rate cost where the track ahead is straight (radius > 1/--straight_curv): '
                         'the 11/24 car weaved +-20 cm on straights; corners keep --steer_rate_cost only')
     p.add_argument('--straight_curv', type=float, default=0.05)
+    p.add_argument('--straight_back', type=float, default=0.0, help='also require this many meters behind to be straight')
+    p.add_argument('--straight_entry_reset', type=int, default=0, help='reset steering EMA on entering a straight')
     p.add_argument('--straight_heading_cost', type=float, default=0.0)
     p.add_argument('--straight_offset_cost', type=float, default=0.0)
     p.add_argument('--straight_v_ref', type=float, default=0.0,
@@ -329,6 +331,7 @@ def env_config(args):
     return dict(PROGRESS_COEFF=args.progress_coeff, COLLISION_COST=args.crash_start or args.collision_cost,
                 STEER_RATE_COST=args.steer_rate_cost, STRAIGHT_STEER_COST=args.straight_steer_cost,
                 STRAIGHT_HEADING_COST=args.straight_heading_cost, STRAIGHT_OFFSET_COST=args.straight_offset_cost,
+                STRAIGHT_BACK=args.straight_back, STRAIGHT_ENTRY_RESET=bool(args.straight_entry_reset),
                 STRAIGHT_CURV=args.straight_curv, STRAIGHT_V_REF=args.straight_v_ref, BAY_COST=args.bay_cost, LINE_COST=args.line_cost, LINE_MARGIN=args.line_margin, TIME_COST=args.time_cost, WALL_COST=args.wall_cost,
                 WALL_MARGIN=args.wall_margin, LAT_COST=args.lat_cost, LAT_GRIP_SHARE=args.lat_grip_share,
                 LAP_BONUS=args.lap_bonus, uncapped_prob=args.uncapped_prob,
