@@ -378,7 +378,8 @@ class RacelinePlanner:
     def __init__(self, track, wb, v_min=2.0, v_max=8.0, a_lat=4.0, a_acc=3.0, a_brake=3.0,
                  max_steer=0.497, lad_base=0.6, lad_gain=0.22, sv_max=2.65, merge_dist=0.6, max_steer_left=None,
                  max_steer_right=None, sim_agent=None,
-                 merge_speed=2.0, a_lat_steer=None, steer_speed_mode='cap', lad_off_gain=0.0):
+                 merge_speed=2.0, a_lat_steer=None, steer_speed_mode='cap', lad_off_gain=0.0,
+                 corner_lad_cap=None, corner_lad_kappa=0.5):
         from utils.raceline import speed_profile
         self.merge_dist = merge_dist
         # far from the line the expert slows towards this, not towards v_min (with min_speed 0.5 it
@@ -406,6 +407,11 @@ class RacelinePlanner:
         if np.linalg.norm(xy[0] - xy[-1]) < 1e-3:
             xy = xy[:-1]
         self.xy, self.n = xy, xy.shape[0]
+        self.corner_lad_cap = corner_lad_cap
+        self.corner_lad_kappa = float(corner_lad_kappa)
+        if corner_lad_cap is not None:
+            from utils.raceline import curvature_smooth
+            self.corner_curvature = curvature_smooth(xy, span=1.0)
         self.ds = float(np.mean(np.linalg.norm(np.roll(xy, -1, axis=0) - xy, axis=1)))
         self.wheelbase, self.max_steer, self.sv_max = wb, max_steer, sv_max
         self.max_steer_left = max_steer if max_steer_left is None else min(max_steer_left, max_steer)   # + = left
@@ -472,6 +478,10 @@ class RacelinePlanner:
         i = self._nearest_index(pos)
         e_line = float(np.linalg.norm(self.xy[i] - pos))
         lad = self.lad_base + self.lad_gain * max(v, self.v_min) + self.lad_off_gain * min(e_line, 1.0)
+        if self.corner_lad_cap is not None:
+            probe = (i + np.round(np.array([0.0, 0.5, 1.0, 1.5]) / self.ds).astype(int)) % self.n
+            if np.max(np.abs(self.corner_curvature[probe])) > self.corner_lad_kappa:
+                lad = min(lad, float(self.corner_lad_cap))
         target = self.xy[(i + int(round(lad / self.ds))) % self.n]
         dx, dy = target - pos
         local_y = -np.sin(th) * dx + np.cos(th) * dy

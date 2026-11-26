@@ -138,6 +138,8 @@ def get_args():
                    help='extra steering-rate cost where the track ahead is straight (radius > 1/--straight_curv): '
                         'the 11/24 car weaved +-20 cm on straights; corners keep --steer_rate_cost only')
     p.add_argument('--straight_curv', type=float, default=0.05)
+    p.add_argument('--straight_heading_cost', type=float, default=0.0)
+    p.add_argument('--straight_offset_cost', type=float, default=0.0)
     p.add_argument('--straight_v_ref', type=float, default=0.0,
                    help='[m/s] > 0: the straight-line cost is per meter (equal to per step at this speed), so slow '
                         'driving does not make corrections dearer (PPO 8: 4)')
@@ -258,6 +260,8 @@ def get_args():
         if a.sim_override else il_task
     args = IL.get_args([])
     args.update(vars(a))
+    if args.get('training_mix') and not args.real_tracks:
+        args.real_tracks = list(args.get('training_real_tracks', []))
     args.save_dir = f'results/{args.name}/{args.algo_idx}'
     # time cost must stay below the progress reward at the slowest speed, or crashing pays (NOTES section 4)
     slowest = args.progress_coeff * args.min_speed * args.timestep
@@ -307,6 +311,7 @@ def env_config(args):
     '''the reward / training settings every worker applies to its env (spawned workers do not see args)'''
     return dict(PROGRESS_COEFF=args.progress_coeff, COLLISION_COST=args.crash_start or args.collision_cost,
                 STEER_RATE_COST=args.steer_rate_cost, STRAIGHT_STEER_COST=args.straight_steer_cost,
+                STRAIGHT_HEADING_COST=args.straight_heading_cost, STRAIGHT_OFFSET_COST=args.straight_offset_cost,
                 STRAIGHT_CURV=args.straight_curv, STRAIGHT_V_REF=args.straight_v_ref, BAY_COST=args.bay_cost, LINE_COST=args.line_cost, LINE_MARGIN=args.line_margin, TIME_COST=args.time_cost, WALL_COST=args.wall_cost,
                 WALL_MARGIN=args.wall_margin, LAT_COST=args.lat_cost, LAT_GRIP_SHARE=args.lat_grip_share,
                 LAP_BONUS=args.lap_bonus, uncapped_prob=args.uncapped_prob,
@@ -329,12 +334,21 @@ def training_tracks(open_train, real=(), short=False):
     '''generated training tracks (held-out variant excluded) + the open-space training tracks if used
     + real-course tracks if trained on (--real_train_share) + short courses (--short_share)'''
     tracks = [t for t in IL.list_variants(IL.MAPS) if IL.HOLDOUT not in t]
+    config = IL.get_args([])
+    if config.get('training_mix'):
+        from utils.training_mix import groups_for
+        groups = groups_for(config, tracks)
+        return [p for group, paths in groups.items() if config.training_mix.get(group, 0) > 0 for p in paths]
     return (tracks + (open_train_tracks() if open_train else []) + [os.path.abspath(t) for t in real]
             + (short_train_tracks() if short else []))
 
 
 def base_track_weights(args):
     '''{track basename: weight} so that the open-space training tracks get --open_train_share of the episodes'''
+    if args.get('training_mix'):
+        from utils.training_mix import groups_for, step_weights
+        regular = [t for t in IL.list_variants(IL.MAPS) if IL.HOLDOUT not in t]
+        return step_weights(groups_for(args, regular), args.training_mix)
     reg = [os.path.basename(t) for t in training_tracks(False)]
     base = {n: 1.0 for n in reg}
     if args.real_train_share > 0 and not args.real_tracks:
@@ -385,10 +399,15 @@ def track_weights(tstat, focus, prior=2.0, base=None, by_group=False):
 def make_env(seed, cfg):
     args = IL.get_args([])
     args.seed = seed
-    env = F1Wrapper(args, IL.MAPS, obs_noise=True, sim_mode='train',
-                    tracks=training_tracks(cfg.get('open_train', False), cfg.get('real_train', []), cfg.get('short_train', False)))
+    tracks = training_tracks(cfg.get('open_train', False), cfg.get('real_train', []), cfg.get('short_train', False))
+    if cfg.get('track_family'):
+        from utils.training_mix import family
+        tracks = [p for p in tracks if family(p) == cfg['track_family']]
+        if not tracks:
+            raise ValueError('empty PPO worker family: ' + cfg['track_family'])
+    env = F1Wrapper(args, IL.MAPS, obs_noise=True, sim_mode='train', tracks=tracks)
     for k, v in cfg.items():
-        if k in ('open_train', 'real_train', 'short_train'):
+        if k in ('open_train', 'real_train', 'short_train', 'track_family'):
             continue
         if k == 'uncapped_prob':
             env.sl_cfg['uncapped_prob'] = v
@@ -419,7 +438,7 @@ def main():
         require_fresh_open_train(open_train_tracks())
     if args.short_share > 0 and not short_train_tracks():
         raise FileNotFoundError('no short courses: run `python -m utils.track_short --random 8 --seeds 1 2 3 4 5 6 7` first')
-    base_w = base_track_weights(args) if args.open_train_share > 0 or args.real_train_share > 0 or args.short_share > 0 else None
+    base_w = base_track_weights(args) if args.get('training_mix') or args.open_train_share > 0 or args.real_train_share > 0 or args.short_share > 0 else None
 
     # IL policy (actor + frozen normalizer) and a frozen copy as the BC teacher
     il_dir = f'results/{args.il}'
@@ -481,6 +500,12 @@ def main():
         if not short_tracks_eval:
             raise FileNotFoundError('no held-out short courses: run `python -m utils.track_short --random 8 --seeds 3` first')
     short_eval = lambda: IL.evaluate(eval_args, policy(), short_tracks_eval, 'eval', settings=IL.SHORT_SETTINGS)
+    hall_tracks_eval = []
+    if args.get('training_mix'):
+        from utils.training_mix import hall_split
+        hall_tracks_eval = hall_split()[1]
+    hall_eval = lambda: IL.evaluate(eval_args, policy(), hall_tracks_eval, 'eval', settings=((8.0, 'center'), (4.0, 'center')))
+    il_hall, il_hall_res = float('nan'), []
 
     def lost_eval():
         '''LiDAR-only fallback of a preview policy: (short-course success, eval-track success at cap 5)'''
@@ -565,6 +590,14 @@ def main():
         il_short, il_short_res = float('nan'), []
     if args.short_eval and not il_short_res:
         il_short, _, il_short_res = short_eval()
+    if hall_tracks_eval:
+        if state is not None:
+            il_hall, il_hall_res = state['il'].get('hall', float('nan')), state['il'].get('hall_res', [])
+            if not il_hall_res:
+                raise ValueError('resume checkpoint has no hall baseline; do not replace IL baseline with PPO')
+        else:
+            il_hall, _, il_hall_res = hall_eval()
+        cprint(f'[IL hall baseline] {il_hall*100:.1f}% on {len(il_hall_res)} held-out runs (2025 copy excluded)', bold=True)
     if state is None and args.init:
         # after the IL baseline (evaluated with the IL actor): continue from an earlier PPO policy
         ck = torch.load(f'results/{args.init}', map_location='cpu', weights_only=False)
@@ -595,7 +628,17 @@ def main():
     N = args.workers
     T = args.n_steps // N
     cfg = env_config(args)
-    venv = gym.vector.AsyncVectorEnv([functools.partial(make_env, args.seed * 1000 + i, cfg) for i in range(N)],
+    worker_cfg = [dict(cfg) for _ in range(N)]
+    if args.get('training_mix'):
+        from utils.training_mix import step_budgets
+        allocation = step_budgets(args.training_mix, N)
+        if any(count == 0 for count in allocation.values()):
+            raise ValueError('not enough workers to cover every training family')
+        families = [group for group, count in allocation.items() for _ in range(count)]
+        for c, group in zip(worker_cfg, families):
+            c['track_family'] = group
+        print(f'[PPO exact step-share workers] {allocation}; each family receives its worker fraction of rollout steps', flush=True)
+    venv = gym.vector.AsyncVectorEnv([functools.partial(make_env, args.seed * 1000 + i, worker_cfg[i]) for i in range(N)],
                                      context='spawn')
     obs, info = venv.reset(seed=args.seed)
     priv = np.stack(list(info['privileged'])).astype(np.float32)
@@ -629,6 +672,7 @@ def main():
                   **(dict(ccritic=ccritic.state_dict(), opt_ccritic=opt_ccritic.state_dict()) if ccritic is not None else {}),
                   priv_rms=(priv_rms.mean, priv_rms.var, priv_rms.count), ret_rms=(ret_rms.mean, ret_rms.var, ret_rms.count),
                   il=dict(succ=il_succ, lap=il_lap, res=il_res, worst=il_worst, open=il_open, short=il_short,
+                          hall=il_hall, hall_res=il_hall_res,
                           short_res=il_short_res, short_tracks=[os.path.basename(t) for t in short_tracks_eval]),
                   best=best, log=log, update=update, total=total, actor_start=actor_start, bc_boost=bc_boost,
                   crash_cost=crash_cost,
@@ -836,7 +880,15 @@ def main():
                 short_ok = sh >= il_short - 1.5 / max(len(sh_res), 1)          # one run of slack (32 runs)
                 sh_gain = IL.paired_gain(sh_res, il_short_res, IL.SHORT_SETTINGS[:1])[0]
                 row.update(short=sh, short_lap=sh_lap, short_gain=sh_gain)
-            better = cand and worst_ok and open_ok and short_ok
+            hall, hall_gain, hall_ok = float('nan'), float('nan'), True
+            if hall_tracks_eval and gates:
+                hall, hall_lap, hall_res = hall_eval()
+                hall_ok = hall >= il_hall - 1.5 / max(len(hall_res), 1)
+                hall_gain = IL.paired_gain(hall_res, il_hall_res, ((8.0, 'center'),))[0]
+                row.update(hall=hall, hall_lap=hall_lap, hall_gain=hall_gain, hall_res=hall_res)
+                cprint(f'[hall @ update {update}] 2-lap success {hall*100:.1f}% (IL {il_hall*100:.1f}%) '
+                       f'paired gain {hall_gain:+.2f}s; 2025 copy excluded', color='cyan')
+            better = cand and worst_ok and open_ok and short_ok and hall_ok
             if args.lost_eval and gates:
                 lost_s, lost_e = lost_eval()
                 row.update(lost_short=lost_s, lost_eval=lost_e)
@@ -867,7 +919,7 @@ def main():
                     target = args.crash_target_succ
                 # the worst-case / open-space checks count too when they ran (a model that reached the target on
                 # the eval tracks but is below IL there is not safe enough yet: 11/24 PPO 4 update 30)
-                gates_bad = gates and not (worst_ok and open_ok and short_ok) and bool(args.crash_gates)
+                gates_bad = gates and not (worst_ok and open_ok and short_ok and hall_ok) and bool(args.crash_gates)
                 if succ < target - 0.02 or gates_bad:
                     crash_cost = min(crash_cost * args.crash_up, args.crash_max)
                 elif succ >= target - 1e-9 and gates:

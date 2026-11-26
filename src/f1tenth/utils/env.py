@@ -81,6 +81,8 @@ class F1Wrapper(gym.Wrapper):
         self.history = ActionHistory(self.obs_cfg['history']['length'])
         # track preview (plan B, utils/preview.py): race line + speed plan per course, simulated localization error
         self.preview_cfg = self.obs_cfg['preview']
+        self.expert_cfg = dict(args.get('expert_plan', {}) or {})
+        self.reward_geometry = dict(args.get('reward_geometry', {}) or {})
         self._preview_cache, self.preview, self.loc_noise = {}, None, None
 
         # sim2real
@@ -161,7 +163,16 @@ class F1Wrapper(gym.Wrapper):
         '''normalized steering command for a wheel angle [rad] (+ = left) with this episode's per-side lock;
         the expert uses it, so its full lock is a full command as on the car'''
         lock = self.steer_left_max if angle > 0 else self.steer_right_max
-        return float(np.clip(angle / max(lock, 1e-6), -1.0, 1.0))
+        x = float(np.clip(abs(angle) / max(lock, 1e-6), 0.0, 1.0))
+        if self.expert_cfg.get('invert_steer_response', False):
+            # The expert plans physical wheel angles; step() applies the linkage response.
+            # Invert that monotone response instead of applying it twice to the label.
+            k = self.steer_scale[0 if angle > 0 else 1]
+            target = x
+            for _ in range(8):
+                x = float(np.clip(x - (x * (k + (1.0-k)*x*x) - target)
+                                  / max(k + 3.0*(1.0-k)*x*x, 1e-6), 0.0, 1.0))
+        return float(np.copysign(x, angle))
 
     def _line_ref(self):
         '''the course's race line as a TrackPreview (the preview's own when the policy has one; else built and cached)'''
@@ -287,6 +298,8 @@ class F1Wrapper(gym.Wrapper):
         self.yaw_frenet = poses_phi
 
     def reset(self, **kwargs):
+        self._reward_geom_cache = None
+        self._reward_line_hint = None
         self.hard = self.sim_mode == 'train' and self.HARD_PROB > 0 and self.noise_rng.random() < self.HARD_PROB
         if self.obs_noise:
             # per-episode speed reading error, like an imperfect odom calibration
@@ -394,6 +407,8 @@ class F1Wrapper(gym.Wrapper):
     # stuck / wrong way (PPO only, 0 = off): no STUCK_DIST m of new progress for STUCK_TIME s, or BACKWARD_DIST m behind
     # the furthest point reached, ends the episode as a crash (collision cost). Without it a car that turned around in
     # a dead-end bay drives on for minutes (time limit: 2 laps at 1.6 m/s) and blurs what went wrong.
+    STRAIGHT_HEADING_COST = 0.0
+    STRAIGHT_OFFSET_COST = 0.0
     STUCK_TIME = 0.0          # [s]
     STUCK_DIST = 0.5          # [m]
     BACKWARD_DIST = 2.0       # [m]
@@ -418,10 +433,33 @@ class F1Wrapper(gym.Wrapper):
 
     def on_straight(self):
         '''the centerline 1, 3 and 6 m ahead is nearly straight (simulator-only: used in the reward, not observed)'''
+        if self.reward_geometry.get('straight_mode') == 'smoothed_raceline':
+            return self.driving_geometry()['straight']
         cl = self._env.unwrapped.track.centerline.spline      # as privileged()
         L = float(cl.s[-1])
         s0 = float(self.position_frenet[0])
         return all(abs(float(cl.calc_curvature((s0 + d) % L))) < self.STRAIGHT_CURV for d in (1.0, 3.0, 6.0))
+
+    def driving_geometry(self):
+        """Smoothed path geometry for reward and metrics, cached once per step."""
+        key = float(getattr(self, 'elapsed', 0.0))
+        cached = getattr(self, '_reward_geom_cache', None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        st = self.vehicle_state()
+        line = self._line_ref()
+        j = line.project(float(st[0]), float(st[1]), hint=getattr(self, '_reward_line_hint', None))
+        self._reward_line_hint = j
+        h = float(line.heading[j])
+        ey = float(-np.sin(h) * (st[0] - line.xy[j, 0]) + np.cos(h) * (st[1] - line.xy[j, 1]))
+        ep = float((st[4] - h + np.pi) % (2 * np.pi) - np.pi)
+        ahead = np.asarray(self.reward_geometry.get('straight_ahead', [0.0, 0.5, 1.0, 2.0]))
+        idx = (j + np.round(ahead / line.ds).astype(int)) % line.n
+        threshold = float(self.reward_geometry.get('straight_curvature', self.STRAIGHT_CURV))
+        info = dict(straight=bool(np.max(np.abs(line.k[idx])) < threshold), curvature=float(line.k[j]),
+                    lateral=ey, heading=ep, future_curvature=float(np.max(np.abs(line.k[idx]))))
+        self._reward_geom_cache = (key, info)
+        return info
 
     def out_of_corridor(self):
         '''[m] how far the car's center is outside the smooth corridor (in a pocket / dead-end bay), 0 inside'''
@@ -447,6 +485,8 @@ class F1Wrapper(gym.Wrapper):
         steer_cost = 0.0
         if action is not None and self.STEER_RATE_COST > 0:
             steer_cost = self.STEER_RATE_COST*float(action[0] - self.prev_cmd[0])**2
+            if self.reward_geometry.get('straight_mode') == 'smoothed_raceline' and abs(self.driving_geometry()['curvature']) > 0.3:
+                steer_cost *= float(self.reward_geometry.get('corner_steer_rate_scale', 1.0))
         straight_cost = 0.0
         if action is not None and self.STRAIGHT_STEER_COST > 0:
             self.steer_ema += (float(action[0]) - self.steer_ema) * min(1.0, self.timestep / self.STRAIGHT_EMA_TIME)
@@ -454,6 +494,13 @@ class F1Wrapper(gym.Wrapper):
                 per_m = max(0.0, float(self.delta_s)) / (self.STRAIGHT_V_REF*self.timestep) if self.STRAIGHT_V_REF > 0 else 1.0
                 straight_cost = self.STRAIGHT_STEER_COST*(float(action[0]) - self.steer_ema)**2*per_m
 
+        straight_heading_cost = straight_offset_cost = 0.0
+        if (self.STRAIGHT_HEADING_COST > 0 or self.STRAIGHT_OFFSET_COST > 0) and self.on_straight():
+            g = self.driving_geometry()
+            per_m = max(0.0, float(self.delta_s)) / (self.STRAIGHT_V_REF*self.timestep) if self.STRAIGHT_V_REF > 0 else 1.0
+            straight_heading_cost = self.STRAIGHT_HEADING_COST * max(0.0, abs(g['heading']) - 0.02)**2 * per_m
+            straight_offset_cost = self.STRAIGHT_OFFSET_COST * max(0.0, abs(g['lateral']) - 0.05)**2 * per_m
+            straight_cost += min(0.10, straight_heading_cost + straight_offset_cost)
         time_cost = self.TIME_COST
         wall_cost = self.WALL_COST * max(0.0, self.WALL_MARGIN - self.min_wall)
         lat_cost = self.LAT_COST * max(0.0, abs(self.lat_acc) - self.LAT_GRIP_SHARE * float(self.params['mu']) * 9.81)
@@ -472,6 +519,7 @@ class F1Wrapper(gym.Wrapper):
         reward = (forward_reward - collision_cost - steer_cost - straight_cost - time_cost - wall_cost - lat_cost
                   - bay_cost - line_cost + lap_bonus)
         reward_dict = {'forward_reward': forward_reward,
+                       'straight_heading_cost': straight_heading_cost, 'straight_offset_cost': straight_offset_cost,
                        'collision_cost': collision_cost,
                        'steer_cost': steer_cost,
                        'straight_cost': straight_cost,

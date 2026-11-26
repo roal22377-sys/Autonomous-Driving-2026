@@ -24,6 +24,7 @@ import os
 import sys
 import time
 import pickle
+import json
 import glob
 import random
 import multiprocessing as mp
@@ -79,9 +80,13 @@ def expert_kwargs(env):
     grip = float(EXPERT_MU if EXPERT_MU else env.params['mu']) * 9.81
     a_max = float(env.params['a_max'])
     a_brk = float(getattr(env, 'a_brake', None) or a_max)     # sim2real.a_brake (11/25) when the config has it
-    return dict(EXPERT, a_lat=EXPERT_GRIP_SHARE * grip, a_acc=a_max, a_brake=min(a_brk, EXPERT_GRIP_SHARE * grip),
-                a_lat_steer=EXPERT_STEER_GRIP_SHARE * grip, steer_speed_mode=EXPERT_STEER_SPEED_MODE,
-                lad_off_gain=EXPERT_LAD_OFF_GAIN, sim_agent=env._env.unwrapped.sim.agents[0])
+    cfg = getattr(env, 'expert_cfg', {})
+    share = float(cfg.get('grip_share', EXPERT_GRIP_SHARE))
+    steer_share = float(cfg.get('steer_grip_share', EXPERT_STEER_GRIP_SHARE))
+    return dict(EXPERT, a_lat=share * grip, a_acc=a_max, a_brake=min(a_brk, share * grip),
+                a_lat_steer=steer_share * grip, steer_speed_mode=cfg.get('steer_speed_mode', EXPERT_STEER_SPEED_MODE),
+                lad_off_gain=EXPERT_LAD_OFF_GAIN, sim_agent=env._env.unwrapped.sim.agents[0],
+                corner_lad_cap=cfg.get('corner_lad_cap'), corner_lad_kappa=cfg.get('corner_lad_kappa', 0.5))
 STEER_LOSS_WEIGHT = 2.0         # steering errors matter more than speed errors
 
 
@@ -168,8 +173,16 @@ def actor_from_state(state_dict):
     a = get_args([])
     a.hidden_dim = int(state_dict['fc1.weight'].shape[0])
     actor = make_actor(a)
-    actor.load_state_dict(state_dict)
+    actor.load_state_dict({k: torch.as_tensor(v) for k, v in state_dict.items()})
     return actor
+
+
+def portable_policy(policy):
+    '''Plain arrays avoid torch's socket-based file-descriptor transfer to spawn workers.'''
+    if policy is None:
+        return None
+    return ({k: v.detach().cpu().numpy().copy() if torch.is_tensor(v) else v
+             for k, v in policy[0].items()}, policy[1], policy[2])
 
 
 def make_actor(args):
@@ -232,7 +245,7 @@ def rollout_worker(job):
     env = F1Wrapper(args, MAPS, obs_noise=True, sim_mode='train', tracks=tracks)
     env.HARD_PROB = float(os.environ.get('F1_HARD_PROB', '0'))     # --hard_prob (workers only see the environment)
     short_share = float(os.environ.get('F1_SHORT_SHARE', '0'))     # --short_share
-    if short_share > 0:
+    if short_share > 0 and not args.get('training_mix'):
         from utils.track_short import SHORT_DIR
         short = [os.path.basename(t) for t in tracks if os.path.dirname(os.path.abspath(t)) == os.path.abspath(SHORT_DIR)]
         n_o = len(tracks) - len(short)
@@ -272,20 +285,48 @@ def rollout_worker(job):
         N[-1] = False
         total += steps
         _tick(steps)
-        stats.append((expert_drives, int(env.success), steps))
+        from utils.training_mix import family
+        stats.append((expert_drives, int(env.success), steps, family(env.track_file)))
     env.close()
-    return np.asarray(O, np.float32), np.asarray(Y, np.float32), stats, np.asarray(N, bool)
+    O, Y, N = np.asarray(O, np.float32), np.asarray(Y, np.float32), np.asarray(N, bool)
+    if args.get('training_mix'):
+        O, Y, N = O[:n_steps], Y[:n_steps], N[:n_steps]
+        N[-1] = False
+    return O, Y, stats, N
 
 
 def collect(args, n_steps, policy, beta, dart_std, tracks, round_idx):
+    policy = portable_policy(policy)
     per = int(np.ceil(n_steps / args.workers))
-    jobs = [(w, per, policy, beta, dart_std, tracks, args.seed * 100000 + round_idx * 1000 + w)
-            for w in range(args.workers)]
-    res = run_pool(rollout_worker, jobs, args.workers, per * args.workers, f'collect round {round_idx}', 'steps')
+    if args.get('training_mix'):
+        from utils.training_mix import family, step_budgets
+        jobs = []
+        budgets = step_budgets(args.training_mix, int(n_steps))
+        for group, budget in budgets.items():
+            members = [t for t in tracks if family(t) == group]
+            if not members:
+                raise ValueError('empty collection family: ' + group)
+            left = budget
+            while left > 0:
+                size = min(per, left)
+                w = len(jobs)
+                jobs.append((w, size, policy, beta, dart_std, members, args.seed * 100000 + round_idx * 1000 + w))
+                left -= size
+        print(f'[collection step quotas] {budgets}', flush=True)
+    else:
+        jobs = [(w, per, policy, beta, dart_std, tracks, args.seed * 100000 + round_idx * 1000 + w)
+                for w in range(args.workers)]
+    res = run_pool(rollout_worker, jobs, args.workers, sum(j[1] for j in jobs), f'collect round {round_idx}', 'steps')
     O = np.concatenate([r[0] for r in res])
     Y = np.concatenate([r[1] for r in res])
     stats = [s for r in res for s in r[2]]
     Nn = np.concatenate([r[3] for r in res])
+    for group in sorted({s[3] for s in stats}):
+        rows = [s for s in stats if s[3] == group]
+        expert = [s for s in rows if s[0]]
+        student = [s for s in rows if not s[0]]
+        rate = lambda rows: f'{100*np.mean([s[1] for s in rows]):.1f}%/{len(rows)}' if rows else '-'
+        print(f'[collection {group}] expert+DART success/episodes {rate(expert)}; student {rate(student)}', flush=True)
     return O, Y, stats, Nn
 
 
@@ -304,17 +345,23 @@ def eval_worker(job):
     actor.eval()
     mean, std = policy[1], np.sqrt(policy[2] + 1e-8)
     obs, info = env.reset(options={'track': path})
+    from utils.driving_metrics import DrivingMetrics
+    metrics = DrivingMetrics()
     done, steers = False, []
     while not done:
         with torch.no_grad():
             act = actor(torch.as_tensor((obs - mean) / std, dtype=torch.float32)).loc.numpy()
         steers.append(act[0])
         obs, r, term, trunc, info = env.step(act)
+        metrics.update(env, act)
         done = term or trunc
     ok = bool(env.success)
     _tick(1)
     st = np.asarray(steers) * env.max_steer
-    return f'{os.path.basename(path)[:-4]}@{cap:g}/{start}', ok, float(env.elapsed), float(np.abs(np.diff(st)).mean())
+    result = (f'{os.path.basename(path)[:-4]}@{cap:g}/{start}', ok, float(env.elapsed),
+              float(np.abs(np.diff(st)).mean()), metrics.result())
+    env.close()
+    return result
 
 
 # (speed cap [m/s], start): uncapped from the centerline (lap time), uncapped and car-practice cap
@@ -330,8 +377,11 @@ SHORT_SETTINGS = ((8.0, 'center'), (5.0, 'random'))     # --short_eval (held-out
 def evaluate(args, policy, tracks, mode='eval', settings=EVAL_SETTINGS):
     '''success over all runs; lap = mean 2-lap time of the first setting's runs that finished.
        A setting's cap may be a tuple: the tracks then take its caps in turn (one run per track).'''
+    policy = portable_policy(policy)
     jobs = [(p, policy, mode, 7 + i, cap[i % len(cap)] if isinstance(cap, (tuple, list)) else cap, start)
             for cap, start in settings for i, p in enumerate(sorted(tracks))]
+    if not jobs:
+        raise ValueError('evaluation needs at least one track and setting')
     res = run_pool(eval_worker, jobs, min(args.workers, len(jobs)), len(jobs), 'eval', 'episodes')
     succ = np.mean([r[1] for r in res])
     held = [r[1] for r in res if HOLDOUT in r[0]]
@@ -422,14 +472,21 @@ def train_bc(args, actor, O, Y, rms, grad_steps, lr, Nn=None):
         if args.hist_noise > 0:
             xb[:, hist] += args.hist_noise * torch.randn_like(xb[:, hist])
         out = actor(xb).loc
-        loss = ((out - T[idx]) ** 2 * w).mean()     # MSE: run 9 already steered too little where large steering
+        weights = w.expand(len(idx), -1).clone()
+        focus = float(args.get('il_steer_focus', 0.0))
+        if focus:
+            weights[:, 0] *= 1.0 + focus * T[idx, 0].square()
+        loss = ((out - T[idx]) ** 2 * weights).mean()     # MSE: retain large steering labels
                                                     # was needed; a Huber loss would weaken exactly those labels
         if args.caps_s > 0:
             noisy = actor(xb + args.caps_sigma * torch.randn_like(xb)).loc
             loss = loss + args.caps_s * ((noisy - out) ** 2).mean()
         if nxt is not None:
             j = nxt[torch.randint(len(nxt), (args.batch // 2,))]
-            loss = loss + args.caps_t * ((actor(X[j + 1].float()).loc - actor(X[j].float()).loc) ** 2).mean()
+            diff = (actor(X[j + 1].float()).loc - actor(X[j].float()).loc).square()
+            if focus:
+                diff[:, 0] /= 1.0 + focus * T[j, 0].square()
+            loss = loss + args.caps_t * diff.mean()
         opt.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(actor.parameters(), args.max_grad_norm)
@@ -491,6 +548,17 @@ def main():
         train_tracks += st
         print(f'[tracks] + {len(st)} short training courses, {args.short_share*100:.0f}% of the episodes', flush=True)
     os.environ['F1_SHORT_SHARE'] = str(args.short_share)
+    if args.get('training_mix'):
+        from utils.training_mix import groups_for, evaluation_sets
+        groups = groups_for(args, [t for t in all_tracks if HOLDOUT not in t])
+        train_tracks = [t for group, paths in groups.items() if args.training_mix.get(group, 0) > 0 for t in paths]
+        extra_eval = evaluation_sets(args)
+        with open(f'{args.save_dir}/backup/track_manifest.json', 'w') as f:
+            json.dump(dict(step_shares=dict(args.training_mix), training=groups, validation=extra_eval,
+                           note='Course2025 is trained; hall validation excludes it. Real course is known geometry.'), f, indent=2)
+        print(f'[tracks] family sizes { {k: len(v) for k, v in groups.items()} }; step shares {dict(args.training_mix)}', flush=True)
+    else:
+        extra_eval = {}
     short_eval = []
     if args.short_eval:
         from utils.track_short import short_tracks
@@ -548,18 +616,23 @@ def main():
         cprint(f'[resume] {len(files)} data rounds ({sum(len(o) for o in data_O)} samples), continuing at round {start_rnd}', bold=True)
     else:
         if args.init:
-            # start from an existing model: its normalizer stays fixed so the actor keeps working
             src = f'results/{args.init}'
-            rms.load(f'{src}/sim2real', required=True)
-            actor.load_state_dict(torch.load(f'{src}/checkpoint/model.pt')['actor'])
-            cprint(f'[init] actor + normalizer from {src}', bold=True)
+            if not os.path.isfile(f'{src}/sim2real/actor.pt'):
+                raise FileNotFoundError(f'{src}/sim2real/actor.pt')
         # round 0: expert drives (DART)
         t0 = time.time()
         O, Y, stats, Nn = collect(args, args.expert_steps, None, 1.0, args.dart_std, train_tracks, 0)
         succ = np.mean([s[1] for s in stats])
         cprint(f'[round 0] expert+DART {len(O)} steps, {len(stats)} episodes, 2-lap success {succ*100:.0f}% '
                f'({time.time()-t0:.0f}s)', color='yellow')
-        if not args.init:
+        if args.init:
+            from utils.policy_transfer import initialize
+            report = initialize(actor, args, rms, src, O)
+            with open(f'{args.save_dir}/backup/transfer.json', 'w') as f:
+                json.dump(report, f, indent=2)
+            cprint(f'[init] transferred policy with calibrated normalization: {report}', bold=True)
+            save(args, actor, rms, tag='init')
+        else:
             rms.update(O)
         O = O.astype(np.float16)            # kept as float16 (memory), see train_bc
         data_O, data_Y, data_N = [O], [Y], [Nn]
@@ -591,6 +664,15 @@ def main():
         op = evaluate(args, policy, open_tracks, 'eval', settings=open_settings)[0] if args.open_eval else float('nan')
         sh, sh_lap = evaluate(args, policy, short_eval, 'eval', settings=SHORT_SETTINGS)[:2] if short_eval else (float('nan'), float('nan'))
         parts = [succ] + ([op] if args.open_eval else []) + ([sh] if short_eval else [])
+        more = {}
+        for group, paths in extra_eval.items():
+            settings = ((8.0, 'center'), (4.0, 'center'))
+            rate, tm, rr = evaluate(args, policy, paths, 'eval', settings=settings)
+            more[group] = dict(success=rate, lap=tm, res=rr)
+            # Known practice geometry is reported separately; it is not an unseen-course score.
+            if group == 'hall':
+                parts.append(rate)
+            cprint(f'[round {rnd}] {group}: 2-lap success {rate*100:.1f}% lap {tm:.2f}s', color='cyan')
         score = float(np.mean(parts))
         cprint(f'[round {rnd}] data {n_data} | bc val {vl:.5f} ({time.time()-t0:.0f}s) | '
                f'EVAL ({eval_desc}): 2-lap success {succ*100:.1f}% '
@@ -605,6 +687,7 @@ def main():
         entry = {'round': rnd, 'data': n_data, 'val': vl, 'success': succ, 'lap': lap, 'open': op, 'score': score,
                  'short': sh, 'short_lap': sh_lap,
                  'jitter': round_jitter(res), 'res': res}
+        entry.update(more)
         log.append(entry)
         better, noticeable, why = judge_round(entry, best, args)
         stale = 0 if noticeable else stale + 1
