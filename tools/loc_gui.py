@@ -57,8 +57,17 @@ def main():
     state = dict(scan=None, pose=None, valid=False, res=None, t=0.0, ema=None, err='', proc=None)
 
     def reader():
-        # the car side: loc_view.py --stream (one JSON line per refresh); restarted if the connection drops
+        # the car side: loc_view.py --stream (one JSON line per refresh); restarted if the connection drops.
+        # Never let an error end this thread (the window would then wait forever)
         while True:
+            try:
+                read_once()
+            except Exception as e:          # noqa: BLE001
+                state['err'] = f'stream error: {e!r}, retrying ...'
+            time.sleep(2.0)
+
+    def read_once():
+        if True:
             cmd = SSH + [CAR_HOST, f'{CAR_ENV} && exec python3 tools/loc_view.py --yaml {yaml_rel} --stream --rate {a.rate}']
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
             state['proc'] = p
@@ -74,7 +83,6 @@ def main():
                 state['valid'], state['res'], state['t'], state['err'] = d['valid'], d['res'], time.monotonic(), ''
             p.wait()
             state['err'] = f'connection to the car ended (exit {p.returncode}), retrying ...'
-            time.sleep(2.0)
 
     threading.Thread(target=reader, daemon=True).start()
 
