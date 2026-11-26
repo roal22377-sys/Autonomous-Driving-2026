@@ -53,9 +53,12 @@ def main():
         ck=torch.load(ckpath,map_location='cpu',weights_only=False)
     if 'obs_mean' in ck:
         mean,var=ck['obs_mean'],ck['obs_var']
+        normalizer_path=None
     else:
         rms=RunningMeanStd('agent_obs',args.obs_dim)
-        rms.load(f'results/{cli.normalizer_model or cli.model}/sim2real',required=True)
+        normalizer_dir=Path(f'results/{cli.normalizer_model or cli.model}/sim2real')
+        rms.load(str(normalizer_dir),required=True)
+        normalizer_path=normalizer_dir/'agent_obs_scale.pkl'
         mean,var=rms.mean,rms.var
     policy=IL.portable_policy((ck['actor'],mean,var))
     regular=regular_tracks(IL,cli.regular_scope)
@@ -75,6 +78,10 @@ def main():
     elif cli.cycle_caps:
         sets={g:(tracks,((tuple(cli.cycle_caps),'center'),)) for g,(tracks,_) in sets.items()}
     out=dict(model=cli.model,tag=cli.tag,seeds=cli.seeds,checkpoint_sha256=hashlib.sha256(ckpath.read_bytes()).hexdigest(),
+             normalizer_source='embedded_checkpoint' if normalizer_path is None else str(normalizer_path),
+             normalizer_file_sha256=None if normalizer_path is None else hashlib.sha256(normalizer_path.read_bytes()).hexdigest(),
+             normalizer_arrays_sha256=hashlib.sha256(b''.join(np.asarray(x,dtype='<f8').tobytes(order='C') for x in (mean,var))).hexdigest(),
+             normalizer_shape=list(np.asarray(mean).shape),
              dynamics_sha256=hashlib.sha256(Path('configs/task/dynamic.yaml').read_bytes()).hexdigest(),
              localization_forced_lost=os.environ.get('F1_LOC_LOST')=='1',
              diagnostic_caps=cli.caps,
