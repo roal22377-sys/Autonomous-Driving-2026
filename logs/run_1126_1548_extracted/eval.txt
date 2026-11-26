@@ -1,0 +1,10 @@
+
+== run_1126_1548: 1 autonomous segments (stats up to the first wall contact)
+  start  dur   dist  v_mean v_max v_cmd | front_min side_min side_p10 | weave Hz  rms   rate  lock% | end
+    209  48.9s 143.2m  2.96  4.62  3.17 |    0.47     0.23     0.52  |  1.09  0.071  1.03   0.0 | stopped by operator (moving)
+
+== total: 1 segments, 49 s / 143 m driven before any wall contact
+   wall contacts: 0/1 segments, 143.2 m per contact, 48.9 s per contact
+   mean speed 2.96 m/s (commanded 3.17), closest side wall 0.23 m, closest front 0.47 m
+   weave 1.09 Hz (median), steering RMS 0.071 rad, mean |steering rate| 1.03 rad/s, full lock 0.0% of the time
+   endings: stopped by operator (moving) x1

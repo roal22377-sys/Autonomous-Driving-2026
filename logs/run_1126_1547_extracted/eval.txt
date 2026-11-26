@@ -1,0 +1,3 @@
+
+== run_1126_1547: 0 autonomous segments (stats up to the first wall contact)
+  start  dur   dist  v_mean v_max v_cmd | front_min side_min side_p10 | weave Hz  rms   rate  lock% | end
