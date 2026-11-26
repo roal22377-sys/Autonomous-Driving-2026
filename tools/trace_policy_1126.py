@@ -11,13 +11,15 @@ def main():
     p.add_argument('--model',default='imitation/14');p.add_argument('--tag',default='round0')
     p.add_argument('--track',required=True);p.add_argument('--cap',type=float,default=8.)
     p.add_argument('--seed',type=int,default=7);p.add_argument('--start',default='center',choices=['center','random'])
+    p.add_argument('--diagnostic_override',choices=['expert_speed','expert_steer','expert_both'],
+                   help='privileged counterfactual for diagnosis; never a policy qualification')
     cli=p.parse_args();os.chdir(S)
     import numpy as np,torch,random
     import matplotlib;matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     from ruamel.yaml import YAML
     import train_il_s2r as IL
-    from utils.env import F1Wrapper,unnormalize_speed
+    from utils.env import F1Wrapper,unnormalize_speed,normalize_speed
     from utils.rule_based import RacelinePlanner
     from utils.vectorize import RunningMeanStd
     from utils.driving_metrics import DrivingMetrics
@@ -46,21 +48,29 @@ def main():
         act=np.clip(act,-1,1);sq,vq=env.pending_commands()
         ev,ed=planner.plan(env.vehicle_state(),sq,vq,env.timestep)
         command_time=float(env.elapsed);valid=bool(getattr(env,'_pv',True))
+        applied=act.copy()
+        if cli.diagnostic_override in ('expert_speed','expert_both'):
+            applied[1]=normalize_speed(ev,env.min_speed,env.max_speed)
+        if cli.diagnostic_override in ('expert_steer','expert_both'):
+            applied[0]=env.steer_command(ed)
         side=0 if act[0]>0 else 1;k=env.steer_scale[side];lock=env.steer_left_max if side==0 else env.steer_right_max
         target=float(act[0]*lock*(k+(1-k)*act[0]**2))
-        obs,_,term,trunc,info=env.step(act);state=env.vehicle_state();g=env.driving_geometry();metrics.update(env,act)
+        obs,_,term,trunc,info=env.step(applied);state=env.vehicle_state();g=env.driving_geometry();metrics.update(env,applied)
         rows.append(dict(command_time=command_time,state_time=float(env.elapsed),x=float(state[0]),y=float(state[1]),
                          speed=float(state[3]),policy_speed=min(float(unnormalize_speed(act[1],env.min_speed,env.max_speed)),env.speed_cap),
                          expert_speed=float(ev),policy_steer=float(act[0]),policy_wheel_target=target,wheel_actual=float(state[2]),
                          expert_wheel_target=float(ed),expert_steer_command=env.steer_command(ed),lateral=g['lateral'],
-                         heading=g['heading'],curvature=g['curvature'],lat_acc=float(env.lat_acc),preview_valid=int(valid)))
+                         heading=g['heading'],curvature=g['curvature'],lat_acc=float(env.lat_acc),preview_valid=int(valid),
+                         applied_steer=float(applied[0]),applied_speed=float(unnormalize_speed(applied[1],env.min_speed,env.max_speed))))
         if term or trunc:break
     dest=Path('results/analysis1126/traces');dest.mkdir(parents=True,exist_ok=True)
     stem=f'{cli.model.replace("/","_")}_{cli.tag}_{Path(path).stem}_cap{cli.cap:g}_{cli.start}_seed{cli.seed}'
+    if cli.diagnostic_override:stem+='_'+cli.diagnostic_override
     with open(dest/(stem+'.csv'),'w') as f:
         w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
     summary=dict(model=cli.model,tag=cli.tag,track=Path(path).name,cap=cli.cap,start=cli.start,seed=cli.seed,
                  success=bool(env.success),collision=bool(env.collision),elapsed=float(env.elapsed),phases=metrics.result(),
+                 diagnostic_override=cli.diagnostic_override,policy_qualification=not bool(cli.diagnostic_override),
                  progress_m=float(env.progress),lap_times=[float(t) for t in env.lap_times],
                  checkpoint_sha256=hashlib.sha256(ckpath.read_bytes()).hexdigest(),
                  shadow_expert='6.0 nominal reference, corner lookahead .65, response inversion; diagnostic only')

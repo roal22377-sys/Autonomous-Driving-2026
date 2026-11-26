@@ -36,9 +36,15 @@ def load_replay(args, rms):
     # Historical records have no near-preview inputs. Zero their normalized
     # contribution rather than inventing a curvature/speed value for them.
     mask = torch.as_tensor(missing)
+    invalid = (O[:,names.index('preview/valid')] < .5) if 'preview/valid' in names else np.zeros(n,bool)
     for j,name in enumerate(names):
         if name not in old_names:
             X[mask,j] = 0
+            if name.startswith('preview/'):
+                # Missing localization makes every preview input exactly zero
+                # in raw units; that value is known even in historical records.
+                rows = torch.as_tensor(missing & invalid)
+                X[rows,j] = float(-rms.mean[j]/np.sqrt(rms.var[j]+1e-8))
     T = torch.as_tensor(Y,dtype=torch.float32)
     perm = torch.randperm(n);nv = max(1,min(n-1,n//50))
     count = int(round(args.batch*share))

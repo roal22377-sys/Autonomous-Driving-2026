@@ -1,0 +1,15 @@
+# Retain PPO21's localization dropout mixture for later PPO. Full noise
+# dictionary: merge_sim_override replaces this nested dictionary as one value.
+track_preview:
+  noise:
+    xy_std: 0.05
+    yaw_std_deg: 1.0
+    corr_time: 0.5
+    jitter_xy: 0.01
+    jump_prob: 0.0005
+    jump_std: 0.3
+    jump_time: 1.0
+    lost_episode_prob: 0.25
+    lost_rate: 0.05
+    lost_len: [0.5, 4.0]
+    lost_full_prob: 0.03

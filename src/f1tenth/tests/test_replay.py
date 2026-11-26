@@ -20,6 +20,7 @@ class ReplayTests(unittest.TestCase):
         self.data=dict(O=np.zeros((8,132),np.float16),Y=np.tile([.2,-.3],(8,1)).astype(np.float32),
                        columns=np.asarray(self.names),old_columns=np.asarray(self.old_names),
                        missing_new_features=np.array([True,False]*4),teacher=np.asarray('ppo_s2r/2130'))
+        self.data['O'][:,self.names.index('preview/valid')]=1.
 
     def tearDown(self):self.tmp.cleanup()
 
@@ -39,6 +40,12 @@ class ReplayTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'schema'):self.load()
         self.data['columns']=np.asarray(self.names);self.args.max_speed=6.
         with self.assertRaisesRegex(ValueError,'action scaling'):self.load()
+
+    def test_invalid_localization_implies_raw_zero_preview_not_neutral_input(self):
+        self.data['O'][0,self.names.index('preview/valid')]=0.
+        replay=self.load();new=[i for i,k in enumerate(self.names) if k not in self.old_names]
+        np.testing.assert_allclose(replay.X[0,new].numpy(),-.5,atol=1e-4)
+        np.testing.assert_array_equal(replay.X[2,new].numpy(),0.)
 
     def test_invalid_labels_or_no_new_experience_are_rejected(self):
         self.data['Y'][0,0]=np.nan

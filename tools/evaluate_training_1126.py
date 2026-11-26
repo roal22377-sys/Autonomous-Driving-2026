@@ -13,6 +13,7 @@ def main():
     p.add_argument('--normalizer_model')
     p.add_argument('--workers',type=int,default=4)
     p.add_argument('--output',help='separate report filename for a subset evaluation')
+    p.add_argument('--caps',type=float,nargs='+',help='diagnostic cap override, centerline starts only')
     p.add_argument('--seeds',type=int,nargs='+',default=[7])
     p.add_argument('--families',nargs='+',default=['regular','short','hall','real','2025','open'])
     cli=p.parse_args()
@@ -49,8 +50,12 @@ def main():
               open=(sorted(str(p) for p in Path(TEST_DIR,'big').glob('*.npz')),((8.,'center'),(5.,'center'))),
               **{'2025':(sorted(str(p.resolve()) for p in Path('installation/maps_hall').glob('Course2025*.npz')),
                          ((8.,'center'),(4.,'center')))})
+    if cli.caps:
+        sets={g:(tracks,tuple((cap,'center') for cap in cli.caps)) for g,(tracks,_) in sets.items()}
     out=dict(model=cli.model,tag=cli.tag,seeds=cli.seeds,checkpoint_sha256=hashlib.sha256(ckpath.read_bytes()).hexdigest(),
              dynamics_sha256=hashlib.sha256(Path('configs/task/dynamic.yaml').read_bytes()).hexdigest(),
+             localization_forced_lost=os.environ.get('F1_LOC_LOST')=='1',
+             diagnostic_caps=cli.caps,
              config=str(args.task_config),families={},notes='Real and 2025 geometries are in training; hall validation excludes 2025.')
     dest=Path('results/analysis1126');dest.mkdir(exist_ok=True)
     target=dest/(cli.output or f'{cli.model.replace("/","_")}_{cli.tag}_seeds{"-".join(map(str,cli.seeds))}.json')

@@ -63,6 +63,9 @@ def main():
         old_Y=np.concatenate([old_teacher(torch.as_tensor(old_rms.normalize(old_O[i:i+4096].astype(np.float32)),dtype=torch.float32)).loc.numpy()
                               for i in range(0,len(old_O),4096)])
     expanded=np.tile(kept.mean.astype(np.float16),(len(old_O),1));expanded[:,shared]=old_O
+    invalid=expanded[:,names.index('preview/valid')]<.5
+    for j,key in enumerate(names):
+        if key not in columns(old_cfg) and key.startswith('preview/'):expanded[invalid,j]=0
     anchor_O.append(expanded);anchor_Y.append(old_Y)
     anchor_O=np.concatenate(anchor_O);anchor_Y=np.concatenate(anchor_Y)
     del old_O,expanded,old_teacher,chunks,current;gc.collect()
@@ -78,6 +81,7 @@ def main():
     cache=root/'replay_cache.npz'
     if not cache.exists():
         missing=np.r_[np.zeros(len(anchor_O)-len(old_Y),bool),np.ones(len(old_Y),bool)]
+        missing[anchor_O[:,names.index('preview/valid')]<.5]=False
         with tempfile.NamedTemporaryFile(dir=root,prefix='replay_',suffix='.npz',delete=False) as f:
             np.savez(f,O=anchor_O,Y=anchor_Y,columns=np.asarray(names),old_columns=np.asarray(columns(old_cfg)),
                      missing_new_features=missing,teacher=np.asarray('ppo_s2r/2130'))
