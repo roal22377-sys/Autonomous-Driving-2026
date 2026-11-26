@@ -53,6 +53,7 @@ import time
 import glob
 import pickle
 import functools
+import json
 from shutil import copyfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -456,6 +457,11 @@ def main():
         for k, v in sorted(args.items()):
             if isinstance(v, (int, float, str, bool)) or v is None:
                 f.write(f'{k}: {v}\n')
+    # Preserve list options as well (known-course paths, low-cap cases, etc.).
+    # Keep every launch/resume snapshot so a later command cannot hide the original.
+    serialized_args=json.dumps(dict(args),indent=2,default=str)+'\n'
+    for filename in ('ppo_args.json',f'ppo_args_{time.time_ns()}.json'):
+        with open(f'{args.save_dir}/backup/{filename}','w') as f:f.write(serialized_args)
     require_fresh_variants(IL.list_variants(IL.MAPS))
     if args.open_train_share > 0:
         if not open_train_tracks():
@@ -670,6 +676,9 @@ def main():
     if low and not args.force_start and state is None:
         raise SystemExit(f'[stop] IL policy {args.il} is not solid enough for PPO ({", ".join(low)}). '
                          'Train IL further, or pass --force_start.')
+    if low and args.force_start and state is None:
+        cprint('[manual bootstrap] --force_start enabled below conservative IL entry floors: '+', '.join(low)
+               +'. Full evaluation and model-selection gates remain active.',color='yellow',bold=True)
     if state is None:
         best = dict(succ=il_succ, res=il_res, name='IL')
         if args.family_select:
