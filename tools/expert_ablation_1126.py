@@ -36,18 +36,23 @@ def main():
     os.chdir(S);os.environ['F1_TASK_CONFIG']='configs/task/f1tenth_preview_1126.yaml'
     old=json.loads((S/'results/preflight_1126/expert_feasibility.json').read_text())['results']
     bad={x['track']+'.npz' for x in old if not x['ok']}
-    full='--full' in sys.argv
+    sweep='--budget-sweep' in sys.argv
+    full='--full' in sys.argv or sweep
     paths=[str(p.resolve()) for p in (S/'installation/maps_hall').glob('*.npz') if full or p.name in bad]
-    cases=([(f'cap_{c}',.75,6/(.75*9.81),c) for c in [.75,.65,.55]] if full else
-           [('old_grip',.65,.7,None),('lower_budget',.75,.7,None),('short_lad',.75,6/(.75*9.81),.75)])
-    inverse='--inverse' in sys.argv
+    if sweep:
+        paths += [str(p.resolve()) for p in (S/'installation/maps_real').glob('Practice1126b*.npz')]
+        cases=[(f'budget_{b}',.75,b/(.75*9.81),.65) for b in [5.5,6.5]]
+    else:
+        cases=([(f'cap_{c}',.75,6/(.75*9.81),c) for c in [.75,.65,.55]] if full else
+               [('old_grip',.65,.7,None),('lower_budget',.75,.7,None),('short_lad',.75,6/(.75*9.81),.75)])
+    inverse='--inverse' in sys.argv or sweep
     jobs=[(n,p,mu,sh,c,inverse) for n,mu,sh,c in cases for p in paths]
     results=[];start=time.time()
     with mp.get_context('spawn').Pool(8) as pool:
         for row in pool.imap_unordered(run,jobs):
             results.append(row)
             if len(results)%20==0:print(len(results),'/',len(jobs),round(time.time()-start),'s',flush=True)
-    suffix=('_full' if full else '')+('_inverse' if inverse else '')
+    suffix='_budget_sweep' if sweep else ('_full' if full else '')+('_inverse' if inverse else '')
     (S/f'results/preflight_1126/expert_ablation{suffix}.json').write_text(json.dumps(results,indent=2)+'\n')
     for n,_,_,_ in cases:
         q=[x for x in results if x['case']==n];print(n,sum(x['ok'] for x in q),'/',len(q),flush=True)

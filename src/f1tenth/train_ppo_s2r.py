@@ -38,6 +38,11 @@
       (longest delay, lowest grip) than the IL policy, and does not finish fewer 2-lap runs than the IL
       policy on the open-space test tracks (eval_open_space.py: a wide dead-end bay at every corner,
       where the 11/23 car drove in and hit the end wall). Otherwise the IL policy stays the deployed one
+      With training_mix, --family_select is on: keep each family's completion against the best policy,
+      then prefer higher completion or a faster weighted relative time on matched uncapped runs.
+      Hall/short gains count even when general-course time is unchanged. Practice geometry has a
+      separate completion gate; its pace never enters the validation score. All family references and
+      the original IL baselines are retained across resume.
     - --baseline reproduces the settings before 11/23 (first run of NOTES section 6 step 3), to compare
     Output: results/ppo_s2r/<algo_idx>/ (same layout as the other algorithms), train_log.pkl per update
 '''
@@ -198,6 +203,10 @@ def get_args():
     # evaluation / model selection
     p.add_argument('--eval_every', type=int, default=10, help='updates between evaluations')
     p.add_argument('--eval_tracks', type=int, default=44)
+    p.add_argument('--family_select', type=int, default=None,
+                   help='default on for training_mix: preserve each family completion, then select by matched relative pace')
+    p.add_argument('--min_il_hall', type=float, default=0.95)
+    p.add_argument('--min_il_short', type=float, default=0.95)
     p.add_argument('--eval_low_caps', type=float, nargs='*', default=[2.0, 2.5, 3.0, 3.5, 4.0],
                    help='one more centerline run per eval track at these caps in turn (the car drives at 2-5 m/s). '
                         '11/25 PPO 7: 0/22 finished at cap 3 (drifted into the left wall on straights without '
@@ -260,6 +269,14 @@ def get_args():
         if a.sim_override else il_task
     args = IL.get_args([])
     args.update(vars(a))
+    args.family_select = bool(args.get('training_mix')) if args.family_select is None else bool(args.family_select)
+    if args.family_select:
+        if not args.get('training_mix'):
+            raise ValueError('--family_select needs training_mix')
+        if args.training_mix.get('open', 0) > 0 and not args.open_eval:
+            raise ValueError('family selection needs the open-space completion check')
+        if args.training_mix.get('short', 0) > 0 and not args.short_eval:
+            raise ValueError('family selection needs --short_eval 1')
     if args.get('training_mix') and not args.real_tracks:
         args.real_tracks = list(args.get('training_real_tracks', []))
     args.save_dir = f'results/{args.name}/{args.algo_idx}'
@@ -492,7 +509,7 @@ def main():
         raise FileNotFoundError(f'no open-space test tracks in {OPEN_TEST_DIR}/{args.open_level}: '
                                 'run `python -u eval_open_space.py --make` first (or --open_eval 0)')
     open_settings = tuple((c, 'center') for c in args.open_caps)
-    open_eval = lambda: IL.evaluate(eval_args, policy(), open_tracks, 'eval', settings=open_settings)[0]
+    open_eval = lambda: IL.evaluate(eval_args, policy(), open_tracks, 'eval', settings=open_settings)
     short_tracks_eval = []
     if args.short_eval:
         from utils.track_short import short_tracks
@@ -505,7 +522,7 @@ def main():
         from utils.training_mix import hall_split
         hall_tracks_eval = hall_split()[1]
     hall_eval = lambda: IL.evaluate(eval_args, policy(), hall_tracks_eval, 'eval', settings=((8.0, 'center'), (4.0, 'center')))
-    il_hall, il_hall_res = float('nan'), []
+    il_hall, il_hall_res, il_open_res = float('nan'), [], []
 
     def lost_eval():
         '''LiDAR-only fallback of a preview policy: (short-course success, eval-track success at cap 5)'''
@@ -547,6 +564,7 @@ def main():
             r.mean, r.var, r.count = state[key]
         il_succ, il_lap, il_res, il_worst, il_open = (state['il'][k] for k in ('succ', 'lap', 'res', 'worst', 'open'))
         il_short, il_short_res = state['il'].get('short', float('nan')), state['il'].get('short_res', [])
+        il_open_res = state['il'].get('open_res', [])
         if args.short_eval and not il_short_res:
             # the actor is the resumed PPO policy now: it must not become the IL baseline (11/25 review)
             raise SystemExit('--resume with --short_eval: the stopped run has no IL short-course baseline; '
@@ -578,6 +596,7 @@ def main():
             raise SystemExit(f'--baseline_from {args.baseline_from}: not comparable ({diff}); evaluate the IL baseline again (drop the option)')
         il_succ, il_lap, il_res, il_worst, il_open = (src['il'][k] for k in ('succ', 'lap', 'res', 'worst', 'open'))
         il_short, il_short_res = src['il'].get('short', float('nan')), src['il'].get('short_res', [])
+        il_open_res = src['il'].get('open_res', [])
         if src['il'].get('short_tracks') != [os.path.basename(t) for t in short_tracks_eval]:
             il_short, il_short_res = float('nan'), []          # other short courses: measured again below
         if (args.worst_eval and not np.isfinite(il_worst)) or (args.open_eval and not np.isfinite(il_open)):
@@ -586,7 +605,7 @@ def main():
     else:
         il_succ, il_lap, il_res = IL.evaluate(eval_args, policy(), eval_tracks, 'eval', settings=eval_settings)
         il_worst = IL.evaluate(eval_args, policy(), eval_tracks, 'worst')[0] if args.worst_eval else float('nan')
-        il_open = open_eval() if args.open_eval else float('nan')
+        il_open, _, il_open_res = open_eval() if args.open_eval else (float('nan'), float('nan'), [])
         il_short, il_short_res = float('nan'), []
     if args.short_eval and not il_short_res:
         il_short, _, il_short_res = short_eval()
@@ -598,6 +617,23 @@ def main():
         else:
             il_hall, _, il_hall_res = hall_eval()
         cprint(f'[IL hall baseline] {il_hall*100:.1f}% on {len(il_hall_res)} held-out runs (2025 copy excluded)', bold=True)
+    il_real, il_real_res = float('nan'), []
+    if args.family_select:
+        if state is not None and 'families' not in best:
+            raise ValueError('resume has no family selection reference; do not replace it with the resumed PPO policy')
+        if args.open_eval and not il_open_res:
+            if state is not None:
+                raise ValueError('resume has no paired IL open-space baseline')
+            il_open, _, il_open_res = open_eval()
+        if args.real_tracks:
+            if state is not None:
+                il_real, il_real_res = state['il'].get('real', float('nan')), state['il'].get('real_res', [])
+                if not il_real_res:
+                    raise ValueError('resume has no IL practice-course baseline')
+            else:
+                il_real, _, il_real_res = IL.evaluate(eval_args, policy(), [os.path.abspath(t) for t in args.real_tracks],
+                                                     'eval', settings=((8.0, 'center'), (4.0, 'center')))
+            cprint(f'[IL practice baseline] {il_real*100:.1f}%; known training geometry, completion gate only', bold=True)
     if state is None and args.init:
         # after the IL baseline (evaluated with the IL actor): continue from an earlier PPO policy
         ck = torch.load(f'results/{args.init}', map_location='cpu', weights_only=False)
@@ -618,11 +654,20 @@ def main():
     low = [f'eval {il_succ*100:.1f}% < {args.min_il_success*100:g}%'] if il_succ < args.min_il_success - 1e-9 else []
     if args.open_eval and il_open < args.min_il_open - 1e-9:
         low.append(f'open-space {il_open*100:.1f}% < {args.min_il_open*100:g}%')
+    if args.family_select and hall_tracks_eval and il_hall < args.min_il_hall - 1e-9:
+        low.append(f'hall {il_hall*100:.1f}% < {args.min_il_hall*100:g}%')
+    if args.family_select and args.short_eval and il_short < args.min_il_short - 1e-9:
+        low.append(f'short {il_short*100:.1f}% < {args.min_il_short*100:g}%')
     if low and not args.force_start and state is None:
         raise SystemExit(f'[stop] IL policy {args.il} is not solid enough for PPO ({", ".join(low)}). '
                          'Train IL further, or pass --force_start.')
     if state is None:
         best = dict(succ=il_succ, res=il_res, name='IL')
+        if args.family_select:
+            best['families'] = dict(regular=dict(success=il_succ, res=il_res), open=dict(success=il_open, res=il_open_res),
+                                    short=dict(success=il_short, res=il_short_res), hall=dict(success=il_hall, res=il_hall_res))
+            if args.real_tracks:
+                best['families']['real'] = dict(success=il_real, res=il_real_res)
         log = [{'update': 0, 'step': 0, 'success': il_succ, 'lap': il_lap, 'worst': il_worst, 'open': il_open, 'res': il_res}]
 
     N = args.workers
@@ -671,8 +716,9 @@ def main():
                   opt_actor=opt_actor.state_dict(), opt_critic=opt_critic.state_dict(),
                   **(dict(ccritic=ccritic.state_dict(), opt_ccritic=opt_ccritic.state_dict()) if ccritic is not None else {}),
                   priv_rms=(priv_rms.mean, priv_rms.var, priv_rms.count), ret_rms=(ret_rms.mean, ret_rms.var, ret_rms.count),
-                  il=dict(succ=il_succ, lap=il_lap, res=il_res, worst=il_worst, open=il_open, short=il_short,
+                  il=dict(succ=il_succ, lap=il_lap, res=il_res, worst=il_worst, open=il_open, open_res=il_open_res, short=il_short,
                           hall=il_hall, hall_res=il_hall_res,
+                          real=il_real, real_res=il_real_res,
                           short_res=il_short_res, short_tracks=[os.path.basename(t) for t in short_tracks_eval]),
                   best=best, log=log, update=update, total=total, actor_start=actor_start, bc_boost=bc_boost,
                   crash_cost=crash_cost,
@@ -867,20 +913,22 @@ def main():
             succ, lap, res = IL.evaluate(eval_args, policy(), eval_tracks, 'eval', settings=eval_settings)
             gain, n_common = IL.paired_gain(res, best['res'], uncapped)
             cand = succ > best['succ'] + 1e-9 or (succ >= best['succ'] - 1e-9 and np.isfinite(gain) and gain > 0)
-            # the worst-case and open-space checks (~half of the evaluation time) only matter for a model that
-            # could be saved; --full_eval 1 runs them every time (complete curves in plot_training.py)
-            gates = cand or args.full_eval
+            # Mixed-course selection evaluates all families: a hall gain can qualify a model even when
+            # general-course time is unchanged. Legacy runs keep the earlier optional gate scheduling.
+            gates = cand or args.full_eval or args.family_select
             worst = IL.evaluate(eval_args, policy(), eval_tracks, 'worst')[0] if args.worst_eval and gates else float('nan')
             worst_ok = (not args.worst_eval) or worst >= il_worst - 1e-9
-            op = open_eval() if args.open_eval and gates else float('nan')
+            op, _, op_res = open_eval() if args.open_eval and gates else (float('nan'), float('nan'), [])
             open_ok = (not args.open_eval) or op >= il_open - 1e-9
             sh, sh_gain, short_ok = float('nan'), float('nan'), True
+            sh_res = []
             if args.short_eval and gates:
                 sh, sh_lap, sh_res = short_eval()
                 short_ok = sh >= il_short - 1.5 / max(len(sh_res), 1)          # one run of slack (32 runs)
                 sh_gain = IL.paired_gain(sh_res, il_short_res, IL.SHORT_SETTINGS[:1])[0]
                 row.update(short=sh, short_lap=sh_lap, short_gain=sh_gain)
             hall, hall_gain, hall_ok = float('nan'), float('nan'), True
+            hall_res = []
             if hall_tracks_eval and gates:
                 hall, hall_lap, hall_res = hall_eval()
                 hall_ok = hall >= il_hall - 1.5 / max(len(hall_res), 1)
@@ -900,6 +948,18 @@ def main():
                 row.update(real_success=rs, real_lap=rl, real_res=rres)
                 cprint(f'[real course @ update {update}] 2-lap success {rs*100:.0f}% ({sum(r[1] for r in rres)}/{len(rres)}), '
                        f'uncapped 2-lap time {rl:.1f} s', color='cyan')
+            if args.family_select:
+                from utils.model_selection import choose_families
+                families = dict(regular=dict(success=succ, res=res), open=dict(success=op, res=op_res),
+                                short=dict(success=sh, res=sh_res), hall=dict(success=hall, res=hall_res))
+                if args.real_tracks:
+                    families['real'] = dict(success=rs, res=rres)
+                decision = choose_families(families, best['families'], args.training_mix)
+                better = decision['selected'] and worst_ok
+                row['family_selection'] = decision
+                cprint(f'[family selection] {decision["reason"]}; weighted completion {decision["completion"]*100:.2f}% '
+                       f'vs {decision["reference_completion"]*100:.2f}%; matched relative pace '
+                       f'{decision["relative_pace_gain"]*100:+.2f}% (real-course pace excluded)', color='cyan')
             cprint(f'[eval @ update {update}] 2-lap success {succ*100:.1f}% (best {best["name"]} {best["succ"]*100:.1f}%) '
                    f'| vs best on {n_common} runs both finished: {gain:+.2f} s faster'
                    + (f' | worst-case success {worst*100:.1f}% (IL {il_worst*100:.1f}%)' if args.worst_eval and gates else '')
@@ -935,6 +995,8 @@ def main():
                        f'{args.save_dir}/checkpoint/model_{total}.pt')
             if better:
                 best = dict(succ=succ, res=res, name=f'update {update}')
+                if args.family_select:
+                    best['families'] = families
                 os.makedirs(f'{args.save_dir}/sim2real', exist_ok=True)
                 torch.save(actor, f'{args.save_dir}/sim2real/actor.pt')
                 rms.save(f'{args.save_dir}/sim2real')
