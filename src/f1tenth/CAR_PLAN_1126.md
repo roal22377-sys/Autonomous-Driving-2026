@@ -1,29 +1,45 @@
 # 11/26(목) 실차 계획: 지도 따기 → LiDAR PPO 주행 → 위치 추정 → 위치 정보 모델(계획 B)
 
-## 한눈에 보기 (15:00 시작, 약 2.5시간)
+## 한눈에 보기 (15:00 시작, 약 2.5시간) — 11/26 14:00 최종
+
+### 출발 전 (PC, 5분)
+```bash
+cd ~/Autonomous-Driving-2026 && git pull && git status      # 바뀐 파일이 없어야 함
+ssh jowonjun@10.106.0.73 true                                # 비밀번호 없이 되어야 함
+ssh jowonjun@10.106.0.73 'source ~/venv/torch210/bin/activate && python3 -c "import scipy; print(scipy.__version__)"'
+```
+- scipy가 없으면 3번(위치 정보 모델) 전에 차에서 `pip install "scipy<1.11"`을 실행합니다. 1·2번에는 필요 없습니다.
+- LiDAR 수평과 배터리 완충을 확인합니다.
+
+### 할 일
 
 | # | 할 일 | 시간 | 필수 여부 | 명령 |
 |---|---|---|---|---|
-| 0 | 준비 | 10분 | 필수 | `git pull`, `ssh jowonjun@10.106.0.73 true`, LiDAR 수평, 배터리 |
-| 1 | **지도 따기** | 30분 | 필수 | `tools/map_session.sh` → 3바퀴 → `tools/map_session.sh --finish Practice1126` → commit / push |
-| 2 | **LiDAR PPO 주행** | 40분 | 필수 | `MODEL=ilppo tools/drive_session.sh` 상한 2 → 4 → 5, 괜찮으면 `MODEL=ilppo_fast` 5 → 6. 상한마다 3바퀴 + `--finish` |
-| 3 | **위치 정보 모델** | 40분 | 아래 조건 | `loc_test.py`로 2번 기록 확인(valid 98 % 이상) → 차를 출발 자리에 → `MODEL=preview` 상한 2.5 → 5. 미끄러지면 `MODEL=preview_robust`. 시간이 남으면 `MODEL=preview_il`로 같은 상한 비교 |
-| 4 | 원선회 | 10분 | 선택 | 공간이 있으면 `tools/drive_session.sh --circle`(조향 양 끝 2개) |
+| 1 | **지도 따기** | 30분 | 필수 | `tools/map_session.sh` → TELEOP `s` → agent Enter → TELEOP `r` → 3바퀴 → `s` → `tools/map_session.sh --finish Practice1126` → 확인 3가지 → commit / push |
+| 2 | **LiDAR PPO 주행** | 40분 | 필수 | `MODEL=ilppo tools/drive_session.sh` 상한 2 → 4 → 5, 괜찮으면 `MODEL=ilppo_fast` 5 → 6. 상한마다 3바퀴, 끝날 때마다 `tools/drive_session.sh --finish` |
+| 3 | **위치 정보 모델** | 40분 | 조건부 | `loc_test.py`로 2번 기록 확인(valid 98 % 이상) → **차를 출발 자리에 먼저 놓고** `MODEL=preview tools/drive_session.sh` 상한 2.5 → 3 → 4 → 5. 미끄러지거나 벽에 닿으면 `MODEL=preview_robust`. 시간이 남으면 `MODEL=preview_il`로 같은 상한 비교 |
+| 4 | 원선회 | 10분 | 선택 | 공간이 있으면 `tools/drive_session.sh --circle`(조향 양 끝 2개만) |
 
-- **2번 기록 하나로 세 가지를 합니다:** 실차 결과, 접지력 측정(5-1절), 위치 추정 시험(4-1절).
-- **시간이 부족하면** 1 → 2 → 3 순서로 하고 4번과 상한 6은 생략합니다.
+- **2번 기록 하나로 세 가지를 합니다:** 실차 결과, 접지력 측정(5-1절 `grip_from_log.py`), 위치 추정 시험(4-1절 `loc_test.py`).
+- **시간이 부족하면** 1 → 2 → 3 순서로 하고, 4번과 상한 6은 생략합니다.
+- **위치 정보 모델은 위치를 0.3 s 넘게 잃으면 스스로 멈춥니다**(정상 동작). 다시 찾으면 이어서 달립니다.
 - **끝나면:** `git add -f logs/run_1126_*_extracted && git commit -m "car 11/26 logs" && git push`. 본 것(벽 접촉, 흔들림, 좋았던 주행)은 메시지로 남겨 주세요.
-- **11/26 08:45 확정 (Claude, 3시드 비교 `results/reports/compare_1126_0837_*.md`):**
 
-  | 설정 | 모델 | 짧은 코스+연습 코스 | 상한 8 2랩 | 최악 조건 | 막다른 공간 | 일반 |
-  |---|---|---|---|---|---|---|
-  | `MODEL=preview` (기본) | **PPO 21 u30** (`ppo_s2r/2130`) | **99.4 %** | **30.9 s** | 82.6 % | 94.3 % | 99.2 % |
-  | `MODEL=preview_robust` | PPO 21 u50 (`ppo_s2r/2150`) | 98.8 % | 31.1 s | **86.4 %** | 93.6 % | 99.2 % |
-  | `MODEL=preview_il` | IL 13 (`imitation/13`) | 97.5 % | 31.0 s | 78.0 % | 94.3 % | **100 %** |
+### 확정 모델 (3시드 비교 `results/reports/compare_1126_0837_*.md`, `_1056_*`, `_1330_*`)
 
-  - 연습 코스 양방향, 상한 2 / 2.5 / 3 / 4에서 세 모델 모두 3/3 완주했습니다.
-  - **상한 8(제한 없음) 역방향에서는 세 모델 모두 위쪽 돌출부(지도 x ≈ −3.4) 부근에서 가끔 닿았습니다.** 오늘은 상한 5까지만 씁니다.
+| 설정 (`MODEL=`) | 모델 | 용도 | 짧은 코스+연습 코스 | 상한 8 2랩 | 최악 조건 | 막다른 공간 | 일반 |
+|---|---|---|---|---|---|---|---|
+| `mapping` (`map_session.sh`) | IL 11 | 지도 주행 2 m/s | – | – | – | – | – |
+| `ilppo` | PPO 12 u190 | LiDAR 전용, 안정 | – | – | – | – | – |
+| `ilppo_fast` | PPO 12 u272 | LiDAR 전용, 약 12 % 빠름 | – | – | – | – | – |
+| **`preview`** | **PPO 21 u30** (`ppo_s2r/2130`) | **위치 정보, 기본** | **99.4 %** | **30.9 s** | 82.6 % | 94.3 % | 99.2 % |
+| `preview_robust` | PPO 21 u50 (`ppo_s2r/2150`) | 위치 정보, 강건 | 98.8 % | 31.1 s | **86.4 %** | 93.6 % | 99.2 % |
+| `preview_il` | IL 13 (`imitation/13`) | 위치 정보, 비교용 | 97.5 % | 31.0 s | 78.0 % | 94.3 % | **100 %** |
 
+- 위치 정보 모델 세 개 모두 연습 코스 양방향, 상한 2 / 2.5 / 3 / 4에서 3/3 완주했습니다.
+- **상한 8(제한 없음) 역방향에서는 세 모델 모두 위쪽 돌출부(지도 x ≈ −3.4) 부근에서 가끔 닿았습니다.** 오늘은 상한 5까지만 씁니다.
+- 6개 설정 모두 11/24 실제 기록으로 차 노드 재생 시험을 통과했습니다(`tools/agent_replay.py`, 14:00).
+- PC에서는 PPO 24(PPO 21 u30을 조심스럽게 다듬는 학습)가 시험 중에도 계속 돕니다. 오늘 차 설정과는 무관합니다.
 
 목표는 네 가지입니다.
 1. 연습 코스 지도를 따서 맵 툴을 실차로 검증합니다.
