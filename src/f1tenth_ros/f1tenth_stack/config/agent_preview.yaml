@@ -20,8 +20,8 @@ agent_node:
     speed_min: 0.0
     steer_gain_left: 1.0
     steer_gain_right: 1.0
-    course: src/f1tenth/installation/maps_real/Practice1126.npz
-    map_dir: maps/run_1126_1539
+    course: src/f1tenth/installation/maps_real/Practice1126b.npz
+    map_dir: maps/run_1126_1718
     laser_x: 0.13
     loc_stride: 3
     lost_stop: 0.3      # [s] (only without a fallback) localization lost longer -> speed 0 until found again

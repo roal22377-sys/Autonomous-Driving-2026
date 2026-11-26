@@ -1,0 +1,4 @@
+log /home/jowonjun/Autonomous-Driving-2026/logs/run_1126_1718_extracted t 11.3-137.5 s, 998 keyframes, path 176.0 m
+sequential ICP fell back to odom on 1 keyframes
+loop closures 511; correction of the sequential path by the pose graph: median 0.436 m, max 1.904 m
+map 419 x 247 cells at 0.05 m, origin [-16.189, -3.112]
