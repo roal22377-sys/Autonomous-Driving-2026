@@ -47,6 +47,9 @@ def main():
     p.add_argument('--cap', type=float, default=8.)
     p.add_argument('--model', default='ppo_s2r/25')
     p.add_argument('--tag', default='3080000')
+    p.add_argument('--recovery', choices=['baseline', 'temporal'], default='baseline')
+    p.add_argument('--search-delay', type=float, default=.6,
+                   help='Simulation-only delay before a temporal global-search result is available')
     cli = p.parse_args()
     if not 0. <= cli.return_confirm <= 5.:
         raise ValueError('return-confirm must be between0 and5 seconds')
@@ -152,6 +155,9 @@ def main():
         laser = float(car.lidar_pos_offset)
         pv = CarPreview(str(course), str(map_dir), pcfg['preview'], laser_x=laser,
                         lidar_pos_offset=laser, log=lambda *_: None)
+        if cli.recovery == 'temporal':
+            from temporal_recovery_localizer_1126 import TemporalRecoveryLocalizer
+            pv.loc = TemporalRecoveryLocalizer(str(map_dir), laser_x=laser, search_delay=cli.search_delay)
         assert len(pv.tps) == 2
         state = env.vehicle_state()
         odom = np.asarray([state[0], state[1], state[4]], float)
@@ -178,6 +184,8 @@ def main():
             if cli.condition == 'scan_loss4' and 3. <= now < 7.:
                 scan = np.full_like(scan, np.inf)
                 injected = True
+            if cli.recovery == 'temporal':
+                pv.loc.set_time(now)
             preview, pose, valid, _ = pv.features(scan, angles, odom, cli.cap)
             if valid:
                 lost_since = None
@@ -236,6 +244,7 @@ def main():
             columns=np.asarray(['time', 'position_error', 'yaw_error', 'valid', 'fallback',
                                 'steer', 'speed', 'true_x', 'true_y', 'true_yaw']))
         report = dict(status='complete', condition=cli.condition, fallback=cli.fallback,
+            recovery_method=cli.recovery,
             return_confirm_seconds=cli.return_confirm,
             seed=cli.seed, cap=cli.cap, success=bool(env.success), collision=bool(env.collision),
             elapsed=float(env.elapsed), fault_triggered=injected, transitions=transitions,
@@ -260,6 +269,14 @@ def main():
                 'not policy LiDAR. Off means primary-only, not production emergency-stop mode. '
                 'Simulator command conversion approximates car switch/history semantics; not ROS or actuator qualification. '
                 'Original simulator observation augmentation is retained; no extra raycasts/noise draws for policy sensors.'))
+        if cli.recovery == 'temporal':
+            report['temporal_recovery'] = dict(search_delay_seconds=cli.search_delay,
+                margin=pv.loc.margin, confirmation_seconds=pv.loc.confirmation,
+                events=pv.loc.events,
+                tracking_runtime_p99_ms=(float(np.quantile(pv.loc.tracking_runtime_ms,.99))
+                                         if pv.loc.tracking_runtime_ms else None),
+                implementation_sha256=sha(ROOT/'tools/temporal_recovery_localizer_1126.py'),
+                qualification='Experimental simulation-only replacement after loss. Search latency is fixed and explicitly modeled; measured compute overruns are logged. Capture-to-result odometry compensation, then current-scan temporal confirmation; no past-scan replay. Four retained modes do not prove global uniqueness. During recovery raw odometry is used without the production skid extrapolator. Not ROS, real-time or vehicle qualification.')
         (dest / 'report.json').write_text(json.dumps(report, indent=2, allow_nan=False) + '\n')
         print(json.dumps(report), flush=True)
     finally:
