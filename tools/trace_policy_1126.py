@@ -15,6 +15,7 @@ def main():
     p.add_argument('--diagnostic_override',choices=['expert_speed','expert_steer','expert_both'],
                    help='privileged counterfactual for diagnosis; never a policy qualification')
     p.add_argument('--audit_preview',action='store_true',help='record the projection index and actual preview inputs')
+    p.add_argument('--audit_physics',action='store_true',help='record slip-aware path-normal acceleration separately from the legacy yaw proxy')
     cli=p.parse_args();os.chdir(S)
     import numpy as np,torch,random
     import matplotlib;matplotlib.use('Agg')
@@ -70,6 +71,11 @@ def main():
         side=0 if act[0]>0 else 1;k=env.steer_scale[side];lock=env.steer_left_max if side==0 else env.steer_right_max
         target=float(act[0]*lock*(k+(1-k)*act[0]**2))
         obs,_,term,trunc,info=env.step(applied);state=env.vehicle_state();g=env.driving_geometry();metrics.update(env,applied)
+        if cli.audit_physics:
+            from utils.driving_physics import path_normal_acceleration
+            audit.update(yaw_rate=float(state[5]),slip_angle=float(state[6]),
+                         path_normal_acceleration=path_normal_acceleration(env._env.unwrapped.sim.agents[0]),
+                         nominal_mu_g=float(env.params['mu'])*9.81)
         rows.append(dict(command_time=command_time,state_time=float(env.elapsed),x=float(state[0]),y=float(state[1]),
                          speed=float(state[3]),policy_speed=min(float(unnormalize_speed(act[1],env.min_speed,env.max_speed)),env.speed_cap),
                          expert_speed=float(ev),policy_steer=float(act[0]),policy_wheel_target=target,wheel_actual=float(state[2]),
@@ -81,6 +87,7 @@ def main():
     stem=f'{cli.model.replace("/","_")}_{cli.tag}_{Path(path).stem}_cap{cli.cap:g}_{cli.start}_seed{cli.seed}'
     if cli.diagnostic_override:stem+='_'+cli.diagnostic_override
     if cli.audit_preview:stem+='_preview_audit'
+    if cli.audit_physics:stem+='_physics_audit'
     with open(dest/(stem+'.csv'),'w') as f:
         w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
     summary=dict(model=cli.model,tag=cli.tag,track=Path(path).name,cap=cli.cap,start=cli.start,seed=cli.seed,
@@ -89,6 +96,8 @@ def main():
                  diagnostic_override=cli.diagnostic_override,policy_qualification=not bool(cli.diagnostic_override),
                  progress_m=float(env.progress),lap_times=[float(t) for t in env.lap_times],
                  checkpoint_sha256=hashlib.sha256(ckpath.read_bytes()).hexdigest(),
+                 lateral_acceleration_semantics={'lat_acc':'legacy speed*yaw_rate proxy; not the slip-aware PPO penalty signal',
+                     'path_normal_acceleration':'optional simulator derivative normal to velocity, including slip-rate'},
                  shadow_expert='6.0 nominal reference, corner lookahead .65, response inversion; diagnostic only')
     if cli.audit_preview:
         jumps=np.array([r['observed_preview_delta_s'] for r in rows]);jumps=jumps[np.isfinite(jumps)]
