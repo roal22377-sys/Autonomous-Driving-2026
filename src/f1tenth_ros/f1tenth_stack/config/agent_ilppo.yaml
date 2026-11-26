@@ -8,7 +8,7 @@ agent_node:
     scan_topic: scan
     drive_topic: drive
     odom_topic: odom
-    speed_limit: 2.0    # [m/s] 11/24 calibrated car: 2.0 first (as IL 11), then 4.0, 5.0; competition 8.0
+    speed_limit: 4.0    # [m/s] 11/26 Practice1126: 4.0 (user choice, 2.0 skipped), then 5.0; competition 8.0
     speed_min: 0.0
     steer_gain_left: 1.0
     steer_gain_right: 1.0
