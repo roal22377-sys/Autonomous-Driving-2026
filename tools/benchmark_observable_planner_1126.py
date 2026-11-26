@@ -58,6 +58,7 @@ def main():
     p.add_argument('--diagnostic-oracle', choices=['none', 'pose', 'wheel', 'both'], default='none',
                    help='Privileged diagnostic only; never qualifies an observable controller')
     p.add_argument('--corner-lookahead', type=float, default=.65)
+    p.add_argument('--predictor', choices=['kinematic', 'nominal-dynamic'], default='kinematic')
     p.add_argument('--output', required=True)
     cli = p.parse_args()
     if not 0 < cli.corner_lookahead < float('inf'):
@@ -70,6 +71,8 @@ def main():
     from utils.env import F1Wrapper, normalize_speed, unnormalize_speed
     from utils.rule_based import RacelinePlanner
     from utils.driving_metrics import DrivingMetrics
+    from utils.observation import apply_start_kick, get_kick_config
+    from nominal_vehicle_1126 import NominalVehicle, nominal_planner_class
 
     ObservationTap = observation_tap_class(F1Wrapper)
 
@@ -80,6 +83,7 @@ def main():
     if oc['lidar']['num_beams'] != 88 or not oc['speed']['enabled'] or oc['history']['length'] != 12:
         raise ValueError('Prototype requires 88 LiDAR bins, speed and 12 command pairs')
     nominal = args.sim2real
+    kick_cfg = get_kick_config(args)
     dt = float(args.timestep)
     ns = int(round(nominal['steer_delay_nominal']/dt))
     nv = int(round(nominal['speed_delay_nominal']/dt))
@@ -99,6 +103,7 @@ def main():
         return float(np.copysign((lo+hi)/2, angle))
     report = dict(status='running', mode=cli.mode, diagnostic_oracle=cli.diagnostic_oracle,
                   corner_lookahead=cli.corner_lookahead,
+                  predictor=cli.predictor,
                   eligible_observable_benchmark=cli.diagnostic_oracle == 'none',
                   history_protocol='physical_zero_reset_padding_v2', runs=[], limitations=[
         'Prototype; no car operation. No proof of hardware-equivalent actuator estimation.',
@@ -119,12 +124,17 @@ def main():
                 env.fixed_speed_cap=cap; env.start_mode='center'
                 try:
                     obs,_=env.reset(options={'track':path})
-                    planner=RacelinePlanner(track,args.length_f+args.length_r,v_min=args.min_speed,v_max=cap,
+                    plant=NominalVehicle(args) if cli.predictor == 'nominal-dynamic' else None
+                    planner_type=nominal_planner_class(RacelinePlanner) if plant else RacelinePlanner
+                    planner=planner_type(track,args.length_f+args.length_r,v_min=args.min_speed,v_max=cap,
                         a_lat=6.,a_acc=nominal['a_max_nominal'],a_brake=nominal['a_brake_nominal'],
                         max_steer=args.max_steer,max_steer_left=locks[0],max_steer_right=locks[1],
                         sv_max=args.sv_max,sim_agent=None,a_lat_steer=6.,steer_speed_mode='hold',
                         lad_base=.6,lad_gain=.22,corner_lad_cap=cli.corner_lookahead,corner_lad_kappa=.5)
+                    if plant: planner.nominal_vehicle=plant
                     estimated_wheel=0.; metrics=DrivingMetrics(); latencies=[]; reason='episode_end'
+                    # Unobserved yaw-rate/slip are propagated from the nominal model.
+                    latent=np.zeros(2)
                     steps=0; wheel_errors=[]; pose_errors=[]
                     while True:
                         x,y,yaw,valid=env.estimated_pose
@@ -140,10 +150,15 @@ def main():
                         sq,vq=pending_from_history(hist,steps,ns,nv,wheel,
                             lambda c: float(unnormalize_speed(c,args.min_speed,args.max_speed)))
                         control_wheel=float(truth[2]) if cli.diagnostic_oracle in ('wheel','both') else estimated_wheel
-                        state=np.array([x,y,control_wheel,speed,yaw,0.,0.])
+                        state=np.array([x,y,control_wheel,speed,yaw,latent[0],latent[1]])
                         v,angle=planner.plan(state,sq,vq,dt)
                         action=np.clip([command(angle),normalize_speed(v,args.min_speed,args.max_speed)],-1,1)
                         target=sq[0] if sq else wheel(action[0])
+                        if plant:
+                            sent_speed=apply_start_kick(min(float(v),cap),speed,kick_cfg)
+                            delivered_speed=vq[0] if vq else sent_speed
+                            propagated=plant.step(state,target,delivered_speed,dt)
+                            latent=propagated[5:7].copy()
                         estimated_wheel+=float(np.clip(target-estimated_wheel,-args.sv_max*dt,args.sv_max*dt))
                         latencies.append(time.perf_counter()-start)
                         obs,_,term,trunc,_=env.step(action)
