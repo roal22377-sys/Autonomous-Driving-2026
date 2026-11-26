@@ -29,7 +29,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--trial-id', type=int, required=True)
     parser.add_argument('--steps', type=int, default=10000)
+    parser.add_argument('--staged-learner', type=Path, help='Also verify the actual staged optimizer block')
     cli = parser.parse_args()
+    staged_path = cli.staged_learner.resolve() if cli.staged_learner else None
     if cli.steps < 2048 or cli.steps % 5:
         raise ValueError('Use >=2048 steps divisible by five')
     os.chdir(SRC)
@@ -49,6 +51,12 @@ def main():
     begin = source_text.index(marker)
     end = source_text.index('        clip_frac = clip_frac / max(1, n_mb)', begin)
     original_block = textwrap.dedent(source_text[begin:end])
+    staged_block = None
+    if staged_path:
+        staged_text = staged_path.read_text()
+        stage_begin = staged_text.index(marker)
+        stage_end = staged_text.index('        clip_frac = clip_frac / max(1, n_mb)', stage_begin)
+        staged_block = textwrap.dedent(staged_text[stage_begin:stage_end])
     assert original_block.count('        opt_actor.step()') == 1
     instrumented = original_block.replace('        opt_actor.step()', '''        opt_actor.step()
         with torch.no_grad():
@@ -117,15 +125,21 @@ def main():
             feature_names = columns(frame['args'])
             raw_obs = frame['B']['obs'].reshape(len(frame['S']), -1)
             states, results = {}, {}
-            for mode in ('unmodified', 'epoch_instrumented', 'minibatch_stop', 'minibatch_rollback'):
+            modes = ['unmodified', 'epoch_instrumented', 'minibatch_stop', 'minibatch_rollback']
+            if staged_block:
+                modes += ['staged_epoch', 'staged_rollback']
+            for mode in modes:
                 # Copy the connected object graph together, preserving the
                 # optimizer-to-parameter and actor_params aliases.
                 scope = copy.deepcopy(initial)
-                scope.update(torch=torch, copy=copy, _mode=mode, _trace=[], _rejected=False)
+                scope.update(torch=torch, np=np, copy=copy, _mode=mode, _trace=[], _rejected=False)
+                scope['args'].kl_guard = 'minibatch_rollback' if mode == 'staged_rollback' else 'epoch'
                 assert {id(p) for g in scope['opt_actor'].param_groups for p in g['params']} == {id(p) for p in scope['actor_params']}
                 torch.set_rng_state(rng)
                 block = (original_block if mode == 'unmodified' else
                          rollback_block if mode == 'minibatch_rollback' else instrumented)
+                if mode.startswith('staged_'):
+                    block = staged_block
                 exec(block, scope)
                 state = {k: scope[k].state_dict() for k in
                          ('actor', 'critic', 'ccritic', 'teacher', 'opt_actor', 'opt_critic', 'opt_ccritic', 'retention')}
@@ -156,15 +170,20 @@ def main():
                         preview_valid=bool(raw_obs[index,-1]>.5),
                         largest_normalized_features=[dict(name=feature_names[j],
                             normalized=float(frame['S'][index,j]), raw=float(raw_obs[index,j])) for j in feature_indices]))
+                rejected = scope.get('guard_rejected', scope['_rejected'])
                 results[mode] = dict(final_kl=float(scope['kl']), actor_minibatches=int(scope['n_mb']),
-                    rejected_actor_minibatches=int(scope['_rejected']),
-                    accepted_actor_minibatches=int(scope['n_mb'])-int(scope['_rejected']),
+                    rejected_actor_minibatches=int(rejected),
+                    accepted_actor_minibatches=int(scope['n_mb'])-int(rejected),
                     retention_minibatches=int(scope['retention_steps']), per_minibatch_kl=scope['_trace'],
                     per_state_kl=strata,
                     largest_state_changes=largest,
                     mean_abs_action_delta=change.abs().mean(0).tolist(),
                     lost_mean_abs_action_delta=change[lost].abs().mean(0).tolist() if lost.any() else None)
             assert same(states['unmodified'], states['epoch_instrumented']), 'Instrumentation changed optimizer result'
+            if staged_block:
+                assert same(states['unmodified'], states['staged_epoch']), 'Staged default changes optimizer behavior'
+                assert same(states['minibatch_rollback'], states['staged_rollback']), 'Staged rollback differs from the verified prototype'
+                assert results['staged_rollback']['retention_minibatches'] == results['staged_rollback']['accepted_actor_minibatches']
             assert same(frame['actor'].state_dict(), source['actor']), 'Source actor mutated'
             assert snapshot.read_bytes() == payload and src_snapshot.read_bytes() == payload
             assert results['minibatch_rollback']['final_kl'] <= frame['args'].max_kl
@@ -175,6 +194,8 @@ def main():
                 max_kl=float(frame['args'].max_kl), bc_weight=float(frame['bc_w']),
                 observation_matrix_sha256=hashlib.sha256(frame['S'].numpy().tobytes()).hexdigest(),
                 instrumentation_bit_exact=True, live_source_unchanged=True, results=results,
+                staged_implementation_sha256=hashlib.sha256(staged_path.read_bytes()).hexdigest() if staged_path else None,
+                staged_default_and_rollback_bit_exact=bool(staged_block),
                 qualification=('Actual optimizer block on private copies of one identical fresh training-only '
                     'rollout. Five balanced-family workers differ from production20-worker quotas. '
                     'Environment state is not serialized, so this is not an exact replay of update39. '

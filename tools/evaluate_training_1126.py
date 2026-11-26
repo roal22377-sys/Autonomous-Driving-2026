@@ -30,6 +30,7 @@ def main():
     p.add_argument('--tag',default='init')
     p.add_argument('--normalizer_model')
     p.add_argument('--workers',type=int,default=4)
+    p.add_argument('--mode',choices=['eval','worst'],default='eval',help='nominal or fixed worst-case simulator preset')
     p.add_argument('--output',help='separate report filename for a subset evaluation')
     caps=p.add_mutually_exclusive_group()
     caps.add_argument('--caps',type=float,nargs='+',help='diagnostic cap override, centerline starts only')
@@ -77,7 +78,7 @@ def main():
         sets={g:(tracks,tuple((cap,'center') for cap in cli.caps)) for g,(tracks,_) in sets.items()}
     elif cli.cycle_caps:
         sets={g:(tracks,((tuple(cli.cycle_caps),'center'),)) for g,(tracks,_) in sets.items()}
-    out=dict(model=cli.model,tag=cli.tag,seeds=cli.seeds,checkpoint_sha256=hashlib.sha256(ckpath.read_bytes()).hexdigest(),
+    out=dict(model=cli.model,tag=cli.tag,seeds=cli.seeds,simulation_mode=cli.mode,checkpoint_sha256=hashlib.sha256(ckpath.read_bytes()).hexdigest(),
              normalizer_source='embedded_checkpoint' if normalizer_path is None else str(normalizer_path),
              normalizer_file_sha256=None if normalizer_path is None else hashlib.sha256(normalizer_path.read_bytes()).hexdigest(),
              normalizer_arrays_sha256=hashlib.sha256(b''.join(np.asarray(x,dtype='<f8').tobytes(order='C') for x in (mean,var))).hexdigest(),
@@ -91,10 +92,11 @@ def main():
              config=str(args.task_config),families={},notes='Real and 2025 geometries are in training; hall validation excludes 2025.')
     dest=Path('results/analysis1126');dest.mkdir(exist_ok=True)
     scope_suffix='' if cli.regular_scope=='standard' else '_'+cli.regular_scope
+    if cli.mode!='eval':scope_suffix+='_'+cli.mode
     target=dest/(cli.output or f'{cli.model.replace("/","_")}_{cli.tag}_seeds{"-".join(map(str,cli.seeds))}{scope_suffix}.json')
     for name in cli.families:
         tracks,settings=sets[name]
-        jobs=[(str(Path(t).resolve()),policy,'eval',seed+i,
+        jobs=[(str(Path(t).resolve()),policy,cli.mode,seed+i,
                cap[i%len(cap)] if isinstance(cap,(tuple,list)) else cap,start)
               for seed in cli.seeds for cap,start in settings for i,t in enumerate(sorted(tracks))]
         res=IL.run_pool(IL.eval_worker,jobs,min(cli.workers,len(jobs)),len(jobs),name,'episodes')

@@ -47,6 +47,7 @@
     Output: results/ppo_s2r/<algo_idx>/ (same layout as the other algorithms), train_log.pkl per update
 '''
 import argparse
+import copy
 import os
 import sys
 import time
@@ -106,6 +107,10 @@ def get_args():
     p.add_argument('--gae', type=float, default=0.95)
     p.add_argument('--clip', type=float, default=0.15)
     p.add_argument('--max_kl', type=float, default=0.015)
+    p.add_argument('--kl_guard', choices=['epoch', 'minibatch_rollback'], default='epoch',
+                   help='epoch: legacy end-of-epoch stop; minibatch_rollback: reject the actor step '
+                        'that exceeds rollout-mean KL, restore actor/optimizer/cache RNG, and stop; '
+                        'the rejected minibatch critic update is retained')
     # exploration noise (log std of the gaussian around the actor mean), per action, decayed linearly
     p.add_argument('--log_std_steer', type=float, default=-2.3)
     p.add_argument('--log_std_speed', type=float, default=-1.5)
@@ -577,6 +582,8 @@ def main():
         if not os.path.isfile(resume_path):
             raise FileNotFoundError(f'{resume_path} missing: nothing to resume (run without --resume to start)')
         state = torch.load(resume_path, map_location='cpu', weights_only=False)
+        if state['args'].get('kl_guard', 'epoch') != args.kl_guard:
+            raise ValueError('KL guard mode changed during resume; start a declared new trial')
         if (retention is None) != (state.get('retention') is None):
             raise ValueError('Do not enable/disable retention during resume; start a declared new trial')
         if float(state['args'].get('retention_weight', 0.)) != args.retention_weight:
@@ -882,6 +889,7 @@ def main():
             old_dist = actor(S)
         kl, clip_frac, n_mb = 0.0, 0.0, 0
         retention_sum, retention_steps = 0., 0
+        guard_rejected, guard_attempted_kl = False, 0.0
         for ep in range(args.epochs):
             perm = torch.randperm(T * N)
             for i in range(0, T * N, args.minibatch):
@@ -899,6 +907,9 @@ def main():
                     opt_ccritic.step()
                 if warm:
                     continue
+                if args.kl_guard == 'minibatch_rollback':
+                    guard_before = copy.deepcopy((actor.state_dict(), opt_actor.state_dict(),
+                        retention.state_dict() if retention is not None else None))
                 d = actor(S[idx])
                 ratio = torch.exp(d.log_prob(A[idx]).sum(-1) - LP[idx])
                 pg = -torch.min(ratio * ADV[idx], torch.clamp(ratio, 1 - args.clip, 1 + args.clip) * ADV[idx]).mean()
@@ -923,10 +934,23 @@ def main():
                 actor_loss.backward()
                 torch.nn.utils.clip_grad_norm_(actor_params, 0.5)
                 opt_actor.step()
+                if args.kl_guard == 'minibatch_rollback':
+                    with torch.no_grad():
+                        guard_attempted_kl = torch.distributions.kl_divergence(old_dist, actor(S)).sum(-1).mean().item()
+                    if not np.isfinite(guard_attempted_kl) or guard_attempted_kl > args.max_kl:
+                        actor.load_state_dict(guard_before[0])
+                        opt_actor.load_state_dict(guard_before[1])
+                        opt_actor.zero_grad()
+                        if retention is not None:
+                            retention.load_state_dict(guard_before[2])
+                            retention_sum -= float(retention_loss.detach())
+                            retention_steps -= 1
+                        guard_rejected = True
+                        break
             if not warm:
                 with torch.no_grad():
                     kl = torch.distributions.kl_divergence(old_dist, actor(S)).sum(-1).mean().item()
-                if kl > args.max_kl:
+                if guard_rejected or kl > args.max_kl:
                     break
         clip_frac = clip_frac / max(1, n_mb)
         set_log_std(frac)                          # exploration noise for the next rollout
@@ -941,6 +965,9 @@ def main():
                    std_steer=float(std[0]), std_speed=float(std[1]), critic_loss=float(closs.item()), ret_scale=r_scale,
                    ep_return=mean('ret'), ep_laps=mean('laps'), crash_rate=mean('crash'), success_rate=mean('success'),
                    ep_speed=mean('speed'), stuck_rate=mean('stuck'), track_focus=focus, reward_per_step=rc)
+        row.update(kl_guard=args.kl_guard, kl_guard_rejected_minibatches=int(guard_rejected),
+                   actor_attempted_minibatches=n_mb, actor_accepted_minibatches=n_mb-int(guard_rejected),
+                   kl_guard_attempted_kl=guard_attempted_kl if np.isfinite(guard_attempted_kl) else None)
         if retention is not None:
             row.update(retention_loss=retention_sum / max(1, retention_steps),
                        retention_weight=args.retention_weight, retention_minibatches=retention_steps)
