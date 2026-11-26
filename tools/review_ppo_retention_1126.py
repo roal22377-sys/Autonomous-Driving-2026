@@ -77,6 +77,30 @@ def main():
     if snapshot['best']['name'] != 'update 10':
         raise ValueError('Pace reference identity changed')
     references = dict(source_u70=source['families'], pace_u10=snapshot['best']['families'])
+    restored_worst, restored_worst_provenance = None, None
+    if candidate_run == 29:
+        path = SRC / 'results/analysis1126/ppo25_u70_worst_regular_reference_seed7.json'
+        restored = json.loads(path.read_text())
+        if (restored['checkpoint_sha256'] != source['checkpoint_sha256']
+                or restored['simulation_mode'] != 'worst' or restored['localization_forced_lost']
+                or restored['seeds'] != [7] or restored['diagnostic_caps'] is not None
+                or restored['diagnostic_cycle_caps'] is not None or restored['regular_scope'] != 'standard'
+                or restored['normalizer_file_sha256'] != launch['observation_normalizer_sha256']):
+            raise ValueError('Different restored worst-case source protocol')
+        for key, filename in (('config_sha256', 'f1tenth.yaml'), ('dynamics_sha256', 'dynamic.yaml')):
+            if restored[key] != sha(base / str(candidate_run) / 'backup' / filename):
+                raise ValueError('Different restored worst-case task/dynamics')
+        cohort = restored['families']['regular']
+        track_order = [Path(p).stem for p in cohort['track_names']]
+        if track_order != now['evaluation_track_order']['worst_res']:
+            raise ValueError('Different restored worst-case seed order')
+        for entry in cohort['runs']:
+            if entry['seed'] != 7 + track_order.index(entry['result'][0].split('@')[0]):
+                raise ValueError('Different restored worst-case per-case seed')
+        restored_worst = [r['result'] for r in cohort['runs']]
+        if len(restored_worst) != 132 or sum(bool(r[1]) for r in restored_worst) != 120 or abs(source_row['worst'] - 120/132) > 1e-9:
+            raise ValueError('Source worst-case history was not reproduced')
+        restored_worst_provenance = dict(report=str(path.relative_to(ROOT)), sha256=sha(path))
     current, control_families, cohorts = {}, {}, {}
     for group, (rate_key, rows_key, count) in COHORTS.items():
         rows, old = now[rows_key], control[rows_key]
@@ -98,6 +122,8 @@ def main():
         if group not in source['families']:
             row['vs_source_u70'] = (matched(rows, source_row[rows_key])
                                     if rows_key in source_row else None)
+        if group == 'worst' and restored_worst is not None:
+            row['vs_source_u70'] = matched(rows, restored_worst)
         cohorts[group] = row
     references['same_update_control'] = control_families
     comparisons = {label: choose_families(current, families, args['training_mix'])
@@ -127,6 +153,7 @@ def main():
                        weight=now['retention_weight'], cache_sha256=manifest['cache_sha256'],
                        manifest_sha256=sha(manifest_path)),
         kl_guard_review=guard_review,
+        restored_worst_source=restored_worst_provenance,
         source_stress_and_lost_guard=dict(passed=not regressions, completion_regressions=regressions),
         eligible_for_expanded_validation=(not regressions and all(
             comparisons[label]['selected'] for label in ('source_u70', 'pace_u10'))),
