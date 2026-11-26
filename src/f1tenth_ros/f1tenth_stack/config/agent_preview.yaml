@@ -16,7 +16,7 @@ agent_node:
     scan_topic: scan
     drive_topic: drive
     odom_topic: odom
-    speed_limit: 6.0    # [m/s] 11/26: 6.0 (user choice; LiDAR PPO hit the top-left open area at 6 and 8, clean at 4)
+    speed_limit: 8.0    # [m/s] 11/26: max (= competition). 6.0 on Practice1126b: 175 m clean, localization 98.6 % (run_1126_1722)
     speed_min: 0.0
     steer_gain_left: 1.0
     steer_gain_right: 1.0
