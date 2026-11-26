@@ -16,6 +16,7 @@ def main():
                    help='privileged counterfactual for diagnosis; never a policy qualification')
     p.add_argument('--audit_preview',action='store_true',help='record the projection index and actual preview inputs')
     p.add_argument('--audit_physics',action='store_true',help='record slip-aware path-normal acceleration separately from the legacy yaw proxy')
+    p.add_argument('--audit_observations',action='store_true',help='save exact pre-action policy inputs for read-only shadow-policy comparisons')
     cli=p.parse_args();os.chdir(S)
     import numpy as np,torch,random
     import matplotlib;matplotlib.use('Agg')
@@ -49,10 +50,12 @@ def main():
     preview_columns=[(i,name) for i,name in enumerate(columns(args)) if name.startswith('preview/')]
     if cli.audit_preview and env.preview is None:raise ValueError('--audit_preview requires track preview')
     previous_i=getattr(env.preview,'last_i',None);previous_valid=bool(getattr(env,'_pv',True))
-    rows=[];metrics=DrivingMetrics()
+    rows=[];metrics=DrivingMetrics();observation_audit=[]
     while True:
         with torch.no_grad():act=actor(torch.as_tensor(rms.normalize(obs),dtype=torch.float32)).loc.numpy()
         act=np.clip(act,-1,1);sq,vq=env.pending_commands()
+        if cli.audit_observations:
+            observation_audit.append((obs.copy(),act.copy()))
         ev,ed=planner.plan(env.vehicle_state(),sq,vq,env.timestep)
         command_time=float(env.elapsed);valid=bool(getattr(env,'_pv',True))
         audit={}
@@ -88,6 +91,7 @@ def main():
     if cli.diagnostic_override:stem+='_'+cli.diagnostic_override
     if cli.audit_preview:stem+='_preview_audit'
     if cli.audit_physics:stem+='_physics_audit'
+    if cli.audit_observations:stem+='_observations_audit'
     with open(dest/(stem+'.csv'),'w') as f:
         w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
     summary=dict(model=cli.model,tag=cli.tag,track=Path(path).name,cap=cli.cap,start=cli.start,seed=cli.seed,
@@ -103,6 +107,15 @@ def main():
         jumps=np.array([r['observed_preview_delta_s'] for r in rows]);jumps=jumps[np.isfinite(jumps)]
         summary['preview_projection_audit']=dict(maximum_step_m=float(np.abs(jumps).max()) if len(jumps) else None,steps_over_1m=int((np.abs(jumps)>1.).sum()),
              note='Projection index and raw preview values actually presented to the policy; logging does not alter observations.')
+    if cli.audit_observations:
+        observation_path=dest/(stem+'_observations.npz')
+        np.savez_compressed(observation_path,O=np.asarray([x[0] for x in observation_audit],np.float32),
+                            policy_action=np.asarray([x[1] for x in observation_audit],np.float32),
+                            command_time=np.asarray([r['command_time'] for r in rows],np.float64),
+                            columns=np.asarray(columns(args)))
+        summary['observation_audit']=dict(file=str(observation_path),rows=len(observation_audit),
+            sha256=hashlib.sha256(observation_path.read_bytes()).hexdigest(),
+            note='Raw policy observations before env.step and clipped primary-policy actions. These are diagnostic evaluation states, never gradient data. Shadow actors require their own matching normalizers.')
     (dest/(stem+'.json')).write_text(json.dumps(summary,indent=2)+'\n');env.close()
     data={k:np.array([r[k] for r in rows]) for k in rows[0]};t=data['state_time']
     fig,axes=plt.subplots(2,2,figsize=(13,8));ax=axes[0,0]
