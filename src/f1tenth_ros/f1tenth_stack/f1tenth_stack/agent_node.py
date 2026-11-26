@@ -95,6 +95,12 @@ class AgentNode(Node):
     self.declare_parameter('fallback_algo_idx', 0)
     self.declare_parameter('fallback_speed_limit', 4.0)
     self.declare_parameter('lost_switch', 0.3)
+    # speed ramp for limit tests (grip): speed_limit = start + step x (driving time // every), up to max. Driving time
+    # counts only while this node drives the car (not behind the keyboard hold, odom > 0.3 m/s). start <= 0: off
+    self.declare_parameter('speed_ramp_start', 0.0)
+    self.declare_parameter('speed_ramp_step', 0.5)
+    self.declare_parameter('speed_ramp_every', 15.0)
+    self.declare_parameter('speed_ramp_max', 8.0)
 
     self.scan_topic = self.get_parameter('scan_topic').value
     self.drive_topic = self.get_parameter('drive_topic').value
@@ -109,6 +115,15 @@ class AgentNode(Node):
     self.gain_right = float(self.get_parameter('steer_gain_right').value)
     if (self.gain_left, self.gain_right) != (1.0, 1.0):
       self.get_logger().warn(f'[drive] STEER GAIN on: left x{self.gain_left:.2f}, right x{self.gain_right:.2f}')
+    self.ramp = None
+    r0 = float(self.get_parameter('speed_ramp_start').value)
+    if r0 > 0:
+      self.ramp = dict(start=r0, step=float(self.get_parameter('speed_ramp_step').value),
+                       every=float(self.get_parameter('speed_ramp_every').value),
+                       max=float(self.get_parameter('speed_ramp_max').value), t=0.0, last=None)
+      self.speed_limit = r0
+      self.get_logger().warn(f"[ramp] SPEED RAMP on: cap {r0:.1f} m/s, +{self.ramp['step']:.1f} every "
+                             f"{self.ramp['every']:.0f} s of driving, up to {self.ramp['max']:.1f}")
     if self.speed_limit > 0:
       self.get_logger().info(f'[drive] speed limited to {self.speed_limit} m/s')
 
@@ -311,6 +326,15 @@ class AgentNode(Node):
     teleop_active = self.teleop_time is not None and time.monotonic() - self.teleop_time < TELEOP_HOLD
     if teleop_active:
       self.resetHistories()
+    if self.ramp is not None:
+      now = time.monotonic()
+      if self.ramp['last'] is not None and not teleop_active and (self.odom_speed or 0.0) > 0.3:
+        self.ramp['t'] += min(now - self.ramp['last'], 0.2)
+      self.ramp['last'] = now
+      cap = min(self.ramp['max'], self.ramp['start'] + self.ramp['step'] * int(self.ramp['t'] // self.ramp['every']))
+      if cap != self.speed_limit:
+        self.speed_limit = cap
+        self.get_logger().warn(f"[ramp] speed limit {cap:.1f} m/s (after {self.ramp['t']:.0f} s of driving)")
 
     # make obs
     raw_scan = np.array(scan_msg.ranges[:1080])

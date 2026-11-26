@@ -31,3 +31,8 @@ agent_node:
     fallback_algo_idx: 12190
     fallback_speed_limit: 4.0
     lost_switch: 0.3
+    # 11/26 limit test: cap 4.0 -> +0.5 every 15 s of driving -> 8.0 (speed_limit above is then ignored; 0 = off)
+    speed_ramp_start: 4.0
+    speed_ramp_step: 0.5
+    speed_ramp_every: 15.0
+    speed_ramp_max: 8.0
