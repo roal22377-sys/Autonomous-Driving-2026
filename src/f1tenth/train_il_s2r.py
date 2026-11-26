@@ -106,6 +106,7 @@ def get_args(argv=None):
     p.add_argument('--workers', type=int, default=20,
                    help='simulation processes (~0.4 GB each): 20 workers peaked at 9.1 GB + data 2.2 GB on the 15.5 GB WSL PC')
     p.add_argument('--bc_threads', type=int, default=16, help='torch threads for BC (WSL sees 16 cores x 2)')
+    p.add_argument('--eval_workers', type=int, default=None, help='evaluation processes (default: workers); cap for parallel trials')
     p.add_argument('--expert_steps', type=float, default=1.2e6, help='DART expert rollout steps')
     p.add_argument('--dagger_iters', type=int, default=20,
                    help='maximum DAgger rounds; the early stop below usually ends the run sooner')
@@ -384,7 +385,8 @@ def evaluate(args, policy, tracks, mode='eval', settings=EVAL_SETTINGS):
             for cap, start in settings for i, p in enumerate(sorted(tracks))]
     if not jobs:
         raise ValueError('evaluation needs at least one track and setting')
-    res = run_pool(eval_worker, jobs, min(args.workers, len(jobs)), len(jobs), 'eval', 'episodes')
+    workers = min(args.workers, args.get('eval_workers') or args.workers, len(jobs))
+    res = run_pool(eval_worker, jobs, workers, len(jobs), 'eval', 'episodes')
     succ = np.mean([r[1] for r in res])
     held = [r[1] for r in res if HOLDOUT in r[0]]
     if held:
