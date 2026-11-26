@@ -60,7 +60,11 @@ case "$1" in
     "$0" --stop
     OUT=$("$0" --fetch | tee /dev/stderr | sed -n 's/^\[done\] //p')
     [ -n "$OUT" ] || { echo "[error] fetch failed"; exit 1; }
-    PY=python3; [ -x "$HOME/venv/torch210/bin/python" ] && PY="$HOME/venv/torch210/bin/python"
+    # PC python with numpy/pandas/matplotlib (+ torch for the sim checks); override: PY=/path/to/python
+    if [ -z "$PY" ]; then
+      PY=python3
+      for p in "$HOME/venv/torch210/bin/python" "$HOME/venv/f1tenth/bin/python"; do [ -x "$p" ] && PY="$p" && break; done
+    fi
     if [ "$2" = "--circle" ]; then
       "$PY" "$REPO/tools/circle_analysis.py" "$OUT" | tee "$OUT/circle.txt"
       echo "[done] analysis saved to $OUT/circle.txt"
@@ -146,6 +150,17 @@ else
                "ros2 run f1tenth_stack agent_node --ros-args --params-file src/f1tenth_ros/f1tenth_stack/config/$AGENT_YAML"
 fi
 
+if ! command -v gnome-terminal >/dev/null 2>&1; then
+  # another computer (Mac, WSL without a desktop, ...): open 6 terminals yourself and run one line in each, in order
+  echo "[local] gnome-terminal not found. Open 6 terminals and run, in this order (wait for bringup before the rest):"
+  echo "  1 bringup:  bash $TABS/bringup.sh"
+  echo "  2 TELEOP:   bash $TABS/teleop.sh      (s = stop, r = go)"
+  echo "  3 bag:      bash $TABS/bag.sh"
+  echo "  4 status:   bash $TABS/status.sh"
+  echo "  5 monitor:  bash $TABS/monitor.sh"
+  echo "  6 ${LAST#6 }:  bash $TABS/agent.sh"
+  exit 0
+fi
 gnome-terminal --window --title "1 bringup"            -e "bash $TABS/bringup.sh" \
                --tab    --title "2 TELEOP s=stop r=go" -e "bash $TABS/teleop.sh" \
                --tab    --title "3 bag record"         -e "bash $TABS/bag.sh" \

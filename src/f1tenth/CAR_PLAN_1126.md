@@ -1,29 +1,71 @@
-# 11/26(목) 실차 계획: 지도 따기 → LiDAR PPO 주행 → 위치 추정 → 위치 정보 모델(계획 B)
+# 11/26(목) 수업 시간 실차 계획: 지도 따기 → LiDAR PPO 주행 → 위치 확인 → 위치 정보 모델(계획 B)
 
-## 한눈에 보기 (15:00 시작, 약 2.5시간) — 11/26 14:00 최종
+## 한눈에 보기 (15:00 시작, 약 2.5시간) — 11/26 14:58 갱신
+
+**다른 컴퓨터에서 할 때는 먼저 0절(준비, 15분)을 합니다.** 모든 명령은 저장소 루트(`~/Autonomous-Driving-2026`) 기준입니다.
 
 ### 출발 전 (PC, 5분)
 ```bash
-cd ~/Autonomous-Driving-2026 && git pull && git status      # 바뀐 파일이 없어야 함
-ssh jowonjun@10.106.0.73 true                                # 비밀번호 없이 되어야 함
+cd ~/Autonomous-Driving-2026 && git pull && git status       # 바뀐 파일이 없어야 함
+ssh jowonjun@10.106.0.73 true                                 # 비밀번호 없이 되어야 함 (0-2)
 ssh jowonjun@10.106.0.73 'source ~/venv/torch210/bin/activate && python3 -c "import scipy; print(scipy.__version__)"'
 ```
+- 차 IP가 바뀌었으면 모든 명령 앞에 `CAR_HOST=jowonjun@<새 IP>`를 붙입니다. 예: `CAR_HOST=jowonjun@10.106.0.80 tools/map_session.sh`
 - scipy가 없으면 3번(위치 정보 모델) 전에 차에서 `pip install "scipy<1.11"`을 실행합니다. 1·2번에는 필요 없습니다.
-- LiDAR 수평과 배터리 완충을 확인합니다.
+- LiDAR 수평과 배터리 완충을 확인합니다. **줄자**를 챙깁니다(통로 폭 측정).
 
 ### 할 일
 
 | # | 할 일 | 시간 | 필수 여부 | 명령 |
 |---|---|---|---|---|
-| 1 | **지도 따기** | 30분 | 필수 | `tools/map_session.sh` → TELEOP `s` → agent Enter → TELEOP `r` → 3바퀴 → `s` → `tools/map_session.sh --finish Practice1126` → 확인 3가지 → commit / push |
+| 1 | **지도 따기** | 30분 | 필수 | `tools/map_session.sh` → TELEOP `s` → agent Enter → TELEOP `r` → 3바퀴 → `s` → `tools/map_session.sh --finish Practice1126` → 확인 4가지(2절) → commit / push |
 | 2 | **LiDAR PPO 주행** | 40분 | 필수 | `MODEL=ilppo tools/drive_session.sh` 상한 2 → 4 → 5, 괜찮으면 `MODEL=ilppo_fast` 5 → 6. 상한마다 3바퀴, 끝날 때마다 `tools/drive_session.sh --finish` |
-| 3 | **위치 정보 모델** | 40분 | 조건부 | `loc_test.py`로 2번 기록 확인(valid 98 % 이상) → **차를 출발 자리에 먼저 놓고** `MODEL=preview tools/drive_session.sh` 상한 2.5 → 3 → 4 → 5. 미끄러지거나 벽에 닿으면 `MODEL=preview_robust`. 시간이 남으면 `MODEL=preview_il`로 같은 상한 비교 |
-| 4 | 원선회 | 10분 | 선택 | 공간이 있으면 `tools/drive_session.sh --circle`(조향 양 끝 2개만) |
+| 3 | **위치 확인** | 15분 | 필수(4번 전) | 차를 출발 자리에 놓고 `MODEL=preview tools/drive_session.sh` + **다른 터미널에서 `MODEL=preview tools/drive_session.sh --loc`** → **OK** 확인 → 손으로 밀어 한 바퀴(계속 OK) (4절) |
+| 4 | **위치 정보 모델** | 40분 | 조건부(3번 통과) | 같은 세션에서 TELEOP `r`. 상한 2.5 → 3 → 4 → 5. `--loc` 화면은 계속 켜 둠. 벽에 닿으면 `MODEL=preview_robust`, 시간이 남으면 `MODEL=preview_il` 비교 |
+| 5 | 원선회 | 10분 | 선택 | 공간이 있으면 `tools/drive_session.sh --circle`(조향 양 끝 2개만) |
 
 - **2번 기록 하나로 세 가지를 합니다:** 실차 결과, 접지력 측정(5-1절 `grip_from_log.py`), 위치 추정 시험(4-1절 `loc_test.py`).
-- **시간이 부족하면** 1 → 2 → 3 순서로 하고, 4번과 상한 6은 생략합니다.
+- **시간이 부족하면** 1 → 2 → 3 → 4 순서로 하고, 5번과 상한 6은 생략합니다.
 - **위치 정보 모델은 위치를 0.3 s 넘게 잃으면 스스로 멈춥니다**(정상 동작). 다시 찾으면 이어서 달립니다.
-- **끝나면:** `git add -f logs/run_1126_*_extracted && git commit -m "car 11/26 logs" && git push`. 본 것(벽 접촉, 흔들림, 좋았던 주행)은 메시지로 남겨 주세요.
+- **끝나면:** `git add -f logs/run_1126_*_extracted && git commit -m "car 11/26 logs" && git push`. 본 것(벽 접촉, 흔들림, 좋았던 주행, 줄자 값)은 메시지로 남겨 주세요. 다음 학습은 이 기록을 보고 같이 정합니다(8절).
+
+### 위치가 맞는지 보는 법 (3·4번, `tools/loc_view.py`)
+
+`MODEL=preview tools/drive_session.sh --loc`를 PC의 **다른 터미널**에서 켭니다. agent가 시작 위치를 찾으면 화면이 나옵니다. 차에 아무 명령도 보내지 않습니다(읽기만 함).
+
+| 판정 | 뜻 | 할 일 |
+|---|---|---|
+| **OK** (초록) | 스캔의 75 % 이상이 지도 벽 위에 있음 (맞는 위치는 보통 95–100 %) | 출발해도 됨 |
+| **CHECK** (노랑) | 45–75 %. 차 근처에 사람이나 물건이 있어도 이렇게 나옴 | 그림을 보고 판단. 사람을 비키게 하고 다시 봄 |
+| **WRONG** (빨강) | 45 % 미만: 위치가 틀림 | 아래 "다시 잡기" |
+| **LOST** | agent가 위치를 잃었다고 보고함 | 아래 "다시 잡기" |
+
+- **그림:** `.` 지도 벽, `o` 벽 위에 맞은 스캔, `X` 벽에 안 맞은 스캔, `@` 차, `*` 차가 보는 방향. 맞으면 `o`가 `.` 줄 위에 겹칩니다.
+- **RViz로 보기(선택):** PC에 ROS 2 Foxy가 있고 차와 같은 네트워크에서 토픽이 보이면 다음을 켭니다.
+  ```bash
+  source /opt/ros/foxy/setup.bash && export ROS_DOMAIN_ID=6 && rviz2 -d tools/loc_view.rviz
+  ```
+  초록 점(지금 스캔)이 검은 지도 벽 위에 겹치면 맞습니다. 빨간 화살표가 차입니다. `--loc` 터미널이 켜져 있어야 지도와 초록 점이 나옵니다.
+  화면이 비어 있으면 `ros2 topic list`에 `/loc_map`이 없는 것입니다(WSL은 기본 설정에서 차의 토픽이 안 보임). 이때는 터미널 판정을 씁니다. 기준은 같습니다.
+- **다시 잡기:** TELEOP `s` → agent 탭 Ctrl-C → 차를 출발 자리에 놓기(코너가 보이는 곳, 통로에 사람 없음) → `MODEL=preview tools/drive_session.sh --agent` → `--loc` 화면이 OK가 된 뒤 TELEOP `r`.
+- **차를 손으로 옮겼으면** 항상 다시 잡습니다(agent가 들고 다니는 중의 위치를 믿을 수 있게 하려면 출발 자리에서 켜는 게 확실합니다).
+
+### 주의: 좁은 헤어핀 (11/26 14:56 시뮬레이터 결과, `results/reports/hall_eval_1126_1456.md`)
+
+2025 대회 트랙 사진을 보고 만든 좁은 코스(통로 1.0–2.0 m, 벽 하나 사이로 붙은 헤어핀, 평가 전용 53개)에서는 **지금 모델이 거의 완주하지 못합니다.** expert는 53/53입니다.
+
+| 모델 | 상한 8 | 상한 4 | 2025 복제 맵 |
+|---|---|---|---|
+| `preview` PPO 21 u30 | 0 % | 2 % | 0/4 |
+| `preview_robust` PPO 21 u50 | 0 % | 0 % | 0/4 |
+| `preview_il` IL 13 | 0 % | 0 % | 0/4 |
+| `ilppo` PPO 12 u190 (LiDAR 전용) | 19 % | 23 % | 0/4 |
+
+- 위치 정보 모델은 대부분 출발 4–5 s 안(첫 좁은 코너)에서 부딪힙니다. 2025 복제 맵에서는 상한 2.5에서도 1.6 m 간격 헤어핀 두 개 구간에서 부딪혔습니다.
+- 11/24 연습 코스(가장 좁은 곳 약 1.0 m)에서는 세 위치 정보 모델 모두 상한 2–4에서 완주했으므로, 오늘 주행 계획은 그대로 갑니다.
+- 오늘 연습 코스에 폭 1.5 m 이하 통로나 헤어핀이 있으면, 그곳은 **상한 2–2.5에서 먼저** 봅니다.
+- 그런 곳의 실차 기록(벽 접촉 위치, 속도)이 다음 학습(좁은 코스 학습)에 가장 중요한 자료입니다. 어디서 닿았는지 적어 주세요.
+- 전체 결과는 `results/reports/hall_eval_1126_1456.md`에 있습니다(8절).
 
 ### 확정 모델 (3시드 비교 `results/reports/compare_1126_0837_*.md`, `_1056_*`, `_1330_*`)
 
@@ -48,22 +90,42 @@ ssh jowonjun@10.106.0.73 'source ~/venv/torch210/bin/activate && python3 -c "imp
 4. 준비되면 위치 정보 입력 모델(계획 B)을 낮은 속도부터 돌려 봅니다.
 
 연습 코스는 대회 코스와 무관합니다. 대회 코스는 대회 이틀 전에 땁니다. 오늘은 그날의 흐름을 한 번 해 보는 날입니다.
-모든 명령은 저장소 루트(`~/Autonomous-Driving-2026`) 기준입니다.
 
 ---
 
-## 0. 오늘 밤 PC에서 준비되는 것 (Claude)
+## 0. 다른 컴퓨터에서 할 때 (처음 한 번, 15분)
 
-| 항목 | 상태 (11/25 저녁) | 아침까지 |
-|---|---|---|
-| 맵 툴 (`map_offline.py` 등) | 짧은 코스에서도 되도록 고침. 정답 비교 벽 오차는 연습 코스 3.3 cm, 50–90 m 코스 5.6–7.6 cm (`MAP_TOOL.md` 1절) | 완료 |
-| 위치 추정 (`utils/localizer.py`) | 11/24 실제 기록에서 62 s 내내 유효, 오차 중앙값 2.9 cm. 시뮬레이터 4–5 m/s 정답 비교 2.8–10.6 cm. 스캔당 2–3 ms(PC) | 완료 |
-| 차 쪽 연결 (`agent_node.py`, `agent_preview.yaml`) | 첫 스캔에서 코스를 따라 시작 위치를 찾고, 반대 방향이면 `_rev` 코스로 자동 전환. 위치를 잃으면 LiDAR만으로 주행. `/loc_pose` 기록 | PC 재생 검사(`tools/agent_replay.py`) 뒤 완료 |
-| IL 13 (위치 정보 입력, 짧은 코스 50 %) | 16:06 시작, 약 4시간 | 결과를 보고 Claude가 PPO 14 설정 |
-| PPO 14 (IL 13에서 시작) | IL 13 뒤 밤새 | 아침에 가장 좋은 모델을 `agent_preview.yaml`에 넣고 push |
-| LiDAR 전용 모델 | PPO 12 u190(`12190`, 안정) / u272(`12272`, 약 12 % 빠름). `agent_ilppo.yaml` / `agent_ilppo_fast.yaml` | 완료 |
+수업 시간에는 이 PC가 아니라 다른 컴퓨터로 해도 됩니다. 필요한 것은 **Linux 셸(Ubuntu, WSL, macOS), git, ssh, Python 3.8 이상**입니다.
 
-아침에 `git pull` 하면 모든 것이 들어옵니다. 계획 B 모델이 준비되지 않으면 4번은 건너뛰고 1–3번만 합니다.
+**0-1. 저장소**
+```bash
+git clone https://github.com/roal22377-sys/Autonomous-Driving-2026.git ~/Autonomous-Driving-2026
+cd ~/Autonomous-Driving-2026 && git config user.name "<이름>" && git config user.email "<메일>"
+```
+- 지도와 주행 기록을 push해야 하므로 이 컴퓨터에서 GitHub에 로그인돼 있어야 합니다(`git push`가 되는지 먼저 확인).
+
+**0-2. 차에 비밀번호 없이 접속**
+```bash
+ssh-keygen -t ed25519            # 키가 이미 있으면 생략 (엔터만 눌러도 됨)
+ssh-copy-id jowonjun@10.106.0.73
+ssh jowonjun@10.106.0.73 true    # 비밀번호를 묻지 않으면 성공
+```
+- 스크립트가 ssh를 여러 번 부르므로 비밀번호를 물으면 진행이 안 됩니다.
+
+**0-3. PC 쪽 Python (지도 만들기, 주행 평가, 시뮬레이터 확인)**
+```bash
+tools/setup_train_env.sh         # ~/venv/f1tenth 에 고정 버전 설치 (Python 3.8 기준, 약 10분)
+```
+- 스크립트들은 `~/venv/torch210` → `~/venv/f1tenth` → `python3` 순서로 Python을 찾습니다. 다른 곳에 설치했으면 `PY=/경로/python tools/map_session.sh --finish ...`처럼 붙입니다.
+- 시간이 없으면 최소한 `pip install numpy scipy matplotlib pandas pyyaml numba`만 해도 **지도 만들기(`map_session.sh --finish`)와 주행 평가는 됩니다.** 마지막 시뮬레이터 확인(`check_track.py`)만 실패하는데, 그 전에 지도와 차 설정은 이미 저장됩니다. 확인은 push 뒤에 Claude가 이 PC에서 합니다. (11/26 확인: 이 6개만 깐 새 환경에서 11/24 지도 → 코스 변환이 됨)
+
+**0-4. 탭 6개 열기**
+- `drive_session.sh` / `map_session.sh`는 gnome-terminal로 탭 6개를 엽니다(Ubuntu 데스크톱).
+- gnome-terminal이 없으면(macOS, WSL 등) 스크립트가 **터미널 6개에서 실행할 명령 6줄**을 출력하고 끝납니다. 터미널을 6개 열어 1번(bringup)부터 순서대로 한 줄씩 실행합니다. bringup이 뜬 뒤 나머지를 켭니다.
+
+**0-5. RViz (선택)**
+- Ubuntu 20.04에 ROS 2 Foxy(`ros-foxy-desktop`)가 있으면 위치 확인을 RViz로도 볼 수 있습니다(위 "위치가 맞는지 보는 법").
+- 없으면 터미널 판정(`--loc`)만으로 충분합니다.
 
 ---
 
@@ -141,10 +203,9 @@ python3 tools/loc_test.py logs/run_1126_XXXX_extracted maps/run_1126_YYYY --trac
    - 시작 위치는 agent가 켜질 때 찾습니다. 차를 들고 다니는 중에 켜면 엉뚱한 곳을 찾을 수 있습니다. 내려놓은 뒤 다시 찾게 고쳤지만, 출발 자리에서 켜는 게 확실합니다.
    - 주행 사이에 차를 손으로 옮겼다면 agent를 다시 시작합니다(`tools/drive_session.sh --agent`).
    - 주변에 사람이 많이 서 있거나 직선 한가운데처럼 비슷한 곳이 여러 군데면 `ambiguous start` 또는 `no reliable start pose`가 나옵니다. 이때는 코너가 보이는 자리로 옮기면 됩니다.
-2. agent 로그를 봅니다.
-   - `[preview] localization: start at x .. y .. yaw ..`가 나와야 합니다(시작 위치 찾기).
-   - `[preview] valid ...% ... step X ms`가 5초마다 나와야 합니다.
-3. 차를 손으로 밀어 코스를 한 바퀴 돕니다. `valid`가 100 % 근처를 유지해야 합니다.
+2. PC의 다른 터미널에서 `MODEL=preview tools/drive_session.sh --loc`를 켭니다(위 "위치가 맞는지 보는 법"). **OK**가 나와야 합니다.
+   - agent 로그에는 `[preview] localization: start at x .. y .. yaw ..`(시작 위치 찾기)와 5초마다 `[preview] valid ...% ... step X ms`가 나와야 합니다.
+3. 차를 손으로 밀어 코스를 한 바퀴 돕니다. `--loc` 화면이 계속 OK이고, agent 로그의 `valid`가 100 % 근처를 유지해야 합니다.
 4. **`step`이 10 ms를 넘으면** `agent_preview.yaml`에서 `loc_stride: 4`로 바꿉니다(Jetson이 PC보다 느림).
 
 ---
@@ -197,6 +258,24 @@ PPO가 느려지는 주원인은 바닥 접지력을 모르는 것입니다. 바
 | 1 준비 | 10분 |
 | 2 지도 | 30분 |
 | 3 LiDAR PPO | 40분 |
-| 4 위치 추정 | 20분 |
+| 4 위치 확인 (`--loc`) | 15–20분 |
 | 5 계획 B | 30분 |
 | 합계 | 약 2시간 10분 (배터리 교체 포함 2.5시간) |
+
+## 8. 끝난 뒤: 다음 학습 방향 정하기 (Claude와 같이)
+
+오늘 기록을 push하면 Claude가 아래를 분석해서 가져옵니다. 학습은 이 결과를 보고 같이 정한 뒤 시작합니다.
+
+| 분석 | 무엇으로 | 나오는 것 |
+|---|---|---|
+| 시뮬레이터 vs 실차 랩 타임 | 2·4번 `eval.txt` + 같은 코스 `check_track.py` | sim2real 차이 (시뮬레이터 보정량) |
+| 접지력 | `grip_from_log.py` (5-1절) | mu 하한 / 한계 → 학습 접지력 범위 |
+| 위치 추정 정확도 | `loc_test.py`, `eval_drive.py`의 `localization while driving` | 위치 잡음 모델(`track_preview.noise`) 실측 보정 |
+| 모델 비교 | 같은 상한의 LiDAR PPO / preview / preview_robust / preview_il | 어느 계열로 계속 갈지 |
+| 좁은 코스 | `results/reports/hall_eval_*.md` (`tools/eval_hall.py`) + 오늘 좁은 곳 실차 기록 | 좁은 코스 학습이 필요한 정도 |
+
+**같이 정할 후보 (Claude 의견):**
+1. **좁은 코스 학습 (우선):** 2025 사진 기반 코스 99개(`utils/track_hall.py`, `installation/maps_hall`, expert 완주 확인)를 IL과 PPO 학습에 섞습니다. 지금 모델은 1.2 m 통로 헤어핀을 못 돕니다.
+2. **시뮬레이터 보정:** 오늘 기록의 랩 타임·접지력·조향 반응으로 시뮬레이터 범위를 실측에 맞춥니다.
+3. **위치 잡음 보정:** 실차 위치 추정 오차와 끊김을 학습의 위치 잡음에 반영합니다.
+- 대회 코스는 대회 이틀 전에 지도를 따서 같은 파이프라인(지도 → 코스 → 확인 → 필요하면 추가 학습)으로 넣습니다.

@@ -18,8 +18,10 @@
 # NAME: letters and digits only (no _), e.g. Practice1126. The run name is the bag's (run_MMDD_HHMM).
 set -e
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PY=python3
-for p in "$HOME/venv/torch210/bin/python" "$HOME/venv/f1tenth/bin/python"; do [ -x "$p" ] && PY="$p" && break; done
+if [ -z "$PY" ]; then                     # override: PY=/path/to/python tools/map_session.sh ...
+  PY=python3
+  for p in "$HOME/venv/torch210/bin/python" "$HOME/venv/f1tenth/bin/python"; do [ -x "$p" ] && PY="$p" && break; done
+fi
 
 track() {  # map dir, name, extra args for map_to_track.py
   local MAP="$1" NAME="$2"; shift 2
