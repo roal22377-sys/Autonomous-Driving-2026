@@ -196,6 +196,9 @@ def main():
         scan_cb(s)
         T.append(time.perf_counter() - t0)
     drv = node.pubs[params.get('drive_topic', 'drive')].msgs
+    if os.environ.get('REPLAY_DUMP'):          # commanded (stamp, steering, speed) per scan, for checking the node's output
+        np.savetxt(os.environ['REPLAY_DUMP'], np.array([[float(m.header.stamp) if not hasattr(m.header.stamp, 'sec') else 0.0,
+                   m.drive.steering_angle, m.drive.speed] for m in drv]), delimiter=',', header='stamp,steer,speed', comments='')
     T = np.array(T)
     if a.blackout and drv:
         b0, b1 = (float(x) for x in a.blackout.split(','))
