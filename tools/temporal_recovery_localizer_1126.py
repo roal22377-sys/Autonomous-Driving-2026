@@ -13,7 +13,8 @@ from analyze_localizer_hypotheses_1126 import rank_candidates
 
 
 class TemporalRecoveryLocalizer(ScanLocalizer):
-    def __init__(self, *args, search_delay=.6, margin=.05, confirmation=.5, max_hypotheses=4, **kwargs):
+    def __init__(self, *args, search_delay=.6, margin=.05, confirmation=.5, max_hypotheses=4,
+                 audit_hypotheses=False, **kwargs):
         super().__init__(*args, **kwargs)
         if not all(np.isfinite(x) and x >= 0 for x in (search_delay, margin, confirmation)):
             raise ValueError('Invalid temporal recovery settings')
@@ -30,6 +31,8 @@ class TemporalRecoveryLocalizer(ScanLocalizer):
         self.released_at = None
         self.events = []
         self.tracking_runtime_ms = []
+        self.audit_hypotheses = bool(audit_hypotheses)
+        self.hypothesis_audit = []
 
     def set_time(self, seconds):
         if not np.isfinite(seconds) or seconds < self.now:
@@ -80,6 +83,9 @@ class TemporalRecoveryLocalizer(ScanLocalizer):
             motion = relative(self.pending['odom'], odom)
             self.hypotheses = [dict(id=i, pose=compose(np.asarray(r['pose']), motion), total=0.)
                                for i,r in enumerate(self.pending['rows'])]
+            if self.audit_hypotheses:
+                self.events.append(dict(kind='released', time=self.now,
+                    predicted_modes=[dict(id=h['id'], pose=h['pose'].tolist()) for h in self.hypotheses]))
             self.pending = None
             self.frames = 0
             self.released_at = self.now
@@ -87,6 +93,7 @@ class TemporalRecoveryLocalizer(ScanLocalizer):
             delta = np.zeros(3)  # capture-to-now motion was applied above
         begin = time.perf_counter()
         self.frames += 1
+        audit = []
         for h in self.hypotheses:
             prediction = compose(h['pose'], delta)
             pose, residual, inliers, _ = icp(src, self.pts, self.tree, self.n, self.ok,
@@ -97,6 +104,14 @@ class TemporalRecoveryLocalizer(ScanLocalizer):
                     and explained >= self.cfg['explained_refind'])
             h.update(pose=pose if good else prediction, good=bool(good),
                      total=h['total']+(float(explained-2*residual) if good else 0.))
+            if self.audit_hypotheses:
+                audit.append(dict(id=h['id'], predicted_pose=prediction.tolist(), fitted_pose=pose.tolist(),
+                    residual=float(residual) if np.isfinite(residual) else None,
+                    inliers=int(inliers), explained=float(explained),
+                    fitted_jump_m=float(np.linalg.norm(pose[:2]-prediction[:2])),
+                    good=bool(good), mean_score=h['total']/self.frames))
+        if self.audit_hypotheses:
+            self.hypothesis_audit.append(dict(time=self.now, frame=self.frames, modes=audit))
         ranked = sorted(self.hypotheses, key=lambda h:h['total'], reverse=True)
         distinct = []
         for h in ranked:

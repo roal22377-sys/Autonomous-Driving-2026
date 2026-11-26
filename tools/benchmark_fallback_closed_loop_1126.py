@@ -51,6 +51,8 @@ def main():
     p.add_argument('--search-delay', type=float, default=.6,
                    help='Simulation-only delay before a temporal global-search result is available')
     p.add_argument('--recovery-hypotheses', type=int, default=4)
+    p.add_argument('--audit-recovery-hypotheses', action='store_true',
+                   help='Read-only per-mode fits and post-decision truth diagnostics')
     cli = p.parse_args()
     if not 0. <= cli.return_confirm <= 5.:
         raise ValueError('return-confirm must be between0 and5 seconds')
@@ -146,7 +148,7 @@ def main():
     env = F1Wrapper(args, IL.MAPS, obs_noise=True, sim_mode='eval', tracks=[track])
     env.fixed_speed_cap = cli.cap
     env.start_mode = 'center'
-    rows, transitions, recovery_event_truth = [], [], []
+    rows, transitions, recovery_event_truth, recovery_audit_truth = [], [], [], []
     recorded_events = 0
     digest = hashlib.sha256()
     rng = np.random.default_rng(cli.seed + 991)
@@ -160,7 +162,8 @@ def main():
         if cli.recovery == 'temporal':
             from temporal_recovery_localizer_1126 import TemporalRecoveryLocalizer
             pv.loc = TemporalRecoveryLocalizer(str(map_dir), laser_x=laser, search_delay=cli.search_delay,
-                                               max_hypotheses=cli.recovery_hypotheses)
+                                               max_hypotheses=cli.recovery_hypotheses,
+                                               audit_hypotheses=cli.audit_recovery_hypotheses)
         assert len(pv.tps) == 2
         state = env.vehicle_state()
         odom = np.asarray([state[0], state[1], state[4]], float)
@@ -194,7 +197,7 @@ def main():
                 # Read-only annotation AFTER the estimator's decisions. Truth
                 # never enters its candidate search, tracking or acceptance.
                 for event in pv.loc.events[recorded_events:]:
-                    modes = event.get('initial_modes', [])
+                    modes = event.get('initial_modes', event.get('predicted_modes', []))
                     if event['kind'] == 'accepted':
                         modes = [dict(pose=event['pose'])]
                     errors = [dict(position_error_m=float(np.linalg.norm(np.asarray(m['pose'])[:2]-state[:2])),
@@ -202,6 +205,17 @@ def main():
                               for m in modes]
                     recovery_event_truth.append(dict(kind=event['kind'], time=now, mode_errors=errors))
                 recorded_events = len(pv.loc.events)
+                if (pv.loc.hypothesis_audit and pv.loc.hypothesis_audit[-1]['time'] == now):
+                    audit = pv.loc.hypothesis_audit[-1]
+                    errors = []
+                    for mode in audit['modes']:
+                        item = dict(id=mode['id'])
+                        for key in ('predicted_pose', 'fitted_pose'):
+                            estimate = np.asarray(mode[key])
+                            item[key] = dict(position_error_m=float(np.linalg.norm(estimate[:2]-state[:2])),
+                                yaw_error_deg=float(np.degrees(abs(wrap(estimate[2]-state[4])))))
+                        errors.append(item)
+                    recovery_audit_truth.append(dict(time=now, frame=audit['frame'], modes=errors))
             if valid:
                 lost_since = None
             elif lost_since is None:
@@ -292,6 +306,9 @@ def main():
                 margin=pv.loc.margin, confirmation_seconds=pv.loc.confirmation,
                 events=pv.loc.events,
                 post_decision_truth_annotations=recovery_event_truth,
+                **(dict(hypothesis_audit=pv.loc.hypothesis_audit,
+                        post_decision_hypothesis_truth=recovery_audit_truth)
+                   if cli.audit_recovery_hypotheses else {}),
                 tracking_runtime_p99_ms=(float(np.quantile(pv.loc.tracking_runtime_ms,.99))
                                          if pv.loc.tracking_runtime_ms else None),
                 implementation_sha256=sha(ROOT/'tools/temporal_recovery_localizer_1126.py'),
