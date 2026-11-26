@@ -51,7 +51,7 @@ def sha(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--workers',type=int,default=2)
-    parser.add_argument('--family',choices=('open','regular'),default='open')
+    parser.add_argument('--family',choices=('open','regular','regular_variants'),default='open')
     cli=parser.parse_args();os.chdir(S)
     import torch,numpy as np
     import train_il_s2r as IL
@@ -68,17 +68,30 @@ def main():
     if cli.family=='open':
         tracks=sorted(Path(TRAIN_DIR).glob('*.npz'));require_fresh_open_train([str(p) for p in tracks])
         assert len(tracks)==184 and all(Path(TEST_DIR).resolve() not in p.resolve().parents for p in tracks)
-    else:
+    elif cli.family=='regular':
         original_names={name+direction for name in IL.MAPS for direction in ('','_rev')}
         tracks=sorted(Path(p) for p in IL.list_variants(IL.MAPS) if Path(p).stem in original_names)
         IL.require_fresh_variants([str(p) for p in tracks])
         assert len(tracks)==46 and all(IL.HOLDOUT not in str(p) for p in tracks)
+    else:
+        # Predeclared training augmentations across every original direction;
+        # never select the held-out w105 cases used in the failure analysis.
+        eligible=[Path(p) for p in IL.list_variants(IL.MAPS) if IL.HOLDOUT not in p]
+        tracks=sorted(p for p in eligible if p.stem.endswith(('_w101','_w103')))
+        IL.require_fresh_variants([str(p) for p in tracks])
+        expected={m+d+'_w'+str(seed)+'.npz' for m in IL.MAPS for d in ('','_rev') for seed in (101,103)}
+        assert {p.name for p in tracks}==expected and len(tracks)==92
+        assert all(IL.HOLDOUT not in str(p) for p in tracks)
     base=Path('results/retention_probe_1126/replay_cache.npz')
     metadata=dict(family=cli.family,source='PPO2130 function, affine-transferred IL14 init; new preview reference6',
                   source_sha256=sha(source),config_sha256=sha(config),dynamics_sha256=sha('configs/task/dynamic.yaml'),
                   base_cache_sha256=sha(base),selection='Add successful source episodes only',
                   qualification='Training-only frozen-policy rehearsal collection, not new-model validation',
                   tracks=[str(p) for p in tracks],runs=[])
+    if cli.family=='regular_variants':
+        metadata.update(selection_rule='Every base/direction at training seeds101 and103; exclude heldout105',
+                        collection_caps=[8.0],live_training_modified=False,
+                        intended_use='Separate future replay-coverage experiment only; current PPO cache is immutable')
     target=root/'collection.json';target.write_text(json.dumps(metadata,indent=2)+'\n')
     jobs=[(str(p.resolve()),50000+i,str((shards/(p.stem+'.npz')).resolve())) for i,p in enumerate(tracks)]
     started=time.monotonic()
