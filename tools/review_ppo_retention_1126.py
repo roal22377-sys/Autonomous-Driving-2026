@@ -114,7 +114,7 @@ def main():
         source_stress_and_lost_guard=dict(passed=not regressions, completion_regressions=regressions),
         eligible_for_expanded_validation=(not regressions and all(
             comparisons[label]['selected'] for label in ('source_u70', 'pace_u10'))),
-        original_il_selection=now['family_selection'], selected_within_own_run=now['saved'],
+        original_il_selection=now['family_selection'], selected_within_own_run=bool(now['saved']),
         expanded_validation_qualified=False,
         qualification=('Matched case order and fixed seeds; jointly completed cap8 pace only. '
                        'Missing source stress/lost per-case records remain null. Same-update control '
