@@ -259,12 +259,20 @@ def get_args():
                         'rest, and the policy advantage is A_reward - crash_cost * A_crash. 11/25 PPO 8: one critic for '
                         'rewards of ~0.01 per step and crashes of -10000..-30000 explained the returns badly '
                         '(EV 0.2-0.66, twice -0.9), and success fell while the crash cost rose')
+    p.add_argument('--retention_file', default=None, help='Successful training-only action cache for auxiliary BC')
+    p.add_argument('--retention_manifest', default=None, help='Audited provenance manifest for retention_file')
+    p.add_argument('--retention_weight', type=float, default=0., help='Auxiliary supervised loss coefficient;0 disables retention')
+    p.add_argument('--retention_share', type=float, default=.125, help='Extra cached rows relative to PPO minibatch; PPO rows unchanged')
     p.add_argument('--crash_up', type=float, default=1.5)
     p.add_argument('--crash_down', type=float, default=0.8)
     p.add_argument('--crash_max', type=float, default=10000.0,
                    help='2000 was binding (PPO 5): with gamma 0.995 a crash then costs about as much as 10 %% more speed over '
                         '5 s at ~1 %% risk, which adds up to ~26 %% crashed episodes over 2 laps')
     a = p.parse_args()
+    if not np.isfinite(a.retention_weight) or a.retention_weight < 0:
+        raise ValueError('retention_weight must be finite and nonnegative')
+    if a.retention_weight > 0 and (not a.retention_file or not a.retention_manifest or not 0 < a.retention_share < 1):
+        raise ValueError('Active retention requires a cache, audited manifest and share in(0,1)')
     if a.baseline:
         vars(a).update(BASELINE)
     # use the IL model's own task config (lidar layout, obs_dim, steering calibration), not today's default
@@ -511,6 +519,13 @@ def main():
         ccritic = Critic(EasyDict({**args, 'obs_dim': args.obs_dim + P})).to(args.device)
         ccritic.initialize()
         opt_ccritic = torch.optim.Adam(ccritic.parameters(), lr=args.critic_lr)
+    retention = None
+    if args.retention_weight > 0:
+        from utils.ppo_retention import RetentionCache
+        retention = RetentionCache(args, rms, args.retention_file, args.retention_manifest,
+            training_tracks(args.open_train_share > 0, args.real_tracks, args.short_share > 0),
+            minibatch=args.minibatch, share=args.retention_share, seed=args.seed + 1126)
+        print('[retention] supervised auxiliary only; PPO advantages, returns and fresh rollout budget unchanged', flush=True)
 
     def value(o, pr, net=None):
         x = np.concatenate([rms.normalize(o), priv_rms.normalize(pr)], axis=-1)
@@ -562,6 +577,12 @@ def main():
         if not os.path.isfile(resume_path):
             raise FileNotFoundError(f'{resume_path} missing: nothing to resume (run without --resume to start)')
         state = torch.load(resume_path, map_location='cpu', weights_only=False)
+        if (retention is None) != (state.get('retention') is None):
+            raise ValueError('Do not enable/disable retention during resume; start a declared new trial')
+        if float(state['args'].get('retention_weight', 0.)) != args.retention_weight:
+            raise ValueError('Retention coefficient changed during resume; start a declared new trial')
+        if retention is not None:
+            retention.load_state_dict(state['retention'])
         changed = {k: (state['args'].get(k), v) for k, v in args.items()
                    if k not in ('resume', 'device') and isinstance(v, (int, float, str, bool)) and state['args'].get(k) != v}
         if changed:
@@ -745,7 +766,7 @@ def main():
                           real=il_real, real_res=il_real_res,
                           short_res=il_short_res, short_tracks=[os.path.basename(t) for t in short_tracks_eval]),
                   best=best, log=log, update=update, total=total, actor_start=actor_start, bc_boost=bc_boost,
-                  crash_cost=crash_cost,
+                  crash_cost=crash_cost, retention=retention.state_dict() if retention is not None else None,
                   done_stats=done_stats[-200:], tstat=tstat, np_rng=np.random.get_state(), torch_rng=torch.get_rng_state())
         torch.save(st, resume_path + '.tmp')
         os.replace(resume_path + '.tmp', resume_path)
@@ -860,6 +881,7 @@ def main():
         with torch.no_grad():
             old_dist = actor(S)
         kl, clip_frac, n_mb = 0.0, 0.0, 0
+        retention_sum, retention_steps = 0., 0
         for ep in range(args.epochs):
             perm = torch.randperm(T * N)
             for i in range(0, T * N, args.minibatch):
@@ -891,8 +913,14 @@ def main():
                     bc = (((d.loc - t_mean) ** 2) * bc_dim * torch.stack([w, torch.ones_like(w)], -1) * m).mean()
                 else:
                     bc = (((d.loc - t_mean) ** 2) * bc_dim * m).mean()
+                actor_loss = pg + bc_w * bc
+                if retention is not None:
+                    retention_loss, _ = retention.loss(actor, speed_weight=args.bc_speed)
+                    actor_loss = actor_loss + args.retention_weight * retention_loss
+                    retention_sum += float(retention_loss.detach())
+                    retention_steps += 1
                 opt_actor.zero_grad()
-                (pg + bc_w * bc).backward()
+                actor_loss.backward()
                 torch.nn.utils.clip_grad_norm_(actor_params, 0.5)
                 opt_actor.step()
             if not warm:
@@ -913,6 +941,9 @@ def main():
                    std_steer=float(std[0]), std_speed=float(std[1]), critic_loss=float(closs.item()), ret_scale=r_scale,
                    ep_return=mean('ret'), ep_laps=mean('laps'), crash_rate=mean('crash'), success_rate=mean('success'),
                    ep_speed=mean('speed'), stuck_rate=mean('stuck'), track_focus=focus, reward_per_step=rc)
+        if retention is not None:
+            row.update(retention_loss=retention_sum / max(1, retention_steps),
+                       retention_weight=args.retention_weight, retention_minibatches=retention_steps)
         slip=np.abs(B['priv'][...,5])
         row.update(slip_rms_rad=float(np.sqrt(np.mean(slip**2))),slip_abs_p99_rad=float(np.quantile(slip,.99)))
         sub_crash = lambda key: (float(np.mean([d['crash'] for d in recent if d.get(key)]))
