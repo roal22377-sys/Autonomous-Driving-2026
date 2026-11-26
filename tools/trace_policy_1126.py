@@ -9,6 +9,7 @@ sys.path[:0]=[str(S),str(S/'installation')]
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--model',default='imitation/14');p.add_argument('--tag',default='round0')
+    p.add_argument('--normalizer_model',help='Frozen normalizer source for a checkpoint without its own sim2real export')
     p.add_argument('--track',required=True);p.add_argument('--cap',type=float,default=8.)
     p.add_argument('--seed',type=int,default=7);p.add_argument('--start',default='center',choices=['center','random'])
     p.add_argument('--diagnostic_override',choices=['expert_speed','expert_steer','expert_both'],
@@ -33,7 +34,7 @@ def main():
     else:ck=torch.load(ckpath,map_location='cpu',weights_only=False)
     rms=RunningMeanStd('agent_obs',args.obs_dim)
     if 'obs_mean' in ck:rms.mean,rms.var=ck['obs_mean'],ck['obs_var']
-    else:rms.load(f'results/{cli.model}/sim2real',required=True)
+    else:rms.load(f'results/{cli.normalizer_model or cli.model}/sim2real',required=True)
     actor=IL.actor_from_state(ck['actor']);actor.eval()
     path=str(Path(cli.track).resolve())
     env=F1Wrapper(args,IL.MAPS,obs_noise=True,sim_mode='eval',tracks=[path])
@@ -83,6 +84,7 @@ def main():
     with open(dest/(stem+'.csv'),'w') as f:
         w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
     summary=dict(model=cli.model,tag=cli.tag,track=Path(path).name,cap=cli.cap,start=cli.start,seed=cli.seed,
+                 normalizer_source='embedded_checkpoint' if 'obs_mean' in ck else (cli.normalizer_model or cli.model),
                  success=bool(env.success),collision=bool(env.collision),elapsed=float(env.elapsed),phases=metrics.result(),
                  diagnostic_override=cli.diagnostic_override,policy_qualification=not bool(cli.diagnostic_override),
                  progress_m=float(env.progress),lap_times=[float(t) for t in env.lap_times],
