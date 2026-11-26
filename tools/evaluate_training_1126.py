@@ -12,6 +12,7 @@ def main():
     p.add_argument('--tag',default='init')
     p.add_argument('--normalizer_model')
     p.add_argument('--workers',type=int,default=4)
+    p.add_argument('--output',help='separate report filename for a subset evaluation')
     p.add_argument('--seeds',type=int,nargs='+',default=[7])
     p.add_argument('--families',nargs='+',default=['regular','short','hall','real','2025','open'])
     cli=p.parse_args()
@@ -52,7 +53,7 @@ def main():
              dynamics_sha256=hashlib.sha256(Path('configs/task/dynamic.yaml').read_bytes()).hexdigest(),
              config=str(args.task_config),families={},notes='Real and 2025 geometries are in training; hall validation excludes 2025.')
     dest=Path('results/analysis1126');dest.mkdir(exist_ok=True)
-    target=dest/f'{cli.model.replace("/","_")}_{cli.tag}_seeds{"-".join(map(str,cli.seeds))}.json'
+    target=dest/(cli.output or f'{cli.model.replace("/","_")}_{cli.tag}_seeds{"-".join(map(str,cli.seeds))}.json')
     for name in cli.families:
         tracks,settings=sets[name]
         jobs=[(str(Path(t).resolve()),policy,'eval',seed+i,cap,start)
