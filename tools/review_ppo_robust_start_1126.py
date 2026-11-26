@@ -73,17 +73,27 @@ def main():
     if not all(torch.isfinite(v).all().item() for key in ('actor', 'critic', 'ccritic')
                for v in weights[key].values()):
         raise ValueError('Nonfinite policy weights')
+    comparisons = {label: choose_families(current, families, args['training_mix'])
+                   for label, families in references.items()}
+    stress_regressions = [g for g in ('worst', 'lost_short', 'lost_general')
+                          if cohorts[g]['candidate_completed'] < cohorts[g]['source_completed']]
     report = dict(run='ppo_s2r/27', update=cli.update, steps=now['step'],
         checkpoint_sha256=hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
         source_reference_sha256=hashlib.sha256(reference_path.read_bytes()).hexdigest(),
         configuration_differences=differences, cohorts=cohorts,
         original_il_selection=now['family_selection'], selected_within_own_run=now['saved'],
-        comparisons={label: choose_families(current, families, args['training_mix'])
-                     for label, families in references.items()},
+        comparisons=comparisons,
+        source_stress_and_lost_guard=dict(passed=not stress_regressions,
+                                         completion_regressions=stress_regressions),
+        eligible_for_expanded_validation=(not stress_regressions and
+            all(result['selected'] for result in comparisons.values())),
+        expanded_validation_qualified=False,
         qualification=('Same case ordering and fixed per-track seed schedule; source u70 restored '
                        'open/short records reproduce its original counts. Missing source per-case '
                        'stress/lost records remain null. Pace uses jointly completed cap8 runs only. '
-                       'Neither reference is an overall winner; no real-car qualification.'))
+                       'Stress/lost counts additionally must not regress from sourceu70 before '
+                       'expanded candidate validation. This report alone cannot qualify new-layout, '
+                       'correct relocalization, or real-car performance. Neither reference is an overall winner.'))
     out = Path(cli.output)
     if out.exists():
         raise FileExistsError('Preserve prior review: ' + str(out))
