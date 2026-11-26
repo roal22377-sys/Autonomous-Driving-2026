@@ -1,0 +1,12 @@
+
+== run_1126_1658: 2 autonomous segments (stats up to the first wall contact)
+  start  dur   dist  v_mean v_max v_cmd | front_min side_min side_p10 | weave Hz  rms   rate  lock% | end
+    296   1.6s   3.8m  2.51  3.97  3.29 |    1.78     0.58     0.60  |   nan  nan  0.43   0.0 | stopped by operator (moving)
+    334   2.7s   9.1m  3.46  5.45  3.72 |    0.35     0.18     0.45  |  1.18  0.095  0.61   0.0 | stopped by operator (moving)
+   localization while driving: valid 100.0% of 164 scans, 0 lost stretches (longest 0.00 s), ICP residual median 1.5 cm
+
+== total: 2 segments, 4 s / 13 m driven before any wall contact
+   wall contacts: 0/2 segments, 12.8 m per contact, 4.2 s per contact
+   mean speed 3.11 m/s (commanded 3.56), closest side wall 0.18 m, closest front 0.35 m
+   weave 1.18 Hz (median), steering RMS 0.095 rad, mean |steering rate| 0.52 rad/s, full lock 0.0% of the time
+   endings: stopped by operator (moving) x2

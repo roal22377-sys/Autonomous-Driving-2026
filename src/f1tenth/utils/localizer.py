@@ -110,6 +110,9 @@ class ScanLocalizer:
                    ambiguous_gap=0.05,  # start: another pose > 1.5 m away explaining the scan within this -> refuse
                    confirm_cons=0.1,    # ... and only scans that fix both directions count (not along a straight:
                                         # a pose re-found 1 m off along a straight stayed "right" there, sim test 11/25)
+                   explained_hint=0.6,  # start from a pose given by hand (RViz / tools/loc_gui.py click): people and things
+                                        # around the course in class (11/26 17:00) left correct poses at 75 % < 0.8, so
+                                        # every click was refused; wrong poses: median 0.53
                    explained_track=0.45)  # tracking: running mean (10 scans) of the explained share below this -> lost.
                                         # 11/24 log, correct poses: never below 0.58; a wrong pose that kept matching
                                         # (forced 6 m / 115 deg off): median 0.33
@@ -197,7 +200,8 @@ class ScanLocalizer:
                     alt = (q, sc)
                 break
         self.reset(p, odom)
-        self.valid = bool(good) and ex >= self.cfg['explained_ok'] and alt is None
+        need = self.cfg['explained_ok'] if prefer is None else self.cfg['explained_hint']
+        self.valid = bool(good) and ex >= need and alt is None
         return p, res, ex, alt
 
     def reset(self, pose, odom=None):

@@ -1,0 +1,13 @@
+/home/jowonjun/venv/torch210/lib/python3.8/site-packages/numpy/lib/nanfunctions.py:1217: RuntimeWarning: All-NaN slice encountered
+  return function_base._ureduce(a, func=_nanmedian, keepdims=keepdims,
+
+== run_1126_1641: 1 autonomous segments (stats up to the first wall contact)
+  start  dur   dist  v_mean v_max v_cmd | front_min side_min side_p10 | weave Hz  rms   rate  lock% | end
+    651   0.1s   0.0m  0.71  1.18  2.03 |    0.05     0.05     0.05  |   nan  nan  1.60   0.0 | wall contact at 0.1s (1% of the segment against the wall)
+   localization while driving: valid 89.6% of 1878 scans, 1 lost stretches (longest 5.12 s), ICP residual median 1.4 cm
+
+== total: 1 segments, 0 s / 0 m driven before any wall contact
+   wall contacts: 1/1 segments, 0.0 m per contact, 0.1 s per contact
+   mean speed 0.71 m/s (commanded 2.03), closest side wall 0.05 m, closest front 0.05 m
+   weave nan Hz (median), steering RMS nan rad, mean |steering rate| 1.60 rad/s, full lock 0.0% of the time
+   endings: wall contact at 0.1s (1% of the segment against the wall) x1
