@@ -129,8 +129,8 @@ def main():
     assert len(sources) == 4
     hashes = {str(p.resolve()): sha(p) for p in sources}
     report = dict(status='generating_not_used_in_training', sources=hashes, variants=[],
-                  qualification='Known geometry augmentation; evaluation seeds unseen, but base geometry is trained. Static grid checks do not replace closed-loop evaluation.',
-                  proposed_training_mix=dict(target=.20, hall=.35, short=.20, regular=.15, open=.10))
+                  qualification='Reference examples only: the competition layout is unknown. Opening seeds are unseen in evaluation, but base geometry is trained. Static grid checks do not replace closed-loop evaluation.',
+                  geometry_role='Known-course regression and opening sensitivity; no special training-share increase implied.')
     dest.mkdir(parents=True)
     for split, seeds in [('train', [112601, 112602, 112603, 112604]), ('eval', [112691, 112692])]:
         (dest/split).mkdir()
