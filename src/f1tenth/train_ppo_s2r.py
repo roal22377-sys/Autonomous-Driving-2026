@@ -546,15 +546,15 @@ def main():
     il_hall, il_hall_res, il_open_res = float('nan'), [], []
 
     def lost_eval():
-        '''LiDAR-only fallback of a preview policy: (short-course success, eval-track success at cap 5)'''
+        '''LiDAR-only fallback rates and cases, retained for failure diagnosis.'''
         from utils.track_short import short_tracks
         os.environ['F1_LOC_LOST'] = '1'          # read by utils/preview.LocalizationNoise in the eval workers
         try:
-            ls = IL.evaluate(eval_args, policy(), short_tracks(holdout=True), 'eval', settings=IL.SHORT_SETTINGS)[0]
-            le = IL.evaluate(eval_args, policy(), eval_tracks, 'eval', settings=((5.0, 'center'),))[0]
+            ls, _, ls_res = IL.evaluate(eval_args, policy(), short_tracks(holdout=True), 'eval', settings=IL.SHORT_SETTINGS)
+            le, _, le_res = IL.evaluate(eval_args, policy(), eval_tracks, 'eval', settings=((5.0, 'center'),))
         finally:
             os.environ.pop('F1_LOC_LOST', None)
-        return ls, le
+        return dict(lost_short=ls, lost_eval=le, lost_short_res=ls_res, lost_eval_res=le_res)
 
     resume_path = f'{args.save_dir}/checkpoint/resume.pt'
     state = None
@@ -943,7 +943,8 @@ def main():
             # Mixed-course selection evaluates all families: a hall gain can qualify a model even when
             # general-course time is unchanged. Legacy runs keep the earlier optional gate scheduling.
             gates = cand or args.full_eval or args.family_select
-            worst = IL.evaluate(eval_args, policy(), eval_tracks, 'worst')[0] if args.worst_eval and gates else float('nan')
+            worst, _, worst_res = (IL.evaluate(eval_args, policy(), eval_tracks, 'worst')
+                                   if args.worst_eval and gates else (float('nan'), float('nan'), []))
             worst_ok = (not args.worst_eval) or worst >= il_worst - 1e-9
             op, _, op_res = open_eval() if args.open_eval and gates else (float('nan'), float('nan'), [])
             open_ok = (not args.open_eval) or op >= il_open - 1e-9
@@ -965,8 +966,9 @@ def main():
                        f'paired gain {hall_gain:+.2f}s; 2025 copy excluded', color='cyan')
             better = cand and worst_ok and open_ok and short_ok and hall_ok
             if args.lost_eval and gates:
-                lost_s, lost_e = lost_eval()
-                row.update(lost_short=lost_s, lost_eval=lost_e)
+                lost = lost_eval()
+                row.update(lost)
+                lost_s, lost_e = lost['lost_short'], lost['lost_eval']
                 cprint(f'[localization lost @ update {update}] LiDAR only: short courses {lost_s*100:.1f}%, '
                        f'eval tracks at cap 5 {lost_e*100:.1f}%', color='cyan')
             if args.real_tracks:
@@ -994,7 +996,16 @@ def main():
                    + (f' | short {sh*100:.1f}% (IL {il_short*100:.1f}%, {sh_gain:+.2f} s vs IL)' if args.short_eval and gates else '')
                    + ('' if gates else ' | not better than the best: worst-case / open-space checks skipped')
                    + ('  -> saved' if better else ''), color='green' if better else 'cyan', bold=True)
-            row.update(eval_success=succ, eval_lap=lap, paired_gain=gain, worst=worst, open=op, res=res, saved=better)
+            row.update(eval_success=succ, eval_lap=lap, paired_gain=gain, worst=worst, open=op, res=res, saved=better,
+                       worst_res=worst_res, open_res=op_res, short_res=sh_res)
+            # IL.evaluate uses ordered pool.map results: settings, then sorted tracks;
+            # every setting uses seed 7 + that track's index. Retain the cohort so a
+            # rejected checkpoint can be diagnosed without rerunning whole families.
+            row['evaluation_seed_base'] = 7
+            row['evaluation_track_order'] = {
+                key: list(dict.fromkeys(r[0].split('@', 1)[0] for r in row.get(key, [])))
+                for key in ('res', 'worst_res', 'open_res', 'short_res', 'hall_res',
+                            'real_res', 'lost_short_res', 'lost_eval_res')}
             if args.bc_adapt:
                 # keep the policy near IL while it is worse than IL; relax again once it recovers
                 bc_boost = min(bc_boost * 2.0, 64.0) if succ < il_succ - 0.02 else max(1.0, bc_boost / 2.0)
