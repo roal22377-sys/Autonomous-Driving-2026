@@ -113,6 +113,10 @@ class ScanLocalizer:
                    explained_hint=0.6,  # start from a pose given by hand (RViz / tools/loc_gui.py click): people and things
                                         # around the course in class (11/26 17:00) left correct poses at 75 % < 0.8, so
                                         # every click was refused; wrong poses: median 0.53
+                   explained_refind=0.7,  # lost while driving, a re-found pose (one try per scan): 0.8 never passed with
+                                        # people around the course (11/26 run 1655: lost 25 s); still confirmed over time
+                   skid_ratio=0.6,      # odom step < this x the scan-matched step: wheels locked (braking skid, 11/24:
+                                        # odom 0.3 m while the car slid 1-2 m) -> predict with the scan-matched speed
                    explained_track=0.45)  # tracking: running mean (10 scans) of the explained share below this -> lost.
                                         # 11/24 log, correct poses: never below 0.58; a wrong pose that kept matching
                                         # (forced 6 m / 115 deg off): median 0.33
@@ -167,7 +171,7 @@ class ScanLocalizer:
             p0 = self.candidates[self.sweep[j]]
         p, res, n_in, _ = icp(src, self.pts, self.tree, self.n, self.ok, p0, iters=12, d_max=(1.0, 0.5, 0.25, 0.12))
         if (res < self.cfg['res_ok'] and n_in >= self.cfg['min_inliers'] * 1.5        # stricter than tracking
-                and self.explained(src, p) >= self.cfg['explained_ok']):
+                and self.explained(src, p) >= self.cfg['explained_refind']):
             return p, res, n_in, self.cfg['confirm_local' if local else 'confirm_global']
         return None
 
@@ -209,6 +213,7 @@ class ScanLocalizer:
         self.last_odom = None if odom is None else np.array(odom, float)
         self.bad, self.valid, self.confirm = 0, True, 0
         self.lost, self.k_lost, self.ema = False, 0, 1.0
+        self.v_step = None          # scan-matched forward motion per scan [m] (for the skid check)
 
     # -------------------------------------------------------------- every scan
     def step(self, ranges, angles, odom):
@@ -218,11 +223,21 @@ class ScanLocalizer:
         odom = np.array(odom, float)
         if not np.all(np.isfinite(odom)):           # a broken odom message: no motion assumed for this scan
             odom = self.last_odom if self.last_odom is not None else np.zeros(3)
-        pred = self.pose if self.last_odom is None else compose(self.pose, relative(self.last_odom, odom))
+        rel = np.zeros(3) if self.last_odom is None else relative(self.last_odom, odom)
+        info = {}
+        vs = getattr(self, 'v_step', None)
+        if vs is not None and vs > 0.03 and np.hypot(rel[0], rel[1]) < self.cfg['skid_ratio'] * vs:
+            # wheels slow much faster than the car can (locked in a hard brake): the car keeps sliding, so carry the
+            # last scan-matched motion on, slowing at ~4 m/s^2 (11/24 braking 3.4-4.2 m/s^2) -- 40 Hz: 0.0025 m / scan
+            vs = max(vs - 0.0025, np.hypot(rel[0], rel[1]))
+            rel = np.array([vs, 0.0, rel[2]])
+            self.v_step = vs
+            info['skid'] = True
+        pred = self.pose if self.last_odom is None else compose(self.pose, rel)
         self.last_odom = odom
         src = self.points(ranges, angles)
         self.stats['steps'] += 1
-        info = dict(n=len(src))
+        info['n'] = len(src)
         good, pose, res, n_in = False, pred, np.inf, 0
         if len(src) < 50:
             pass                                            # no usable scan: odom only
@@ -250,6 +265,12 @@ class ScanLocalizer:
         if good:
             if not info.get('recovered') and self.last_cons >= self.cfg['confirm_cons']:
                 self.confirm = max(self.confirm - 1, 0)
+            if not info.get('recovered'):
+                d = relative(self.pose, pose)                  # scan-matched motion this scan, in the car frame
+                vs = getattr(self, 'v_step', None)
+                self.v_step = max(float(d[0]), 0.0) if vs is None else 0.7 * vs + 0.3 * max(float(d[0]), 0.0)
+            else:
+                self.v_step = None
             self.pose, self.bad, self.sweep = pose, 0, None
             self.stats['accepted'] += 1
         else:
