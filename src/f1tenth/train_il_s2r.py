@@ -679,8 +679,8 @@ def main():
         policy = ({k: v.clone() for k, v in actor.state_dict().items()}, rms.mean.copy(), rms.var.copy())
         save(args, actor, rms, tag=f'round{rnd}')
         succ, lap, res = evaluate(args, policy, eval_tracks, 'eval')
-        op = evaluate(args, policy, open_tracks, 'eval', settings=open_settings)[0] if args.open_eval else float('nan')
-        sh, sh_lap = evaluate(args, policy, short_eval, 'eval', settings=SHORT_SETTINGS)[:2] if short_eval else (float('nan'), float('nan'))
+        op, op_lap, op_res = evaluate(args, policy, open_tracks, 'eval', settings=open_settings) if args.open_eval else (float('nan'), float('nan'), [])
+        sh, sh_lap, sh_res = evaluate(args, policy, short_eval, 'eval', settings=SHORT_SETTINGS) if short_eval else (float('nan'), float('nan'), [])
         parts = [succ] + ([op] if args.open_eval else []) + ([sh] if short_eval else [])
         more = {}
         for group, paths in extra_eval.items():
@@ -704,6 +704,7 @@ def main():
                 print(f'      fail {r[0]:28s} {r[2]:6.1f}s')
         entry = {'round': rnd, 'data': n_data, 'val': vl, 'success': succ, 'lap': lap, 'open': op, 'score': score,
                  'short': sh, 'short_lap': sh_lap,
+                 'open_lap': op_lap, 'open_res': op_res, 'short_res': sh_res,
                  'jitter': round_jitter(res), 'res': res}
         entry.update(more)
         log.append(entry)
