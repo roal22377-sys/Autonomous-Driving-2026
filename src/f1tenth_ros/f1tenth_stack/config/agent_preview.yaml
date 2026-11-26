@@ -20,8 +20,8 @@ agent_node:
     speed_min: 0.0
     steer_gain_left: 1.0
     steer_gain_right: 1.0
-    course: src/f1tenth/installation/maps_real/Practice1124.npz
-    map_dir: maps/run_1124_1521
+    course: src/f1tenth/installation/maps_real/Practice1126.npz
+    map_dir: maps/run_1126_1539
     laser_x: 0.13
     loc_stride: 3
     lost_stop: 0.3      # [s] localization lost longer -> speed 0 until found again (0 = keep driving on LiDAR alone)
