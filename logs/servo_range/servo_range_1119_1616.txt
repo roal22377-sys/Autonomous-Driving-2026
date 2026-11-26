@@ -1,0 +1,13 @@
+stick_cm: 
+servo 0.558 | center | 
+servo 0.800 | left 0.80 | cm=
+servo 0.900 | left 0.90 | more= | cm=
+servo 0.950 | left 0.95 | more= | cm=
+servo 1.000 | left 1.00 (END) | more=y | gap= | buzz= | cm=
+servo 0.558 | center | 
+servo 0.300 | right 0.30 | cm=
+servo 0.150 | right 0.15 | more=y | cm=
+servo 0.061 | right 0.061 (current right max) | more=y | gap= | buzz= | cm=
+servo 0.030 | right 0.03 | more=n | cm=
+servo 0.000 | right 0.00 (END) | more= | gap= | buzz= | cm=
+servo 0.558 | center | 

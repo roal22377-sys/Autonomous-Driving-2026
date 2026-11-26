@@ -1,0 +1,6 @@
+servo 0.567 | center | 
+servo 1.000 | left 1.00 (END) | gap=n | buzz=n
+servo 0.567 | center | 
+servo 0.061 | right 0.061 (current right max) | gap=n | buzz=y
+servo 0.000 | right 0.00 (END) | buzz=y
+servo 0.567 | center | 
