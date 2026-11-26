@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 '''expert on every short course of installation/maps_short (utils/track_short.py): caps 8 and 4, 2 seeds, 2 laps.
    Tracks it does not finish every time are no training/eval tracks: --remove_failed deletes them.
-       python3 tools/check_short_tracks.py [WORKERS] [--remove_failed]
+       python3 tools/check_short_tracks.py [WORKERS] [--remove_failed] [--dir=maps_hall]
    11/25: 8 of 114 failed (narrow tight corners), removed.'''
 import glob, os, sys, multiprocessing as mp
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DIR = os.path.join(REPO, 'src/f1tenth/installation/maps_short')
+DIR = os.path.join(REPO, 'src/f1tenth/installation', next((x.split('=', 1)[1] for x in sys.argv if x.startswith('--dir=')), 'maps_short'))
 sys.path[:0] = [os.path.join(REPO, 'tools'), os.path.join(REPO, 'src/f1tenth')]
 
 def run(job):
