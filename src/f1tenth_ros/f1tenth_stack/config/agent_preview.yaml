@@ -24,4 +24,10 @@ agent_node:
     map_dir: maps/run_1126_1539
     laser_x: 0.13
     loc_stride: 3
-    lost_stop: 0.3      # [s] localization lost longer -> speed 0 until found again (0 = keep driving on LiDAR alone)
+    lost_stop: 0.3      # [s] (only without a fallback) localization lost longer -> speed 0 until found again
+    # 11/26: localization lost > lost_switch -> the LiDAR-only PPO 12 u190 drives (143 m clean at cap 4 on Practice1126)
+    # at most fallback_speed_limit, while the localization keeps searching; back to the preview model once valid
+    fallback_name: ppo_s2r
+    fallback_algo_idx: 12190
+    fallback_speed_limit: 4.0
+    lost_switch: 0.3

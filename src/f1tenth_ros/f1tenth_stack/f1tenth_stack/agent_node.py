@@ -88,6 +88,13 @@ class AgentNode(Node):
     # The 11/25 preview model drives poorly on LiDAR alone (IL 13 r3, whole run without localization: 9 % of the
     # eval tracks at cap 8, 53 % of the short courses). <= 0: keep driving
     self.declare_parameter('lost_stop', 0.3)
+    # localization lost longer than lost_switch [s] -> a LiDAR-only model drives instead (fallback_name / _algo_idx, at
+    # most fallback_speed_limit) while the localization keeps searching; back to this model once the pose is valid again.
+    # Set -> lost_stop is not used. '' = no fallback (lost_stop applies). 11/26: PPO 12 u190 drove 143 m clean at cap 4
+    self.declare_parameter('fallback_name', '')
+    self.declare_parameter('fallback_algo_idx', 0)
+    self.declare_parameter('fallback_speed_limit', 4.0)
+    self.declare_parameter('lost_switch', 0.3)
 
     self.scan_topic = self.get_parameter('scan_topic').value
     self.drive_topic = self.get_parameter('drive_topic').value
@@ -221,6 +228,16 @@ class AgentNode(Node):
     # one forward pass now: the first real call took 1.8-3.1 s on the car (11/24 logs) while ~10 scans queued up
     with torch.no_grad():
       self.actor(torch.zeros(self.obs_dim, dtype=torch.float32, device=self.device))
+    self.prim = EasyDict(args=self.args, obs_cfg=self.obs_cfg, history=self.history, rms=self.obs_rms, actor=self.actor,
+                         cmd_gain=self.cmd_gain, name=f'{name}/{algo_idx}')
+    self.fb, self.fb_on = None, False
+    fb_name = self.get_parameter('fallback_name').value
+    if self.carpv is not None and fb_name:
+      self.fb = self.loadPolicy(fb_name, int(self.get_parameter('fallback_algo_idx').value))
+      self.fb_cap = float(self.get_parameter('fallback_speed_limit').value)
+      self.lost_switch = float(self.get_parameter('lost_switch').value)
+      self.get_logger().info(f'[fallback] localization lost > {self.lost_switch:.1f} s -> {self.fb.name} drives '
+                             f'(LiDAR only, cap {self.fb_cap:.1f} m/s) until the pose is valid again; lost_stop not used')
 
     # subscribe
     # newest scan only (a slow callback must not work through a backlog of old scans)
@@ -243,6 +260,26 @@ class AgentNode(Node):
     self.speed = 0.0
     self.steering_angle = 0.0
 
+  def loadPolicy(self, name, algo_idx):
+    '''a second, LiDAR-only model (no preview input) with its own observation config, normalizer and history'''
+    save_dir = os.path.join(sim_path, f'results/{name}/{algo_idx}/sim2real')
+    backup_dir = os.path.join(sim_path, f'results/{name}/{algo_idx}/backup')
+    with open(f'{backup_dir}/f1tenth.yaml', 'r') as f:
+      args = EasyDict(YAML().load(f))
+    obs_cfg = get_obs_config(args)
+    if obs_cfg['preview']['enabled']:
+      raise RuntimeError(f'fallback {name}/{algo_idx} uses the track preview: it must be a LiDAR-only model')
+    rms = RunningMeanStd('agent_obs', args.obs_dim)
+    rms.load(save_dir, required=True)
+    actor = torch.load(f'{save_dir}/actor.pt').to(self.device)
+    with torch.no_grad():
+      actor(torch.zeros(args.obs_dim, dtype=torch.float32, device=self.device))
+    g = float(args.get('steer_cmd_gain', 1.0))
+    cmd_gain = (float(args.get('steer_cmd_gain_left', g)), float(args.get('steer_cmd_gain_right', g)))
+    self.get_logger().info(f'[fallback] loaded {name}/{algo_idx} (obs_dim {args.obs_dim})')
+    return EasyDict(args=args, obs_cfg=obs_cfg, history=ActionHistory(obs_cfg['history']['length']), rms=rms,
+                    actor=actor, cmd_gain=cmd_gain, name=f'{name}/{algo_idx}')
+
   def teleopCallback(self, msg: AckermannDriveStamped):
     self.teleop_time = time.monotonic()
 
@@ -261,7 +298,7 @@ class AgentNode(Node):
     if self.use_speed and (self.odom_time is None or time.monotonic() - self.odom_time > ODOM_TIMEOUT):
       self.get_logger().warn(f'no /{self.odom_topic} in the last {ODOM_TIMEOUT}s, not publishing drive. '
                              'is vesc_to_odom_node running?', throttle_duration_sec=1.0)
-      self.history.reset()
+      self.resetHistories()
       return
 
     if not self.scan_checked:
@@ -273,7 +310,7 @@ class AgentNode(Node):
       self.scan_checked = True
     teleop_active = self.teleop_time is not None and time.monotonic() - self.teleop_time < TELEOP_HOLD
     if teleop_active:
-      self.history.reset()
+      self.resetHistories()
 
     # make obs
     raw_scan = np.array(scan_msg.ranges[:1080])
@@ -281,30 +318,46 @@ class AgentNode(Node):
     if self.carpv is not None:
       preview = self.trackPreview(scan_msg)
       if preview is None:
-        self.history.reset()
+        self.resetHistories()
         return                    # no start pose yet: don't drive
-    obs = self.getObs(raw_scan, self.odom_speed, preview)
+    # localization lost too long and a LiDAR-only fallback is loaded: it drives (the localization keeps searching)
+    lost_for = (time.monotonic() - self.lost_since) if (self.carpv is not None and self.lost_since is not None) else 0.0
+    fb_now = self.fb is not None and lost_for > self.lost_switch
+    if fb_now != self.fb_on:
+      self.fb_on = fb_now
+      if fb_now:
+        self.get_logger().warn(f'[fallback] localization lost {lost_for:.1f} s: {self.fb.name} drives (LiDAR only, '
+                               f'cap {self.fb_cap:.1f} m/s); still searching the pose')
+      else:
+        self.get_logger().info(f'[fallback] localization valid again: {self.prim.name} drives')
+    pol = self.fb if fb_now else self.prim
+    cap = self.speed_limit
+    if fb_now:
+      cap = min(cap, self.fb_cap) if cap > 0 else self.fb_cap
+      speed = self.odom_speed if self.odom_speed is not None else 0.0
+      obs = make_observation(raw_scan, speed, pol.obs_cfg, pol.history, cap if cap > 0 else None, None)
+    else:
+      obs = self.getObs(raw_scan, self.odom_speed, preview)
 
     # model inference
     with torch.no_grad():
-      state_tensor = torch.tensor(self.obs_rms.normalize(obs), dtype=torch.float32, device=self.device)
-      action = self.actor(state_tensor).loc.cpu().numpy()
+      state_tensor = torch.tensor(pol.rms.normalize(obs), dtype=torch.float32, device=self.device)
+      action = pol.actor(state_tensor).loc.cpu().numpy()
     
     # transform action
     # policy angle [rad] -> servo command: calibration says command = angle * steer_cmd_gain
-    cmd_gain = self.cmd_gain[0] if action[0] > 0 else self.cmd_gain[1]
-    action[0] *= self.args.max_steer * cmd_gain
+    cmd_gain = pol.cmd_gain[0] if action[0] > 0 else pol.cmd_gain[1]
+    action[0] *= pol.args.max_steer * cmd_gain
     # per-side extra steering (steer_gain_left/right), then the servo limits
     # (the left end is short of the policy's range with offset 0.558)
     side_gain = self.gain_left if action[0] > 0 else self.gain_right
     action[0] = np.clip(action[0] * side_gain, self.steer_min, self.steer_max)
-    action[1] = unnormalize_speed(action[1], self.args.min_speed, self.args.max_speed)
-    if self.speed_limit > 0:
+    action[1] = unnormalize_speed(action[1], pol.args.min_speed, pol.args.max_speed)
+    if cap > 0:
       # cap after unnormalizing, so the model's output mapping stays as trained
-      action[1] = min(action[1], self.speed_limit)
-    # plan B: localization lost too long -> brake (speed 0), keep the model's steering
-    if self.carpv is not None and self.lost_stop > 0 and self.lost_since is not None \
-            and time.monotonic() - self.lost_since > self.lost_stop:
+      action[1] = min(action[1], cap)
+    # plan B without a fallback: localization lost too long -> brake (speed 0), keep the model's steering
+    if self.fb is None and self.carpv is not None and self.lost_stop > 0 and lost_for > self.lost_stop:
       action[1] = 0.0
     # starting from rest: the VESC can't start the motor with a small command (same as utils/env.py)
     action[1] = apply_start_kick(action[1], self.odom_speed, self.kick_cfg)
@@ -319,8 +372,20 @@ class AgentNode(Node):
     # remember what was actually sent (after the steering clip and speed cap), normalized like the policy output
     if teleop_active:
       return                    # not executed: the history stays empty until the keyboard lets go
-    self.history.push([action[0] / side_gain / (self.args.max_steer * cmd_gain),
-                       normalize_speed(action[1], self.args.min_speed, self.args.max_speed)])
+    self.pushHistories(action[0] / side_gain, action[1])
+
+  def resetHistories(self):
+    self.history.reset()
+    if getattr(self, 'fb', None) is not None:
+      self.fb.history.reset()
+
+  def pushHistories(self, angle_cmd, speed):
+    '''the command actually sent (steering before the per-side gain), normalized for each model as its own output:
+    the model that is not driving then starts from the true recent commands when it takes over'''
+    for pol in ([self.prim, self.fb] if getattr(self, 'fb', None) is not None else [self.prim]):
+      g = pol.cmd_gain[0] if angle_cmd > 0 else pol.cmd_gain[1]
+      pol.history.push([angle_cmd / (pol.args.max_steer * g),
+                        normalize_speed(speed, pol.args.min_speed, pol.args.max_speed)])
 
   def policy_to_car_speed(self, v):
     '''policy [min_speed, cap] -> car [speed_min, cap], linear; identity when the remap is off'''
@@ -392,9 +457,13 @@ class AgentNode(Node):
     elif self.lost_since is None:
       self.lost_since = time.monotonic()
     if not valid:
-      self.get_logger().warn('[preview] localization lost' + (f': stopping after {self.lost_stop:.1f} s'
-                             if self.lost_stop > 0 else ': driving on LiDAR only (preview valid = 0)'),
-                             throttle_duration_sec=1.0)
+      if getattr(self, 'fb', None) is not None:
+        msg = f': LiDAR-only fallback after {self.lost_switch:.1f} s, searching the pose'
+      elif self.lost_stop > 0:
+        msg = f': stopping after {self.lost_stop:.1f} s'
+      else:
+        msg = ': driving on LiDAR only (preview valid = 0)'
+      self.get_logger().warn('[preview] localization lost' + msg, throttle_duration_sec=1.0)
     if time.monotonic() - self.loc_last_report > 5.0:
       self.loc_last_report = time.monotonic()
       self.get_logger().info(f'[preview] valid {self.carpv.n_valid / max(self.carpv.n, 1) * 100:.1f}% of {self.carpv.n} scans, '
