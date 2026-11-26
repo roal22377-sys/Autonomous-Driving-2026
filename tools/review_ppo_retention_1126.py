@@ -22,6 +22,28 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def per_cap_comparison(candidate, reference):
+    """Expose high-cap failures that an aggregate completion count can hide."""
+    matched(candidate, reference)  # Validate identity, order and uniqueness.
+    cap = lambda row: float(row[0].split('@')[-1].split('/')[0])
+    result = {}
+    for value in sorted({cap(row) for row in candidate}):
+        pairs = [(a, b) for a, b in zip(candidate, reference) if cap(a) == value]
+        completed = [(a, b) for a, b in pairs if a[1] and b[1]]
+        if any(not (0 < float(row[2]) < float('inf'))
+               for pair in completed for row in pair):
+            raise ValueError('Invalid paired completed duration')
+        result['%g' % value] = dict(
+            total=len(pairs), candidate_completed=sum(bool(a[1]) for a, _ in pairs),
+            reference_completed=sum(bool(b[1]) for _, b in pairs),
+            paired_completed=len(completed),
+            relative_pace_gain=(sum((b[2] - a[2]) / b[2] for a, b in completed)
+                                / len(completed) if completed else None),
+            new_failures=[a[0] for a, b in pairs if not a[1] and b[1]],
+            recoveries=[a[0] for a, b in pairs if a[1] and not b[1]])
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run', type=int, choices=[28, 29], default=28)
@@ -124,6 +146,12 @@ def main():
                                     if rows_key in source_row else None)
         if group == 'worst' and restored_worst is not None:
             row['vs_source_u70'] = matched(rows, restored_worst)
+        row['per_cap_comparisons'] = dict(same_update_control=per_cap_comparison(rows, old))
+        for label, families in references.items():
+            if group in families:
+                row['per_cap_comparisons'][label] = per_cap_comparison(rows, families[group]['res'])
+        if group == 'worst' and restored_worst is not None:
+            row['per_cap_comparisons']['source_u70'] = per_cap_comparison(rows, restored_worst)
         cohorts[group] = row
     references['same_update_control'] = control_families
     comparisons = {label: choose_families(current, families, args['training_mix'])
