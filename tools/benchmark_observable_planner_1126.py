@@ -59,10 +59,16 @@ def main():
                    help='Privileged diagnostic only; never qualifies an observable controller')
     p.add_argument('--corner-lookahead', type=float, default=.65)
     p.add_argument('--predictor', choices=['kinematic', 'nominal-dynamic'], default='kinematic')
+    p.add_argument('--position-gain', type=float, default=1.,
+                   help='Measured position correction gain on nominal-model prediction; 1 uses the measurement directly')
     p.add_argument('--output', required=True)
     cli = p.parse_args()
     if not 0 < cli.corner_lookahead < float('inf'):
         p.error('--corner-lookahead must be positive and finite')
+    if not 0 < cli.position_gain <= 1:
+        p.error('--position-gain must be in (0, 1]')
+    if cli.position_gain != 1. and (cli.predictor != 'nominal-dynamic' or cli.diagnostic_oracle != 'none'):
+        p.error('Position fusion requires the nominal-dynamic predictor without oracle inputs')
     os.chdir(SRC)
     import numpy as np
     import random
@@ -104,6 +110,7 @@ def main():
     report = dict(status='running', mode=cli.mode, diagnostic_oracle=cli.diagnostic_oracle,
                   corner_lookahead=cli.corner_lookahead,
                   predictor=cli.predictor,
+                  position_gain=cli.position_gain,
                   eligible_observable_benchmark=cli.diagnostic_oracle == 'none',
                   history_protocol='physical_zero_reset_padding_v2', runs=[], limitations=[
         'Prototype; no car operation. No proof of hardware-equivalent actuator estimation.',
@@ -135,7 +142,8 @@ def main():
                     estimated_wheel=0.; metrics=DrivingMetrics(); latencies=[]; reason='episode_end'
                     # Unobserved yaw-rate/slip are propagated from the nominal model.
                     latent=np.zeros(2)
-                    steps=0; wheel_errors=[]; pose_errors=[]
+                    predicted_xy=None
+                    steps=0; wheel_errors=[]; pose_errors=[]; control_position_errors=[]
                     while True:
                         x,y,yaw,valid=env.estimated_pose
                         if not valid: reason='localization_unavailable'; break
@@ -144,6 +152,11 @@ def main():
                         pose_errors.append(float(np.hypot(x-truth[0],y-truth[1])))
                         if cli.diagnostic_oracle in ('pose','both'):
                             x,y,yaw=map(float,(truth[0],truth[1],truth[4]))
+                        # Propagate position with motion, then correct with noisy localization.
+                        # This avoids applying a plain low-pass filter that lags moving positions.
+                        if cli.position_gain != 1. and predicted_xy is not None:
+                            x,y=predicted_xy+cli.position_gain*(np.array([x,y])-predicted_xy)
+                        control_position_errors.append(float(np.hypot(x-truth[0],y-truth[1])))
                         start=time.perf_counter()
                         # Fixed schema of this prototype: 88 LiDAR + speed + 12 pairs.
                         speed=float(obs[88]); hist=obs[89:113].reshape(12,2)
@@ -159,6 +172,7 @@ def main():
                             delivered_speed=vq[0] if vq else sent_speed
                             propagated=plant.step(state,target,delivered_speed,dt)
                             latent=propagated[5:7].copy()
+                            predicted_xy=propagated[:2].copy()
                         estimated_wheel+=float(np.clip(target-estimated_wheel,-args.sv_max*dt,args.sv_max*dt))
                         latencies.append(time.perf_counter()-start)
                         obs,_,term,trunc,_=env.step(action)
@@ -173,6 +187,7 @@ def main():
                              estimated_wheel_rmse=float(np.sqrt(np.mean(np.square(wheel_errors)))) if wheel_errors else None,
                              estimated_wheel_max_error=float(np.max(np.abs(wheel_errors))) if wheel_errors else None,
                              estimated_pose_rmse=float(np.sqrt(np.mean(np.square(pose_errors)))) if pose_errors else None,
+                             control_position_rmse=float(np.sqrt(np.mean(np.square(control_position_errors)))) if control_position_errors else None,
                              controller_p95_ms=float(np.quantile(latencies,.95)*1000) if latencies else None)
                     report['runs'].append(row)
                     dest.write_text(json.dumps(report,indent=2)+'\n')
