@@ -16,7 +16,7 @@ agent_node:
     scan_topic: scan
     drive_topic: drive
     odom_topic: odom
-    speed_limit: 4.0   # 11/26: user starts the preview model at 4.0 (LiDAR PPO was clean at 4.0 here)
+    speed_limit: 6.0    # [m/s] 11/26: 6.0 (user choice; LiDAR PPO hit the top-left open area at 6 and 8, clean at 4)
     speed_min: 0.0
     steer_gain_left: 1.0
     steer_gain_right: 1.0

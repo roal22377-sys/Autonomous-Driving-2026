@@ -169,7 +169,7 @@ class ScanLocalizer:
         return None
 
     # -------------------------------------------------------------- start
-    def global_init(self, ranges, angles, candidates, odom=None):
+    def global_init(self, ranges, angles, candidates, odom=None, prefer=None):
         '''best ICP match from candidate poses (N, 3), e.g. course_candidates(); sets the pose.
         returns (pose, residual, explained share, alternative): alternative = (pose, explained) of the best pose
         > 1.5 m / 45 deg away when it explains the scan almost as well (ambiguous start: valid stays False)'''
@@ -179,14 +179,19 @@ class ScanLocalizer:
         for c0 in candidates:
             p, res, n_in, _ = icp(src, self.pts, self.tree, self.n, self.ok, c0, iters=6, d_max=(1.0, 0.5, 0.25))
             if np.isfinite(res) and res < 2 * self.cfg['res_ok'] and n_in >= self.cfg['min_inliers']:
-                hyp.append((self.explained(src, p) - 2.0 * res, p))
+                sc = self.explained(src, p) - 2.0 * res
+                if prefer is not None:
+                    # a pose given by hand: among the fits, prefer the one nearest to it (on a straight the scan
+                    # fits several places along it about equally; the click decides which)
+                    sc -= 0.05 * np.hypot(p[0] - prefer[0], p[1] - prefer[1]) + 0.05 * abs(wrap(p[2] - prefer[2]))
+                hyp.append((sc, p))
         if not hyp:
             return None, np.inf, 0.0, None
         hyp.sort(key=lambda h: -h[0])
         p, res, n_in, good = self.match(src, hyp[0][1])
         ex = self.explained(src, p)
         alt = None
-        for sc, q in hyp[1:]:
+        for sc, q in ([] if prefer is not None else hyp[1:]):        # a given pose is never ambiguous
             if np.hypot(*(q[:2] - p[:2])) > 1.5 or abs(wrap(q[2] - p[2])) > np.pi / 4:
                 if sc >= hyp[0][0] - self.cfg['ambiguous_gap']:
                     alt = (q, sc)
@@ -265,9 +270,10 @@ def course_candidates(track_npz, step=0.5, yaw_offsets=(0.0, np.pi)):
     return np.array([[c[i, 0], c[i, 1], wrap(h[i] + o)] for i in range(0, len(c), k) for o in yaw_offsets])
 
 
-def hint_candidates(hint, radius=0.6, step=0.3, yaw_offsets=(0.0, 0.2, -0.2, 0.4, -0.4)):
-    '''start candidates around a given pose (x, y, yaw): a small grid of positions and headings near it'''
-    o = np.arange(-radius, radius + 1e-6, step)
+def hint_candidates(hint, radius=1.0, n=5, yaw_offsets=(0.0, 0.25, -0.25, 0.5, -0.5)):
+    '''start candidates around a given pose (x, y, yaw): a 5 x 5 grid of positions within +-radius (0.5 m apart:
+    the ICP's first pass reaches 1 m) x 5 headings = 125, about as many as the whole-course search (Jetson ~1.3 s)'''
+    o = np.linspace(-radius, radius, n)
     return np.array([[hint[0] + dx, hint[1] + dy, wrap(hint[2] + dh)] for dx in o for dy in o for dh in yaw_offsets])
 
 
@@ -325,7 +331,7 @@ class CarPreview:
         '''global start along the course, or only near `hint` (x, y, yaw in the map frame, e.g. RViz "2D Pose
         Estimate"); returns (ok, message)'''
         cand = course_candidates(self.course) if hint is None else hint_candidates(hint)
-        p, res, ex, alt = self.loc.global_init(ranges, angles, cand, odom)
+        p, res, ex, alt = self.loc.global_init(ranges, angles, cand, odom, prefer=hint)
         if hint is not None:
             self.loc.candidates = course_candidates(self.course)       # recovery sweeps search the whole course
         if p is None:

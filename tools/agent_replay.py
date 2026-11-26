@@ -111,7 +111,8 @@ def install_ros_stubs():
         'nav_msgs': NS(), 'nav_msgs.msg': NS(Odometry=object),
         'ackermann_msgs': NS(),
         'ackermann_msgs.msg': NS(AckermannDriveStamped=_msg(header=Header, drive=_msg(steering_angle=0.0, speed=0.0))),
-        'geometry_msgs': NS(), 'geometry_msgs.msg': NS(PoseStamped=_msg(header=Header, pose=Pose)),
+        'geometry_msgs': NS(), 'geometry_msgs.msg': NS(PoseStamped=_msg(header=Header, pose=Pose),
+                                                       PoseWithCovarianceStamped=_msg(header=Header, pose=_msg(pose=Pose))),
     }
     for k, v in mods.items():
         sys.modules[k] = types.ModuleType(k)
