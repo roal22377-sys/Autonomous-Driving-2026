@@ -16,6 +16,7 @@
 #   tools/drive_session.sh --stop     # stop agent, bag (saved cleanly), bringup on the car
 #   tools/drive_session.sh --fetch    # extract the newest bag on the car -> logs/<bag>_extracted/
 #   tools/drive_session.sh --agent    # (re)start only the agent in this terminal (bringup keeps running)
+#   MODEL=preview tools/drive_session.sh --loc  # live localization check (OK/CHECK/WRONG/LOST + picture), 2nd terminal
 #   MODEL=il tools/drive_session.sh   # IL only (config/agent_il.yaml);  MODEL=ilppo: IL + PPO (agent_ilppo.yaml)
 #   MODEL=preview tools/drive_session.sh  # plan B model on the last mapped course (agent_preview.yaml, MAP_TOOL.md)
 #                                     # without MODEL: config/agent.yaml as before
@@ -94,8 +95,12 @@ case "$1" in
     fi
     read -p "Press s in the TELEOP tab first, then Enter here to start the agent: "
     exec ssh $SSH_OPTS -t "$CAR_HOST" "$CAR_ENV && ros2 run f1tenth_stack agent_node --ros-args --params-file src/f1tenth_ros/f1tenth_stack/config/$AGENT_YAML" ;;
+  --loc)
+    # live localization check of the plan-B models in this terminal (read-only; tools/loc_view.py): OK / CHECK /
+    # WRONG / LOST + the map around the car with the scan on it. Run in a second PC terminal next to the session.
+    exec ssh $SSH_OPTS -t "$CAR_HOST" "$CAR_ENV && python3 tools/loc_view.py --yaml src/f1tenth_ros/f1tenth_stack/config/$AGENT_YAML" ;;
   "") ;;
-  *) echo "usage: $0 [-m msg|--no-deploy] [--circle [radius] | --speed [v ...] | --straight [--trim x]] | --finish [--circle|--speed] | --stop | --fetch | --agent"; exit 1 ;;
+  *) echo "usage: $0 [-m msg|--no-deploy] [--circle [radius] | --speed [v ...] | --straight [--trim x]] | --finish [--circle|--speed] | --stop | --fetch | --agent | --loc"; exit 1 ;;
 esac
 
 
