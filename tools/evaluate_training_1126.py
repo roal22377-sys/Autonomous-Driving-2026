@@ -22,7 +22,11 @@ def main():
     from utils.vectorize import RunningMeanStd
     args=IL.get_args(['--task_config',f'results/{cli.model}/backup/f1tenth.yaml','--workers',str(cli.workers)])
     ckpath=Path(f'results/{cli.model}/checkpoint/model{("_"+cli.tag) if cli.tag != "best" else ""}.pt')
-    ck=torch.load(ckpath,map_location='cpu',weights_only=False)
+    if not ckpath.exists() and cli.tag=='best':
+        ckpath=Path(f'results/{cli.model}/sim2real/actor.pt')
+        ck={'actor':torch.load(ckpath,map_location='cpu',weights_only=False).state_dict()}
+    else:
+        ck=torch.load(ckpath,map_location='cpu',weights_only=False)
     if 'obs_mean' in ck:
         mean,var=ck['obs_mean'],ck['obs_var']
     else:
@@ -36,6 +40,8 @@ def main():
     from utils.track_short import short_tracks
     from eval_open_space import TEST_DIR
     extra=evaluation_sets(args)
+    if not extra['real']:
+        extra['real']=sorted(str(p.resolve()) for p in Path('installation/maps_real').glob('Practice1126b*.npz'))
     sets=dict(regular=(regular,IL.EVAL_SETTINGS),short=(short_tracks(True),IL.SHORT_SETTINGS),
               hall=(extra['hall'],((8.,'center'),(4.,'center'))),
               real=(extra['real'],((8.,'center'),(4.,'center'))),
@@ -43,6 +49,7 @@ def main():
               **{'2025':(sorted(str(p.resolve()) for p in Path('installation/maps_hall').glob('Course2025*.npz')),
                          ((8.,'center'),(4.,'center')))})
     out=dict(model=cli.model,tag=cli.tag,seeds=cli.seeds,checkpoint_sha256=hashlib.sha256(ckpath.read_bytes()).hexdigest(),
+             dynamics_sha256=hashlib.sha256(Path('configs/task/dynamic.yaml').read_bytes()).hexdigest(),
              config=str(args.task_config),families={},notes='Real and 2025 geometries are in training; hall validation excludes 2025.')
     dest=Path('results/analysis1126');dest.mkdir(exist_ok=True)
     target=dest/f'{cli.model.replace("/","_")}_{cli.tag}_seeds{"-".join(map(str,cli.seeds))}.json'
