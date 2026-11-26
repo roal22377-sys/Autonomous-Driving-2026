@@ -412,6 +412,7 @@ class F1Wrapper(gym.Wrapper):
     # a dead-end bay drives on for minutes (time limit: 2 laps at 1.6 m/s) and blurs what went wrong.
     STRAIGHT_HEADING_COST = 0.0
     STRAIGHT_OFFSET_COST = 0.0
+    LAT_ACC_MODE = 'yaw_proxy' # optional path_normal includes changing slip; does not change observations
     STUCK_TIME = 0.0          # [s]
     STUCK_DIST = 0.5          # [m]
     BACKWARD_DIST = 2.0       # [m]
@@ -518,7 +519,13 @@ class F1Wrapper(gym.Wrapper):
             straight_cost += min(0.10, straight_heading_cost + straight_offset_cost)
         time_cost = self.TIME_COST
         wall_cost = self.WALL_COST * max(0.0, self.WALL_MARGIN - self.min_wall)
-        lat_cost = self.LAT_COST * max(0.0, abs(self.lat_acc) - self.LAT_GRIP_SHARE * float(self.params['mu']) * 9.81)
+        lat_signal = self.lat_acc
+        if self.LAT_ACC_MODE == 'path_normal':
+            from utils.driving_physics import path_normal_acceleration
+            lat_signal = path_normal_acceleration(self._env.unwrapped.sim.agents[0])
+        elif self.LAT_ACC_MODE != 'yaw_proxy':
+            raise ValueError('unknown lateral acceleration mode: ' + str(self.LAT_ACC_MODE))
+        lat_cost = self.LAT_COST * max(0.0, abs(lat_signal) - self.LAT_GRIP_SHARE * float(self.params['mu']) * 9.81)
         lap_bonus = 0.0
         if lap_done is not None and self.LAP_BONUS > 0 and np.isfinite(self.ref_lap):
             lap_bonus = self.LAP_BONUS * max(0.0, self.ref_lap - lap_done)
@@ -541,6 +548,8 @@ class F1Wrapper(gym.Wrapper):
                        'time_cost': time_cost,
                        'wall_cost': wall_cost,
                        'lat_cost': lat_cost,
+                       'lat_acc_reward': float(lat_signal),
+                       'lat_acc_yaw_proxy': float(self.lat_acc),
                        'bay_cost': bay_cost,
                        'line_cost': line_cost,
                        'lap_bonus': lap_bonus}
@@ -617,7 +626,8 @@ class F1Wrapper(gym.Wrapper):
         else:
             self.success = bool(self._env.unwrapped.toggle_list[0] >= 2 * self.laps)
             self.lap_times = list(self._env.unwrapped.lap_split_times)
-        # for the reward: closest wall seen by the (noise-free) lidar, true lateral acceleration
+        # Noise-free wall distance and legacy yaw-based acceleration diagnostic.
+        # calc_reward can select the path-normal acceleration from the dynamics.
         self.min_wall = float(np.min(np.asarray(obs_dict['scans'][0])))
         st = self.vehicle_state()
         self.lat_acc = float(st[3] * st[5])

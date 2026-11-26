@@ -166,6 +166,9 @@ def get_args():
     p.add_argument('--wall_margin', type=float, default=0.30)
     p.add_argument('--lat_cost', type=float, default=2.0)
     p.add_argument('--lat_grip_share', type=float, default=0.8)
+    p.add_argument('--lat_acc_mode', choices=('yaw_proxy', 'path_normal'), default='yaw_proxy',
+                   help='path_normal: use the ST velocity-direction acceleration, including changing slip, '
+                        'instead of the steady-turn V*yaw_rate approximation')
     p.add_argument('--lap_bonus', type=float, default=0.0, help='per second faster than the expert-pace lap (try 2)')
     p.add_argument('--uncapped_prob', type=float, default=0.5,
                    help='share of training episodes without a speed cap (a capped car gets no speed signal)')
@@ -271,6 +274,8 @@ def get_args():
         if a.sim_override else il_task
     args = IL.get_args([])
     args.update(vars(a))
+    if args.lat_acc_mode == 'path_normal' and args.model != 'st':
+        raise ValueError('--lat_acc_mode path_normal requires the ST vehicle model')
     args.family_select = bool(args.get('training_mix')) if args.family_select is None else bool(args.family_select)
     if args.family_select:
         if not args.get('training_mix'):
@@ -334,6 +339,7 @@ def env_config(args):
                 STRAIGHT_BACK=args.straight_back, STRAIGHT_ENTRY_RESET=bool(args.straight_entry_reset),
                 STRAIGHT_CURV=args.straight_curv, STRAIGHT_V_REF=args.straight_v_ref, BAY_COST=args.bay_cost, LINE_COST=args.line_cost, LINE_MARGIN=args.line_margin, TIME_COST=args.time_cost, WALL_COST=args.wall_cost,
                 WALL_MARGIN=args.wall_margin, LAT_COST=args.lat_cost, LAT_GRIP_SHARE=args.lat_grip_share,
+                LAT_ACC_MODE=args.lat_acc_mode,
                 LAP_BONUS=args.lap_bonus, uncapped_prob=args.uncapped_prob,
                 STUCK_TIME=args.stuck_time, STUCK_DIST=args.stuck_dist, BACKWARD_DIST=args.backward_dist,
                 HARD_PROB=args.hard_prob, HARD_FRAC=args.hard_frac, open_train=args.open_train_share > 0,
@@ -892,6 +898,8 @@ def main():
                    std_steer=float(std[0]), std_speed=float(std[1]), critic_loss=float(closs.item()), ret_scale=r_scale,
                    ep_return=mean('ret'), ep_laps=mean('laps'), crash_rate=mean('crash'), success_rate=mean('success'),
                    ep_speed=mean('speed'), stuck_rate=mean('stuck'), track_focus=focus, reward_per_step=rc)
+        slip=np.abs(B['priv'][...,5])
+        row.update(slip_rms_rad=float(np.sqrt(np.mean(slip**2))),slip_abs_p99_rad=float(np.quantile(slip,.99)))
         sub_crash = lambda key: (float(np.mean([d['crash'] for d in recent if d.get(key)]))
                                  if any(d.get(key) for d in recent) else float('nan'))
         row.update(hard_share=mean('hard'), hard_crash=sub_crash('hard'), open_share=mean('open'), open_crash=sub_crash('open'))
@@ -907,6 +915,7 @@ def main():
               + f' | per step: prog {rc["forward_reward"]:.2f} time -{rc["time_cost"]:.2f} steer -{rc["steer_cost"]:.3f}'
               + (f' straight -{rc["straight_cost"]:.3f}' if args.straight_steer_cost > 0 else '')
               + f' wall -{rc["wall_cost"]:.3f} lat -{rc["lat_cost"]:.3f}'
+              + f' slip RMS {np.degrees(row["slip_rms_rad"]):.1f}deg p99 {np.degrees(row["slip_abs_p99_rad"]):.1f}deg'
               + (f' bay -{rc["bay_cost"]:.3f}' if args.bay_cost > 0 else '')
               + (f' line -{rc["line_cost"]:.3f}' if args.line_cost > 0 else '') + f' crash -{rc["collision_cost"]:.2f}'
               + f' | rollout {t_roll:.0f}s update {time.time()-t0-t_roll:.0f}s (total {IL._hms(time.time()-T_START)})',

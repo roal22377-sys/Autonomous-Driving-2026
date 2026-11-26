@@ -8,7 +8,7 @@ sys.path[:0]=[str(S),str(S/'installation')]
 
 def main():
     os.chdir(S)
-    import torch
+    import torch,numpy as np
     from ruamel.yaml import YAML
     import train_ppo_s2r as PPO
     from utils.vectorize import RunningMeanStd
@@ -40,7 +40,8 @@ def main():
           '--minibatch','250','--eval_every','1','--ckpt_every','1','--short_eval','1','--worst_eval','0',
           '--critic_warmup','0','--max_warmup','0','--warmup_ev=-1000000000','--cost_critic','1',
           '--crash_adapt','0','--collision_cost','5000','--log_std_steer','-3.4','--log_std_speed','-2.6',
-          '--straight_heading_cost','.5','--straight_offset_cost','2','--lat_grip_share','.9']
+          '--straight_heading_cost','.5','--straight_offset_cost','2','--lat_grip_share','.9',
+          '--lat_acc_mode','path_normal','--straight_back','1','--straight_entry_reset','1']
     print('CODE SMOKE: synthetic evaluation scores; do not deploy outputs or use as performance evidence',flush=True)
     sys.argv=argv;PPO.main()
     root=Path('results/code_smoke_1126/1')
@@ -54,7 +55,11 @@ def main():
     assert st['update']==3 and len(calls)-before==5
     assert st['il']['hall_res'][0][2]==100. and st['il']['open_res'][0][2]==100.
     assert all(torch.isfinite(v).all() for net in ('actor','critic','ccritic') for v in st[net].values())
+    updates=[row for row in st['log'] if row['update']>0]
+    assert len(updates)==3 and all(np.isfinite(row['slip_rms_rad']) and
+                                  np.isfinite(row['slip_abs_p99_rad']) for row in updates)
     result=dict(result='passed',real_rollout_steps=1500,updates=3,resumed=True,
+                lat_acc_mode='path_normal',stability_logging=True,
                 qualification='Synthetic scoring only; tested PPO updates, family selection, checkpoint promotion and original IL baseline preservation.')
     Path('results/preflight_1126/ppo_update_resume_smoke.json').write_text(json.dumps(result,indent=2)+'\n')
     print('SMOKE PASSED',result,flush=True)
