@@ -296,13 +296,13 @@ def get_args():
     return args
 
 
-OVERRIDABLE = {'sim2real': None, 'speed_limit': {'range', 'uncapped_prob', 'nominal'},
-               'track_preview': {'noise'}}     # simulated localization error only (not what the policy observes)
+OVERRIDABLE = {'sim2real': None, 'training_mix': None, 'speed_limit': {'range', 'uncapped_prob', 'nominal'},
+               'track_preview': {'noise'}}     # only localization noise may change within the preview config
 
 
 def merge_sim_override(il_task, override, save_dir):
     '''
-        IL task config with the simulator conditions of `override` (sim2real, speed_limit range/caps) replaced,
+        IL task config with simulator conditions and existing-family sampling shares replaced,
         written to <save_dir>/backup/f1tenth.yaml. Everything that defines the observation or the meaning of
         the action (lidar, obs_dim, max_steer, steering gains, speed range, history) must stay the IL model's.
     '''
@@ -316,6 +316,12 @@ def merge_sim_override(il_task, override, save_dir):
         if k not in OVERRIDABLE:
             raise ValueError(f'--sim_override: `{k}` cannot be changed for PPO (it is part of the IL policy\'s '
                              f'observation/action); allowed: {sorted(OVERRIDABLE)}')
+        if k == 'training_mix':
+            if not cfg.get(k) or set(v) != set(cfg[k]):
+                raise ValueError('training_mix override must specify exactly the existing families')
+            shares = [float(value) for value in v.values()]
+            if any(not np.isfinite(value) or value < 0 for value in shares) or abs(sum(shares)-1.) > 1e-6:
+                raise ValueError('training_mix override must be finite, nonnegative and sum to one')
         allowed = OVERRIDABLE[k]
         for kk, vv in v.items():
             if allowed is not None and kk not in allowed:
