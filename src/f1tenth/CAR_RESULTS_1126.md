@@ -178,12 +178,11 @@
 ## 7. 아직 차에만 있는 녹화 (차가 꺼져 가져오지 못함)
 `run_1126_1608, 1611, 1616, 1623, 1626, 1632, 1734, 1754, 1759, 1801`
 - 1623(29 MB)은 위치 정보 모델 주행이 있었을 수 있음. **1801은 연기 사고 주행.**
-- 차를 켠 뒤 PC에서:
+- 차를 켠 뒤 PC에서 (`git pull` 먼저). 차에 있는 11/26 녹화 중 `logs/`에 없는 것을 모두 차에서 풀어 가져옵니다:
   ```bash
-  cd ~/Autonomous-Driving-2026
-  for B in run_1126_1623 run_1126_1801; do
-    ssh jowonjun@10.106.0.73 "cd ~/ros2_ws && source /opt/ros/foxy/setup.bash && source install/setup.bash && python3 tools/bag_extract.py ~/bags/$B"
-    scp -r jowonjun@10.106.0.73:bags/${B}_extracted logs/ && python3 tools/eval_drive.py logs/${B}_extracted
-  done
+  cd ~/Autonomous-Driving-2026 && git pull
+  tools/drive_session.sh --fetch-all run_1126        # 이미 있는 14개는 건너뜀, 실패한 것은 [error]로 표시
   git add -f logs/run_1126_*_extracted && git commit -m "car 11/26 remaining logs" && git push
   ```
+  - 차 IP가 바뀌었으면 앞에 `CAR_HOST=jowonjun@<IP>`를 붙입니다.
+  - 녹화는 차 컴퓨터(Jetson) 디스크에 있습니다. **0절대로 모터 점검 전에는 전원을 넣지 않습니다.** 모터를 빼고 컴퓨터만 켤 수 있는지는 조교와 확인합니다.

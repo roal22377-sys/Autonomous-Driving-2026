@@ -16,6 +16,7 @@
 #   tools/drive_session.sh --stop     # stop agent, bag (saved cleanly), bringup on the car
 #   tools/drive_session.sh --fetch    # extract the newest bag on the car -> logs/<bag>_extracted/
 #   tools/drive_session.sh --agent    # (re)start only the agent in this terminal (bringup keeps running)
+#   tools/drive_session.sh --fetch-all run_1126   # every bag of that day not in logs/ yet (extract on the car + copy)
 #   MODEL=preview tools/drive_session.sh --loc  # live localization check (OK/CHECK/WRONG/LOST + picture), 2nd terminal
 #   MODEL=il tools/drive_session.sh   # IL only (config/agent_il.yaml);  MODEL=ilppo: IL + PPO (agent_ilppo.yaml)
 #   MODEL=preview tools/drive_session.sh  # plan B model on the last mapped course (agent_preview.yaml, MAP_TOOL.md)
@@ -98,6 +99,25 @@ case "$1" in
     scp -rq "$CAR_HOST:${BAG}_extracted" "$REPO/logs/"
     echo "[done] $REPO/logs/$(basename "$BAG")_extracted"
     exit 0 ;;
+  --fetch-all)
+    # every bag on the car that is not in logs/ yet (e.g. sessions ended without --finish, car switched off):
+    # extract on the car, copy here. Optional: a date prefix, e.g. --fetch-all run_1126
+    PREFIX="${2:-run_}"
+    mkdir -p "$REPO/logs"
+    BAGS=$(ssh $SSH_OPTS "$CAR_HOST" "ls -d ~/bags/${PREFIX}* 2>/dev/null" | grep -v _extracted)
+    [ -n "$BAGS" ] || { echo "[error] no bag ~/bags/${PREFIX}* on the car"; exit 1; }
+    for BAG in $BAGS; do
+      N=$(basename "$BAG")
+      if [ -d "$REPO/logs/${N}_extracted" ]; then echo "[skip] $N (already in logs/)"; continue; fi
+      echo "[car] extracting $N"
+      if ssh $SSH_OPTS "$CAR_HOST" "$CAR_ENV && python3 tools/bag_extract.py $BAG" && scp -rq "$CAR_HOST:${BAG}_extracted" "$REPO/logs/"; then
+        echo "[done] logs/${N}_extracted"
+      else
+        echo "[error] $N failed (bag still on the car)"
+      fi
+    done
+    echo "[next] git add -f logs/${PREFIX}*_extracted && git commit -m 'car logs' && git push"
+    exit 0 ;;
   --agent)
     # (re)start only the agent in this terminal, e.g. after it crashed; bringup keeps running
     if ssh $SSH_OPTS "$CAR_HOST" 'pgrep -f "[a]gent_node" >/dev/null'; then
@@ -110,7 +130,7 @@ case "$1" in
     # WRONG / LOST + the map around the car with the scan on it. Run in a second PC terminal next to the session.
     exec ssh $SSH_OPTS -t "$CAR_HOST" "$CAR_ENV && python3 tools/loc_view.py --yaml src/f1tenth_ros/f1tenth_stack/config/$AGENT_YAML" ;;
   "") ;;
-  *) echo "usage: $0 [-m msg|--no-deploy] [--circle [radius] | --speed [v ...] | --straight [--trim x]] | --finish [--circle|--speed] | --stop | --fetch | --agent | --loc"; exit 1 ;;
+  *) echo "usage: $0 [-m msg|--no-deploy] [--circle [radius] | --speed [v ...] | --straight [--trim x]] | --finish [--circle|--speed] | --stop | --fetch | --fetch-all [run_MMDD] | --agent | --loc"; exit 1 ;;
 esac
 
 
