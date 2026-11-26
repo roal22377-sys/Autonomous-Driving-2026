@@ -42,6 +42,7 @@ class TemporalRecoveryLocalizer(ScanLocalizer):
         self.events.append(dict(kind='search', time=self.now, release_time=self.pending['release'],
             full_seed_count=len(initial), accepted_seeds=accepted, distinct_modes=len(ranked),
             retained_modes=len(ranked[:4]), actual_compute_ms=runtime_ms,
+            initial_modes=ranked,
             compute_exceeded_assumed_delay=runtime_ms > self.search_delay*1000))
 
     def step(self, ranges, angles, odom):

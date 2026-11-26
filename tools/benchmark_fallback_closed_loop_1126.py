@@ -145,7 +145,8 @@ def main():
     env = F1Wrapper(args, IL.MAPS, obs_noise=True, sim_mode='eval', tracks=[track])
     env.fixed_speed_cap = cli.cap
     env.start_mode = 'center'
-    rows, transitions = [], []
+    rows, transitions, recovery_event_truth = [], [], []
+    recorded_events = 0
     digest = hashlib.sha256()
     rng = np.random.default_rng(cli.seed + 991)
     try:
@@ -187,6 +188,18 @@ def main():
             if cli.recovery == 'temporal':
                 pv.loc.set_time(now)
             preview, pose, valid, _ = pv.features(scan, angles, odom, cli.cap)
+            if cli.recovery == 'temporal':
+                # Read-only annotation AFTER the estimator's decisions. Truth
+                # never enters its candidate search, tracking or acceptance.
+                for event in pv.loc.events[recorded_events:]:
+                    modes = event.get('initial_modes', [])
+                    if event['kind'] == 'accepted':
+                        modes = [dict(pose=event['pose'])]
+                    errors = [dict(position_error_m=float(np.linalg.norm(np.asarray(m['pose'])[:2]-state[:2])),
+                                   yaw_error_deg=float(np.degrees(abs(wrap(m['pose'][2]-state[4])))))
+                              for m in modes]
+                    recovery_event_truth.append(dict(kind=event['kind'], time=now, mode_errors=errors))
+                recorded_events = len(pv.loc.events)
             if valid:
                 lost_since = None
             elif lost_since is None:
@@ -273,6 +286,7 @@ def main():
             report['temporal_recovery'] = dict(search_delay_seconds=cli.search_delay,
                 margin=pv.loc.margin, confirmation_seconds=pv.loc.confirmation,
                 events=pv.loc.events,
+                post_decision_truth_annotations=recovery_event_truth,
                 tracking_runtime_p99_ms=(float(np.quantile(pv.loc.tracking_runtime_ms,.99))
                                          if pv.loc.tracking_runtime_ms else None),
                 implementation_sha256=sha(ROOT/'tools/temporal_recovery_localizer_1126.py'),
