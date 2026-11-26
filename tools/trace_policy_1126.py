@@ -13,6 +13,7 @@ def main():
     p.add_argument('--seed',type=int,default=7);p.add_argument('--start',default='center',choices=['center','random'])
     p.add_argument('--diagnostic_override',choices=['expert_speed','expert_steer','expert_both'],
                    help='privileged counterfactual for diagnosis; never a policy qualification')
+    p.add_argument('--audit_preview',action='store_true',help='record the projection index and actual preview inputs')
     cli=p.parse_args();os.chdir(S)
     import numpy as np,torch,random
     import matplotlib;matplotlib.use('Agg')
@@ -42,12 +43,24 @@ def main():
     planner=RacelinePlanner(env._env.unwrapped.track,args.length_f+args.length_r,v_min=env.min_speed,
                            v_max=env.speed_cap,max_steer=env.max_steer,max_steer_left=env.steer_left_max,
                            max_steer_right=env.steer_right_max,**IL.expert_kwargs(env))
+    from utils.policy_transfer import columns
+    preview_columns=[(i,name) for i,name in enumerate(columns(args)) if name.startswith('preview/')]
+    if cli.audit_preview and env.preview is None:raise ValueError('--audit_preview requires track preview')
+    previous_i=getattr(env.preview,'last_i',None);previous_valid=bool(getattr(env,'_pv',True))
     rows=[];metrics=DrivingMetrics()
     while True:
         with torch.no_grad():act=actor(torch.as_tensor(rms.normalize(obs),dtype=torch.float32)).loc.numpy()
         act=np.clip(act,-1,1);sq,vq=env.pending_commands()
         ev,ed=planner.plan(env.vehicle_state(),sq,vq,env.timestep)
         command_time=float(env.elapsed);valid=bool(getattr(env,'_pv',True))
+        audit={}
+        if cli.audit_preview:
+            current_i=getattr(env.preview,'last_i',None);jump=float('nan')
+            if valid and previous_valid and current_i is not None and previous_i is not None:
+                jump=((current_i-previous_i+env.preview.n//2)%env.preview.n-env.preview.n//2)*env.preview.ds
+            audit=dict(observed_preview_index=current_i if current_i is not None else float('nan'),observed_preview_delta_s=jump)
+            audit.update({'observed_'+name:float(obs[i]) for i,name in preview_columns})
+            previous_i,previous_valid=current_i,valid
         applied=act.copy()
         if cli.diagnostic_override in ('expert_speed','expert_both'):
             applied[1]=normalize_speed(ev,env.min_speed,env.max_speed)
@@ -61,11 +74,12 @@ def main():
                          expert_speed=float(ev),policy_steer=float(act[0]),policy_wheel_target=target,wheel_actual=float(state[2]),
                          expert_wheel_target=float(ed),expert_steer_command=env.steer_command(ed),lateral=g['lateral'],
                          heading=g['heading'],curvature=g['curvature'],lat_acc=float(env.lat_acc),preview_valid=int(valid),
-                         applied_steer=float(applied[0]),applied_speed=float(unnormalize_speed(applied[1],env.min_speed,env.max_speed))))
+                         applied_steer=float(applied[0]),applied_speed=float(unnormalize_speed(applied[1],env.min_speed,env.max_speed)),**audit))
         if term or trunc:break
     dest=Path('results/analysis1126/traces');dest.mkdir(parents=True,exist_ok=True)
     stem=f'{cli.model.replace("/","_")}_{cli.tag}_{Path(path).stem}_cap{cli.cap:g}_{cli.start}_seed{cli.seed}'
     if cli.diagnostic_override:stem+='_'+cli.diagnostic_override
+    if cli.audit_preview:stem+='_preview_audit'
     with open(dest/(stem+'.csv'),'w') as f:
         w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
     summary=dict(model=cli.model,tag=cli.tag,track=Path(path).name,cap=cli.cap,start=cli.start,seed=cli.seed,
@@ -74,6 +88,10 @@ def main():
                  progress_m=float(env.progress),lap_times=[float(t) for t in env.lap_times],
                  checkpoint_sha256=hashlib.sha256(ckpath.read_bytes()).hexdigest(),
                  shadow_expert='6.0 nominal reference, corner lookahead .65, response inversion; diagnostic only')
+    if cli.audit_preview:
+        jumps=np.array([r['observed_preview_delta_s'] for r in rows]);jumps=jumps[np.isfinite(jumps)]
+        summary['preview_projection_audit']=dict(maximum_step_m=float(np.abs(jumps).max()) if len(jumps) else None,steps_over_1m=int((np.abs(jumps)>1.).sum()),
+             note='Projection index and raw preview values actually presented to the policy; logging does not alter observations.')
     (dest/(stem+'.json')).write_text(json.dumps(summary,indent=2)+'\n');env.close()
     data={k:np.array([r[k] for r in rows]) for k in rows[0]};t=data['state_time']
     fig,axes=plt.subplots(2,2,figsize=(13,8));ax=axes[0,0]
