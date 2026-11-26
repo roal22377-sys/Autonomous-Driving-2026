@@ -18,6 +18,8 @@ def sha(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--run', type=int, default=28)
+    parser.add_argument('--control', type=int, default=27)
     parser.add_argument('--update', required=True, type=int)
     parser.add_argument('--output', required=True)
     cli = parser.parse_args()
@@ -31,21 +33,21 @@ def main():
     out = Path(cli.output)
     if out.exists():
         raise FileExistsError('Preserve previous diagnostic: ' + str(out))
-    args = PPO.IL.get_args(['--task_config', 'results/ppo_s2r/28/backup/f1tenth.yaml'])
+    args = PPO.IL.get_args(['--task_config', 'results/ppo_s2r/%d/backup/f1tenth.yaml' % cli.run])
     rms = RunningMeanStd('agent_obs', args.obs_dim)
     rms.load('results/imitation/1607/sim2real', required=True)
     cache_path = Path('results/ppo_retention_candidate_1126/replay_cache.npz')
     manifest = Path('results/ppo_retention_candidate_1126/preparation.json')
     cache = RetentionCache(args, rms, cache_path, manifest,
                            PPO.training_tracks(True, short=True), minibatch=2048, share=.125, seed=1127)
-    warmup = json.loads(Path('results/preflight_1126/ppo28_production_warmup_review.json').read_text())
+    warmup = json.loads(Path('results/preflight_1126/ppo%d_production_warmup_review.json' % cli.run).read_text())
     if cache.metadata != warmup['retention_metadata']:
         raise ValueError('Diagnostic split/normalization differs from the production cache')
     with np.load(cache_path, allow_pickle=False) as z:
         families = z['family'].copy()
     sources = dict(source_u70=Path('results/ppo_s2r/25/checkpoint/model_3080000.pt'),
-        control=Path('results/ppo_s2r/27/checkpoint/model_%d.pt' % (cli.update * 44000)),
-        candidate=Path('results/ppo_s2r/28/checkpoint/model_%d.pt' % (cli.update * 44000)))
+        control=Path('results/ppo_s2r/%d/checkpoint/model_%d.pt' % (cli.control, cli.update * 44000)),
+        candidate=Path('results/ppo_s2r/%d/checkpoint/model_%d.pt' % (cli.run, cli.update * 44000)))
     if not all(path.is_file() for path in sources.values()):
         raise FileNotFoundError('Wait for the complete checkpoint evaluation; no partial policy substitution')
     results = {}
