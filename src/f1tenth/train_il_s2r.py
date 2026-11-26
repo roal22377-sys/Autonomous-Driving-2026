@@ -138,6 +138,8 @@ def get_args(argv=None):
     p.add_argument('--init', default=None, help='start from this model (e.g. imitation/7): its actor + normalizer, '
                                                'and go straight to DAgger with it driving')
     p.add_argument('--resume', action='store_true', help='reload the data saved in <save_dir>/data and continue')
+    p.add_argument('--replay_file', default=None, help='frozen-policy rehearsal cache; separate from new rollout quotas')
+    p.add_argument('--replay_share', type=float, default=0.5, help='minibatch fraction for replay when --replay_file is set')
     # CAPS (Mysore et al. 2021) smoothness regularization: removes high-frequency steering jitter without
     # adding delay. temporal: pi(s_t) ~ pi(s_t+1); spatial: pi(s) ~ pi(s + noise)
     p.add_argument('--caps_t', type=float, default=0.5, help='temporal smoothness weight (0 = off); 0.5 since 11/24 '
@@ -455,6 +457,9 @@ def train_bc(args, actor, O, Y, rms, grad_steps, lr, Nn=None):
     perm = torch.randperm(n)
     nval = max(2000, n // 50)
     val, tr = perm[:nval], perm[nval:]
+    from utils.replay import load_replay
+    replay = load_replay(args, rms)
+    fresh_batch = args.batch - (replay.batch if replay is not None else 0)
     # samples whose next sample is the next step of the same episode (CAPS temporal term)
     nxt = torch.as_tensor(np.where(Nn[:-1])[0]) if (Nn is not None and args.caps_t > 0) else None
     w = torch.tensor([STEER_LOSS_WEIGHT, 1.0])
@@ -467,16 +472,21 @@ def train_bc(args, actor, O, Y, rms, grad_steps, lr, Nn=None):
     actor.train()
     t0 = time.time()
     for it in range(1, grad_steps + 1):
-        idx = tr[torch.randint(len(tr), (args.batch,))]
+        idx = tr[torch.randint(len(tr), (fresh_batch,))]
         xb = X[idx].float()
+        targets = T[idx]
+        if replay is not None:
+            ri = replay.train[torch.randint(len(replay.train), (replay.batch,))]
+            xb = torch.cat([xb, replay.X[ri].float()])
+            targets = torch.cat([targets, replay.T[ri]])
         if args.hist_noise > 0:
             xb[:, hist] += args.hist_noise * torch.randn_like(xb[:, hist])
         out = actor(xb).loc
-        weights = w.expand(len(idx), -1).clone()
+        weights = w.expand(len(targets), -1).clone()
         focus = float(args.get('il_steer_focus', 0.0))
         if focus:
-            weights[:, 0] *= 1.0 + focus * T[idx, 0].square()
-        loss = ((out - T[idx]) ** 2 * weights).mean()     # MSE: retain large steering labels
+            weights[:, 0] *= 1.0 + focus * targets[:, 0].square()
+        loss = ((out - targets) ** 2 * weights).mean()     # MSE: retain large steering labels
                                                     # was needed; a Huber loss would weaken exactly those labels
         if args.caps_s > 0:
             noisy = actor(xb + args.caps_sigma * torch.randn_like(xb)).loc
@@ -493,10 +503,14 @@ def train_bc(args, actor, O, Y, rms, grad_steps, lr, Nn=None):
         opt.step()
         sched.step()
         if it % 2000 == 0 or it == grad_steps:
+            replay_text = ''
             with torch.no_grad():
                 vl = ((actor(X[val].float()).loc - T[val]) ** 2 * w).mean().item()      # MSE, comparable to earlier runs
+                if replay is not None:
+                    rv = ((actor(replay.X[replay.val].float()).loc - replay.T[replay.val]) ** 2 * w).mean().item()
+                    replay_text = f' replay val {rv:.5f}'
             el = time.time() - t0
-            print(f'    [bc] step {it}/{grad_steps} train {loss.item():.5f} val {vl:.5f} | '
+            print(f'    [bc] step {it}/{grad_steps} train {loss.item():.5f} val {vl:.5f}{replay_text} | '
                   f'elapsed {_hms(el)} | ETA {_hms(el / it * (grad_steps - it))} | total {_hms(time.time() - T_START)}', flush=True)
     actor.eval()
     return vl
@@ -523,6 +537,8 @@ def main():
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     os.makedirs(f'{args.save_dir}/backup', exist_ok=True)
+    with open(f'{args.save_dir}/backup/il_args_{int(time.time())}.json', 'w') as f:
+        json.dump({k:v for k,v in args.items() if isinstance(v,(int,float,str,bool)) or v is None}, f, indent=2)
     for f, name in [(task_config(), 'f1tenth.yaml'), ('configs/task/dynamic.yaml', 'dynamic.yaml'),
                     ('configs/algorithm/imitation.yaml', 'imitation.yaml')]:
         copyfile(f, f'{args.save_dir}/backup/{name}')
