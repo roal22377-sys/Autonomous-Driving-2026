@@ -26,13 +26,17 @@
 set -e
 AGENT_YAML="agent${MODEL:+_$MODEL}.yaml"
 CAR_HOST="${CAR_HOST:-jowonjun@10.106.0.73}"
-SSH_OPTS="-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
+# 11/24: Wi-Fi round trips reached 0.2 s and 5 s connects failed now and then -> 10 s and up to 3 tries
+SSH_OPTS="-o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
 CAR_ENV='export PYTHONPATH=$HOME/venv/torch210/lib/python3.8/site-packages:$PYTHONPATH && source ~/venv/torch210/bin/activate && cd ~/ros2_ws && source /opt/ros/foxy/setup.bash && source install/setup.bash && export ROS_DOMAIN_ID=6'
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if ! ssh $SSH_OPTS -o BatchMode=yes "$CAR_HOST" true; then
-  echo "[error] cannot reach $CAR_HOST (car off / not on Wi-Fi?)"; exit 1
-fi
+REACHED=0
+for TRY in 1 2 3; do
+  if ssh $SSH_OPTS -o BatchMode=yes "$CAR_HOST" true 2>/dev/null; then REACHED=1; break; fi
+  echo "[warn] no answer from $CAR_HOST (try $TRY/3)"; sleep 2
+done
+[ $REACHED = 1 ] || { echo "[error] cannot reach $CAR_HOST (car off / not on Wi-Fi?)"; exit 1; }
 
 DEPLOY=1 MSG="" CIRCLE=0
 case "$1" in
@@ -81,6 +85,8 @@ case "$1" in
     ssh $SSH_OPTS "$CAR_HOST" 'pkill -INT -f "[a]gent_node"; pkill -INT -f "[c]ircle_test.py"; pkill -f "[c]ircle_series.sh"; pkill -INT -f "[s]peed_test.py"; pkill -f "[s]peed_series.sh"; sleep 1; pkill -INT -f "[r]os2 bag record"; sleep 2;
       pkill -INT -f "[r]os2 launch f1tenth_stack"; pkill -INT -f "[k]ey_teleop"; pkill -INT -f "[t]opic echo";
       pkill -INT -f "[l]ive_status.py"; sleep 2;
+      pkill -INT -f "[k]eyboard_to_ackermann"; pkill -INT -f "[r]os2_ws/install/"; pkill -INT -f "[u]rg_node"; sleep 1;
+      pkill -f "[r]os2_ws/install/"; pkill -f "[u]rg_node";
       pgrep -af "[r]os2|[a]gent_node|[u]rg_node|[v]esc_" || echo "[car] all stopped"'
     exit 0 ;;
   --fetch)

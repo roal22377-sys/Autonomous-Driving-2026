@@ -14,7 +14,7 @@ CAR_DOMAIN_ID="${CAR_DOMAIN_ID:-6}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 # fail fast instead of hanging when the car's Wi-Fi drops (no answer for ~15 s -> ssh exits)
-SSH_OPTS=(-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3)
+SSH_OPTS=(-o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=3)
 
 MSG="" BUILD=0 LAUNCH=""
 while [ $# -gt 0 ]; do
@@ -40,7 +40,7 @@ echo "[local] git push"
 git push
 
 echo "[car] git pull on $CAR_HOST"
-if ! ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$CAR_HOST" true; then
+if ! { ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$CAR_HOST" true || { sleep 2; ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$CAR_HOST" true; }; }; then
   echo "[error] cannot reach $CAR_HOST (car off / not on Wi-Fi?). GitHub is updated; rerun when the car is up."
   exit 1
 fi
