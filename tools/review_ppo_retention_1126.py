@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Review the declared retention-only PPO28 pilot against control27 and sources.
+"""Review declared retention/KL-guard pilots against their controls and sources.
 
 This reads completed fixed-cohort evaluations; it does not select exports or
 modify the running learner. Expanded-layout and real-car qualification remain
@@ -24,6 +24,7 @@ def sha(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--run', type=int, choices=[28, 29], default=28)
     parser.add_argument('--update', required=True, type=int)
     parser.add_argument('--output', required=True)
     cli = parser.parse_args()
@@ -33,32 +34,37 @@ def main():
     import torch
     torch.set_num_threads(1)
     base = SRC / 'results/ppo_s2r'
+    candidate_run, control_run = cli.run, {28: 27, 29: 28}[cli.run]
     control_args, args = [json.loads((base / str(n) / 'backup/ppo_args.json').read_text())
-                          for n in (27, 28)]
+                          for n in (control_run, candidate_run)]
     differences = {k: [control_args.get(k), args.get(k)]
                    for k in control_args.keys() | args.keys()
                    if control_args.get(k) != args.get(k)}
     expected = {'save_dir', 'algo_idx', 'retention_file', 'retention_manifest',
                 'retention_weight', 'retention_share'}
+    if candidate_run == 29:
+        expected = {'save_dir', 'algo_idx', 'kl_guard'}
+        if args['kl_guard'] != 'minibatch_rollback' or control_args.get('kl_guard', 'epoch') != 'epoch':
+            raise ValueError('Different KL-guard intervention')
     if set(differences) != expected:
-        raise ValueError('Unexpected retention-only experiment differences: ' + str(differences))
+        raise ValueError('Unexpected single-factor experiment differences: ' + str(differences))
     if (args['line_cost'] != 10 or args['retention_weight'] != 5
             or args['retention_share'] != .125
             or args['init'] != 'preflight_1126/ppo25_u70_actor_only.pt'):
         raise ValueError('Parameters differ from the declared pilot')
     for name in ('dynamic.yaml', 'f1tenth.yaml'):
-        if (base / '27/backup' / name).read_bytes() != (base / '28/backup' / name).read_bytes():
+        if (base / str(control_run) / 'backup' / name).read_bytes() != (base / str(candidate_run) / 'backup' / name).read_bytes():
             raise ValueError('Different task/dynamics: ' + name)
     manifest_path = SRC / args['retention_manifest']
     manifest = json.loads(manifest_path.read_text())
     if sha(SRC / args['retention_file']) != manifest['cache_sha256']:
         raise ValueError('Retention cache identity changed')
-    launch = json.loads((SRC / 'results/preflight_1126/ppo28_launch_manifest.json').read_text())
+    launch = json.loads((SRC / ('results/preflight_1126/ppo%d_launch_manifest.json' % candidate_run)).read_text())
     if (launch['retention_manifest_sha256'] != sha(manifest_path)
             or launch['retention_cache_sha256'] != manifest['cache_sha256']):
         raise ValueError('Retention lineage differs from the launch')
     now, control = [completed_row(base / str(n) / 'train_log.pkl', cli.update)
-                    for n in (28, 27)]
+                    for n in (candidate_run, control_run)]
     source_row = completed_row(base / '25/train_log.pkl', 70)
     source_path = SRC / 'results/analysis1126/ppo25_u70_full_family_reference.json'
     source = json.loads(source_path.read_text())
@@ -98,19 +104,29 @@ def main():
                    for label, families in references.items()}
     regressions = [g for g in ('worst', 'lost_short', 'lost_general')
                    if cohorts[g]['candidate_completed'] < cohorts[g]['source_completed']]
-    ckpath = base / ('28/checkpoint/model_%s.pt' % now['step'])
+    ckpath = base / ('%d/checkpoint/model_%s.pt' % (candidate_run, now['step']))
     weights = torch.load(ckpath, map_location='cpu', weights_only=False)
     if not all(torch.isfinite(v).all().item() for name in ('actor', 'critic', 'ccritic')
                for v in weights[name].values()):
         raise ValueError('Nonfinite candidate weights')
-    if now['retention_weight'] != 5 or not now['retention_minibatches'] > 0:
+    if (now['retention_weight'] != 5 or now['retention_minibatches'] < 0
+            or (candidate_run == 28 and not now['retention_minibatches'] > 0)):
         raise ValueError('Expected active retention at the reviewed actor update')
-    report = dict(run='ppo_s2r/28', update=cli.update, steps=now['step'],
+    guard_review = None
+    if candidate_run == 29:
+        if (now['kl_guard'] != 'minibatch_rollback' or not 0 <= now['kl'] <= args['max_kl'] + 1e-9
+                or now['actor_accepted_minibatches'] + now['kl_guard_rejected_minibatches'] != now['actor_attempted_minibatches']
+                or now['actor_accepted_minibatches'] != now['retention_minibatches']):
+            raise ValueError('Production KL guard/counter invariant failed')
+        guard_review = {k: now[k] for k in ('kl', 'kl_guard', 'kl_guard_attempted_kl',
+            'actor_attempted_minibatches', 'actor_accepted_minibatches', 'kl_guard_rejected_minibatches')}
+    report = dict(run='ppo_s2r/%d' % candidate_run, update=cli.update, steps=now['step'],
         checkpoint_sha256=sha(ckpath), source_reference_sha256=sha(source_path),
         configuration_differences=differences, cohorts=cohorts, comparisons=comparisons,
         retention=dict(loss=now['retention_loss'], minibatches=now['retention_minibatches'],
                        weight=now['retention_weight'], cache_sha256=manifest['cache_sha256'],
                        manifest_sha256=sha(manifest_path)),
+        kl_guard_review=guard_review,
         source_stress_and_lost_guard=dict(passed=not regressions, completion_regressions=regressions),
         eligible_for_expanded_validation=(not regressions and all(
             comparisons[label]['selected'] for label in ('source_u70', 'pace_u10'))),
