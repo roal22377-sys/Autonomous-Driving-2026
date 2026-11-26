@@ -80,5 +80,27 @@
     "고정 구간의 진입~출구 이후 통과 시간, 전체 랩 시간, 경로 이탈/개방구역 진입, 조향 흔들림, 위치 오차 조건을 함께 진단한다.",
     "공개 맵 적응은 지도 사용이 가능한 조건의 성능이며, 미공개 레이아웃 일반화와 혼동하지 않는다.",
     "시뮬레이션 결과와 실제 차량 결과를 구분한다. 완주율 추정의 표본 수와 조건을 공개한다."
-  ]
+  ],
+  "localization_resilience": {
+    "user_requirement": "지도 기반 주행 중 위치 추정이 깨져도 충돌 없이 대응하고, 위치를 다시 확보해 빠른 주행으로 복귀하는 전체 과정을 개선한다.",
+    "existing_training": "PPO25: 위치 오차/점프와 일시적 preview 상실, 완전 상실 에피소드 포함. 물리 시뮬레이터에서 합성된 위치 오류이며 실제 ScanLocalizer를 실행한 결과는 아니다.",
+    "existing_deployment_code": "agent_preview.yaml: lost_switch0.3s 후 LiDAR-only ppo_s2r/12190, cap4m/s. ScanLocalizer는 odometry prediction+scan/map ICP, local/global candidate search, local8/global40 qualifying scans confirmation. 실제 배포·실차 동작을 이번 점검에서 변경하지 않음.",
+    "evaluation_gap": "일반/worst PPO 평가는 연속 위치 오차 위주이고 lost_eval은 동일 preview 정책의 전체 에피소드 preview 제거 시험이다. 일시 상실→별도 fallback 정책 전환→실제 위치 재탐색→주 정책 복귀의 통합 성공을 증명하지 못한다.",
+    "planned_tests": [
+      "같은 물리/노이즈 시드에서 위치 기능 정상 대조군과 0.2/0.5/1/2/4초 상실 및 반복 상실을 비교. 헤어핀 진입·회전 중·출구·직선·넓은 공간에서 각각 주입.",
+      "잘못된 위치인데 valid=true인 경우와 정상→상실→확인 중→복귀 전환을 별도 시험. 인접 평행 통로·비슷한 직선의 잘못된 재인식을 특히 확인.",
+      "순수 PPO preview 제거 시험과 실제 별도 LiDAR fallback 전환 시험을 분리. 학습에 없는 상태 조합, 복귀 순간 조향/속도 급변, 경로 반대 방향 선택을 기록.",
+      "동일 ScanLocalizer 코드로 오프라인 LiDAR/odometry 재생 및 시뮬레이션 truth 비교. 실차 mapping poses는 추정 참조이며 절대 정답으로 간주하지 않는다."
+    ],
+    "metrics": [
+      "2랩 완주율/충돌률",
+      "잘못된 위치를 유효하다고 판단한 시간 및 사례 수",
+      "올바른 위치의 지속적 재확인까지 걸린 시간",
+      "fallback 전환/복귀 시 조향·속도 명령 변화",
+      "복구 후 경로 오차/주행 방향",
+      "정상 대조군 대비 구간 및 랩타임 손실"
+    ],
+    "role_assignment": "제어 정책은 불확실한 위치 정보에 대한 주행 대응을 담당하고 위치 추정기는 위치 재탐색·일관성 확인을 담당한다. 기본 정책이 위치 자체를 재추정한다고 주장하지 않는다.",
+    "decision_rule": "신뢰할 만한 주행 경로를 판단할 수 없는 상황에서는 감속·필요시 정지를 허용한다. 상실 상태에서 무조건 고속 유지나 빠른 valid복귀 수치만을 목표로 삼지 않는다."
+  }
 }
