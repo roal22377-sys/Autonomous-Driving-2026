@@ -12,7 +12,7 @@
   ],
   "implemented_now": {
     "optimizer": "tools/mintime_joint_1127.py",
-    "method": "Periodic C2 cubic path knots and collocated squared speeds jointly optimized by SLSQP with torch automatic Jacobians. No fixed list of output paths.",
+    "method": "Periodic C4 quintic path knots and collocated squared speeds jointly optimized by scaled SLSQP with forward-mode automatic Jacobians; analytic steering-rate and both-endpoint longitudinal constraints.",
     "objective": "sum of segment travel times; no minimum-curvature or shortest-distance surrogate in objective",
     "constraints": [
       "offset corridor bounds",
@@ -23,8 +23,8 @@
     ],
     "control": "Optimize speed on matched reconstructed stored geometry with the same constraints; compare joint-from-stored and joint-from-center.",
     "smoke_report": "results/joint_mintime_1127/smoke_v1/report.json",
-    "pilot_report": "results/joint_mintime_1127/pilot_v3/report.json",
-    "solver_stabilization": "Feasibility warmstart, scaled squared-speed variables, penalty continuation, best-feasible-iterate retention and dense audit. Current first Practice candidate converged on collocation but FAILED dense ellipse/rate/body margin checks; rejected."
+    "pilot_report": "results/joint_mintime_1127/pilot_v4b/report.json",
+    "solver_stabilization": "C2 finite-difference rate candidate from both initializations converged but failed dense rate/force/body constraints. Rejected. C4 analytic-rate version under test."
   },
   "model_limitations": [
     "Quasi-steady bicycle geometry, not full slip dynamics or delayed actuator OCP.",

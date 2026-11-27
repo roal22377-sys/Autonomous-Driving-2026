@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline joint path/squared-speed NLP; experimental, never a deployment tool.
 
-Periodic C2 cubic geometry, analytic spline curvature, longitudinal energy
+Periodic C4 quintic geometry, analytic curvature/steering derivatives, longitudinal energy
 balance, steering/rate bounds and a provisional combined acceleration ellipse.
 This quasi-steady bicycle approximation omits slip and actuator delay. Exported
 speed/steering are NOT yet consumed by the production preview or teacher.
@@ -14,13 +14,14 @@ from pathlib import Path
 import sys
 import time
 
-ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = Path(__file__).resolve()
+ROOT = SCRIPT.parents[1]
 SRC = ROOT / 'src/f1tenth'
 sys.path[:0] = [str(SRC), str(SRC/'installation'), str(ROOT/'tools')]
 
 import numpy as np
 import torch
-from scipy.interpolate import CubicSpline
+from scipy.interpolate import make_interp_spline
 from scipy.ndimage import distance_transform_edt
 from scipy.optimize import minimize
 from scipy.spatial import cKDTree
@@ -42,11 +43,14 @@ class JointProblem:
         self.m = self.n * samples
         self.clearance = clearance
         self.reserve = reserve
+        self.constraint_names=['ellipse_start','ellipse_end','steering','steering_rate',
+                               'path_derivative','forward_progress']
+        if arrays is not None:self.constraint_names.append('body_clearance')
         self.u = np.arange(self.m)/samples
-        basis = CubicSpline(np.arange(self.n+1),
-                            np.vstack([np.eye(self.n), np.eye(self.n)[:1]]),
-                            bc_type='periodic')
-        self.matrices = [tensor(basis(self.u, d)) for d in range(3)]
+        basis = make_interp_spline(np.arange(self.n+1),
+                                   np.vstack([np.eye(self.n), np.eye(self.n)[:1]]),
+                                   bc_type='periodic',k=5)
+        self.matrices = [tensor(basis(self.u, nu=d)) for d in range(4)]
         direction = self.matrices[1] @ tensor(center)
         self.reference_direction = direction / torch.sqrt((direction*direction).sum(1))[:,None]
         self.arrays = arrays
@@ -64,7 +68,7 @@ class JointProblem:
     def geometry(self, offset, matrices=None):
         matrices = self.matrices if matrices is None else matrices
         knots = tensor(self.center)+offset[:,None]*tensor(self.normals)
-        p, d, dd = [b @ knots for b in matrices]
+        p, d, dd = [b @ knots for b in matrices[:3]]
         norm = torch.sqrt((d*d).sum(1)+1e-16)
         tangent = d/norm[:,None]
         k = (d[:,0]*dd[:,1]-d[:,1]*dd[:,0])/norm**3
@@ -95,20 +99,31 @@ class JointProblem:
         ds = .5*(norm+torch.roll(norm,-1))/self.samples
         v = torch.sqrt(q)
         dt = 2*ds/(v+torch.roll(v,-1))
-        ax = (torch.roll(q,-1)-q)/(2*ds)
+        # q is piecewise linear in the knot parameter. Check longitudinal
+        # acceleration at BOTH segment endpoints; using only mean ds hid peaks.
+        dqdu=(torch.roll(q,-1)-q)*self.samples
+        ax = dqdu/(2*norm)
+        ax_end = dqdu/(2*torch.roll(norm,-1))
         ay = q*k
         steer = torch.atan(self.limits['wheelbase']*k)
-        rate = (torch.roll(steer,-1)-steer)/dt
+        knots=tensor(self.center)+off[:,None]*tensor(self.normals)
+        d,dd,ddd=[b @ knots for b in self.matrices[1:]]
+        cross=d[:,0]*dd[:,1]-d[:,1]*dd[:,0]
+        kp=(d[:,0]*ddd[:,1]-d[:,1]*ddd[:,0])/norm**3
+        kp-=3*cross*(d*dd).sum(1)/norm**5
+        rate=self.limits['wheelbase']*kp/(1+(self.limits['wheelbase']*k)**2)*v/norm
         # Conservative ellipse uses asymmetric longitudinal drive/brake bounds.
         ax_scale = torch.where(ax>=0,self.limits['a_acc'],self.limits['a_brake'])
         ellipse = (ax/ax_scale)**2+(ay/self.limits['a_lat'])**2
+        ellipse_end=(ax_end/ax_scale)**2+(torch.roll(ay,-1)/self.limits['a_lat'])**2
         forward = (tangent*self.reference_direction).sum(1)
-        constraints = [self.reserve**2-ellipse,
+        constraints = [self.reserve**2-ellipse,self.reserve**2-ellipse_end,
                        (self.reserve**2*self.limits['steer']**2-steer**2)/self.limits['steer']**2,
                        (self.reserve**2*self.limits['rate']**2-rate**2)/self.limits['rate']**2,
                        norm-.02,forward-.1]
         if self.arrays is not None:
-            constraints.append((self.body_clearance(p,tangent)-self.clearance)/.1)
+            body_reserve=.015 if self.reserve<1 else 0.
+            constraints.append((self.body_clearance(p,tangent)-self.clearance-body_reserve)/.1)
         return dt.sum(), torch.cat(constraints)
 
     def solve(self, initial_offset, maxiter=120, fixed=False):
@@ -153,7 +168,7 @@ class JointProblem:
                     f,g = self.values(z)
                     return torch.cat([f[None],g])
                 y = all_values(xx)
-                jac = torch.autograd.functional.jacobian(all_values,xx,vectorize=True)
+                jac = torch.autograd.functional.jacobian(all_values,xx,vectorize=True,strategy='forward-mode')
                 cached.update(x=x.copy(),y=y.detach().numpy(),jac=jac.detach().numpy())
                 remember(x,cached['y'])
             return cached['y'],cached['jac']
@@ -171,6 +186,7 @@ class JointProblem:
         pre=minimize(feasibility_fg,x0[free]/scales,jac=True,method='L-BFGS-B',
                      bounds=free_bounds,
                      options=dict(maxiter=600,ftol=1e-13,gtol=1e-7))
+        print('feasibility_stage',float(pre.fun),'elapsed',round(time.time()-start,2),flush=True)
         evaluate(pre.x)
         warm=pre.x
         for weight in (100.,1000.,10000.):
@@ -185,6 +201,7 @@ class JointProblem:
             warm_result=minimize(penalty_fg,warm,jac=True,method='L-BFGS-B',bounds=free_bounds,
                                  options=dict(maxiter=250,ftol=1e-11,gtol=1e-6,maxls=40))
             warm=warm_result.x
+            print('penalty_stage',weight,'elapsed',round(time.time()-start,2),flush=True)
         result = minimize(lambda x:(evaluate(x)[0][0],evaluate(x)[1][0]),warm,jac=True,
                           method='SLSQP',bounds=free_bounds,
                           constraints=[dict(type='ineq',fun=lambda x:evaluate(x)[0][1:],
@@ -200,6 +217,7 @@ class JointProblem:
                     returned_best_feasible=bool(not np.array_equal(chosen,result.x)),
                     model_lap_time_s=float(f),minimum_scaled_constraint=float(g.min()),
                     collocation_feasible=bool(g.min()>=-1e-5))
+        info['constraint_minima']=dict(zip(self.constraint_names,g.detach().numpy().reshape(-1,self.m).min(1).tolist()))
         return z,info
 
     def dense_audit(self,z,factor=6):
@@ -212,6 +230,7 @@ class JointProblem:
             p,t,k,_ = dense.geometry(tensor(z[:self.n]))
             clearance = float(dense.body_clearance(p,t).min()) if self.arrays is not None else None
         return dict(model_lap_time_s=float(f),minimum_scaled_constraint=float(g.min()),
+                    constraint_minima=dict(zip(dense.constraint_names,g.numpy().reshape(-1,dense.m).min(1).tolist())),
                     feasible=bool(g.min()>=-1e-4),minimum_sampled_body_clearance_m=clearance), p.numpy(), q, k.numpy()
 
 
@@ -251,12 +270,13 @@ def main():
     if (SRC/'installation') in dest.parents:raise ValueError('Offline results only')
     dest.mkdir(parents=True,exist_ok=False)
     report=dict(status='running',circle_check=circle_check(),tracks=[],
-                model='quasi-steady spline path / longitudinal energy balance',
+                optimizer_source_sha256=hashlib.sha256(SCRIPT.read_bytes()).hexdigest(),
+                model='quasi-steady C4 quintic spline / longitudinal energy balance / analytic steering rate',
                 limitations=['No global optimum certificate. No tire-slip or actuator-delay dynamics.',
                              'Combined acceleration ellipse and a_lat=6 are planning hypotheses, not measured hardware limits.',
                              'Sampled signed-distance body constraints need independent dense/static and closed-loop validation.',
                              'The fixed stored control is a spline reconstruction, not an exact original path. Infeasibility does not prove the original path infeasible.',
-                             '2 percent planning reserve is tested against hard limits at 6x denser samples.',
+                             '2 percent force/steering reserve and 15mm body reserve are tested at 6x denser samples.',
                              'Production preview and teacher do not yet consume exported speed/steering. No policy trained here.'])
     (dest/'report.json').write_text(json.dumps(report,indent=2)+'\n')
     from utils.raceline import resample_closed,tangents_normals
@@ -292,6 +312,8 @@ def main():
                            joint_speed=np.sqrt(q).astype(np.float32),
                            joint_steering=np.arctan(limits['wheelbase']*k).astype(np.float32),
                            joint_offset=z[:problem.n],joint_center=c,
+                           joint_q_collocation=z[problem.n:],joint_collocation_samples=np.array(problem.samples),
+                           joint_spline_degree=np.array(5),
                            gen_sig=np.array('joint_mintime_experiment:'+source_hash+':'+name))
             np.savez_compressed(folder/'track.npz',**candidate)
             info['path']=str(folder/'track.npz');row['candidates'][name]=info

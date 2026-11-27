@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-27T11:02:10.439813+00:00",
+  "updated_utc": "2026-11-27T11:06:25.789740+00:00",
   "phase": "Experimental reference planner redesign and robustness data preparation; PPO is not running.",
   "local_training_branch": "codex/1126-hairpin-position-ppo",
   "publication_branch": "codex/1127-raceline-robustness",
@@ -11,7 +11,7 @@
     "sha256": "28ce09301a6013ffdca87a3dbdd25737fed21feca608f7cf263e5255ab30d7f7",
     "availability": "Local only; full checkpoint and replay data are not in this source snapshot."
   },
-  "optimizer": "Quasi-steady path/speed joint nonlinear optimizer; analytic circle and objective gradients pass. Dense feasibility gates currently reject the first Practice candidate.",
+  "optimizer": "C4 quintic path/speed NLP with analytic steering-rate and both-endpoint force constraints. Previous C2 candidate converged from two starts but failed dense checks and was rejected. C4 track pilots running; no policy improvement claimed.",
   "robustness_preparation": "15 physical-wall mismatch variants prepared, keeping nominal map and reference path fixed; not yet trained.",
   "two_car_requirement": "Same track, separated simultaneous starting positions. Opposite positions do not imply head-on traffic. Actual opponent-occluded LiDAR plus scan-localizer validation remains to implement.",
   "existing_randomization_retained": "LiDAR range noise/dropout/spikes; speed noise/scale; steering delay/lock/response; acceleration/braking/friction; synthetic localization offset/jumps/loss; varied geometry and open pockets.",
@@ -25,6 +25,8 @@
     "git_push_error": "Could not resolve host github.com in the execution environment",
     "local_commit": "8945f6bc3766c49be2863ee6845317ef010d500b",
     "destination": "https://github.com/roal22377-sys/Autonomous-Driving-2026/tree/codex/1127-raceline-robustness",
-    "destination_exists": false
+    "destination_exists": false,
+    "credential_helper_present": true,
+    "credential_note": "Windows Git Credential Manager is configured. DNS fails before authentication; no claim that stored credentials are invalid."
   }
 }
