@@ -1,0 +1,422 @@
+{
+  "status": "complete_not_applied",
+  "limits": {
+    "v_min": 0.5,
+    "v_max": 8.0,
+    "a_lat": 6.0,
+    "a_acc": 2.9,
+    "a_brake": 3.7
+  },
+  "source_generation_sha256": "ce3088f5764f45213264e534f8f7d046ae25ff577218acf1a598f9b43b95a3bf",
+  "tracks": [
+    {
+      "source": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+      "source_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+      "shortest_solver_success": true,
+      "shortest_solver_message": "CONVERGENCE: REL_REDUCTION_OF_F_<=_FACTR*EPSMCH",
+      "bounds_sha256": "3f28771296ee596bd5911d512191380bb77806c22cb155c9687f317b339e11cb",
+      "margin": 0.55,
+      "candidates": {
+        "stored": {
+          "length_m": 29.62513571885799,
+          "current_profile": {
+            "lap_time_s": 6.894704479335875,
+            "max_speed": 7.066449066176118,
+            "max_lateral_acc": 5.99999521860128,
+            "max_kinematic_steer_rad": 0.4032699669176956,
+            "max_kinematic_steer_rate_rad_s": 1.4836774124771435,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.039324025806656
+          },
+          "raw_max_kinematic_steer_rad": 0.794249531242793,
+          "raw_steer_limit_fraction": 0.02364864864864865,
+          "footprint": {
+            "sampled_poses": 1481,
+            "body_samples_per_pose": 325,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.30000000000000004,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Practice1126b/stored/track.npz"
+        },
+        "centerline": {
+          "length_m": 33.842038718460486,
+          "current_profile": {
+            "lap_time_s": 8.956718392968753,
+            "max_speed": 5.906996696368027,
+            "max_lateral_acc": 5.999994955362633,
+            "max_kinematic_steer_rad": 0.3842846751036576,
+            "max_kinematic_steer_rate_rad_s": 1.640441836595877,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.039925151167175
+          },
+          "raw_max_kinematic_steer_rad": 0.5805447802599709,
+          "raw_steer_limit_fraction": 0.01775147928994083,
+          "footprint": {
+            "sampled_poses": 1692,
+            "body_samples_per_pose": 325,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.41231056256176607,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Practice1126b/centerline/track.npz"
+        },
+        "min_curvature": {
+          "length_m": 30.60010437409839,
+          "current_profile": {
+            "lap_time_s": 7.08690362749166,
+            "max_speed": 7.04678751644079,
+            "max_lateral_acc": 5.999994728514645,
+            "max_kinematic_steer_rad": 0.3692384996014555,
+            "max_kinematic_steer_rate_rad_s": 1.0147613306752064,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.048791856645071
+          },
+          "raw_max_kinematic_steer_rad": 0.47926062987031826,
+          "raw_steer_limit_fraction": 0.0,
+          "footprint": {
+            "sampled_poses": 1530,
+            "body_samples_per_pose": 325,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.3535533905932738,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Practice1126b/min_curvature/track.npz"
+        },
+        "true_shortest_polyline": {
+          "length_m": 28.888894179346753,
+          "current_profile": {
+            "lap_time_s": 7.052950816422857,
+            "max_speed": 6.764315131962754,
+            "max_lateral_acc": 5.999994521086928,
+            "max_kinematic_steer_rad": 0.35643331552967844,
+            "max_kinematic_steer_rate_rad_s": 1.5143082957804765,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.0260241540451105
+          },
+          "raw_max_kinematic_steer_rad": 1.4295356076755616,
+          "raw_steer_limit_fraction": 0.034722222222222224,
+          "footprint": {
+            "sampled_poses": 1444,
+            "body_samples_per_pose": 325,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.25,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Practice1126b/true_shortest_polyline/track.npz"
+        }
+      }
+    },
+    {
+      "source": "src/f1tenth/installation/maps_real/Practice1126b_rev.npz",
+      "source_sha256": "d238103f940d3d171b6c939939109f2afba0925894280f0ed0204aa3a15baf7e",
+      "shortest_solver_success": false,
+      "shortest_solver_message": "STOP: TOTAL NO. of ITERATIONS REACHED LIMIT",
+      "bounds_sha256": "593b3d28ac17a30d51fc13755f0d89c5502aadcdfc6902b44cfbe3a90094bf62",
+      "margin": 0.55,
+      "candidates": {
+        "stored": {
+          "length_m": 29.85927659854137,
+          "current_profile": {
+            "lap_time_s": 6.802914689739148,
+            "max_speed": 7.171001020359416,
+            "max_lateral_acc": 5.999994974865639,
+            "max_kinematic_steer_rad": 0.385632828044719,
+            "max_kinematic_steer_rate_rad_s": 1.2745088866518686,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.024987096366796
+          },
+          "raw_max_kinematic_steer_rad": 0.6547773016980263,
+          "raw_steer_limit_fraction": 0.026755852842809364,
+          "footprint": {
+            "sampled_poses": 1493,
+            "body_samples_per_pose": 325,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.32015621187164245,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Practice1126b_rev/stored/track.npz"
+        },
+        "centerline": {
+          "length_m": 33.80222717675674,
+          "current_profile": {
+            "lap_time_s": 8.91849012718819,
+            "max_speed": 5.846315859140467,
+            "max_lateral_acc": 5.999994944964698,
+            "max_kinematic_steer_rad": 0.38356956865996705,
+            "max_kinematic_steer_rate_rad_s": 1.552790209180427,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.040271554239815
+          },
+          "raw_max_kinematic_steer_rad": 0.5528612788570579,
+          "raw_steer_limit_fraction": 0.002967359050445104,
+          "footprint": {
+            "sampled_poses": 1690,
+            "body_samples_per_pose": 325,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.41231056256176607,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Practice1126b_rev/centerline/track.npz"
+        },
+        "min_curvature": {
+          "length_m": 30.498942171941557,
+          "current_profile": {
+            "lap_time_s": 7.090203084008378,
+            "max_speed": 7.026779169191592,
+            "max_lateral_acc": 5.999994880325663,
+            "max_kinematic_steer_rad": 0.3791802478181923,
+            "max_kinematic_steer_rate_rad_s": 1.063402838795117,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.023314802477769
+          },
+          "raw_max_kinematic_steer_rad": 0.5123962643061295,
+          "raw_steer_limit_fraction": 0.003278688524590164,
+          "footprint": {
+            "sampled_poses": 1525,
+            "body_samples_per_pose": 325,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.3354101966249685,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Practice1126b_rev/min_curvature/track.npz"
+        },
+        "true_shortest_polyline": {
+          "length_m": 28.872169573493828,
+          "current_profile": {
+            "lap_time_s": 6.970786010946378,
+            "max_speed": 6.776346291754908,
+            "max_lateral_acc": 5.999994442665207,
+            "max_kinematic_steer_rad": 0.35181094211888125,
+            "max_kinematic_steer_rate_rad_s": 1.1511495458239063,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.049007335620329
+          },
+          "raw_max_kinematic_steer_rad": 1.428477628909252,
+          "raw_steer_limit_fraction": 0.04861111111111111,
+          "footprint": {
+            "sampled_poses": 1444,
+            "body_samples_per_pose": 325,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.25,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Practice1126b_rev/true_shortest_polyline/track.npz"
+        }
+      }
+    },
+    {
+      "source": "src/f1tenth/installation/maps_hall/Course2025_s57_w3025.npz",
+      "source_sha256": "473acb1ec1a6c45fddb2737fde0d5f5a3495cdd2e0bea54abb3fe0019abc4a72",
+      "shortest_solver_success": true,
+      "shortest_solver_message": "CONVERGENCE: REL_REDUCTION_OF_F_<=_FACTR*EPSMCH",
+      "bounds_sha256": "2afe0c1af9b01fffd3ffb6804efd96e429effff1234d6e3b2f16ecc1be5f19b9",
+      "margin": 0.3,
+      "candidates": {
+        "stored": {
+          "length_m": 53.78925234484849,
+          "current_profile": {
+            "lap_time_s": 13.701272803617407,
+            "max_speed": 7.3126212517522875,
+            "max_lateral_acc": 5.999995563620852,
+            "max_kinematic_steer_rad": 0.4310018203522197,
+            "max_kinematic_steer_rate_rad_s": 1.2832135728109433,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.0399762728196675
+          },
+          "raw_max_kinematic_steer_rad": 0.5934049360519642,
+          "raw_steer_limit_fraction": 0.007434944237918215,
+          "footprint": {
+            "sampled_poses": 2689,
+            "body_samples_per_pose": 144,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.32,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Course2025_s57_w3025/stored/track.npz"
+        },
+        "centerline": {
+          "length_m": 56.64050556049393,
+          "current_profile": {
+            "lap_time_s": 15.690519569032103,
+            "max_speed": 6.991882392067797,
+            "max_lateral_acc": 5.999995519688566,
+            "max_kinematic_steer_rad": 0.4272734893296344,
+            "max_kinematic_steer_rate_rad_s": 2.0126386294880416,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.048300494113331
+          },
+          "raw_max_kinematic_steer_rad": 0.636036905471141,
+          "raw_steer_limit_fraction": 0.005309734513274336,
+          "footprint": {
+            "sampled_poses": 2832,
+            "body_samples_per_pose": 144,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.4,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Course2025_s57_w3025/centerline/track.npz"
+        },
+        "min_curvature": {
+          "length_m": 53.85096088020706,
+          "current_profile": {
+            "lap_time_s": 13.7157064422073,
+            "max_speed": 7.306887104831921,
+            "max_lateral_acc": 5.999995559414641,
+            "max_kinematic_steer_rad": 0.4306422205636889,
+            "max_kinematic_steer_rate_rad_s": 1.304537502753231,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.047177317405891
+          },
+          "raw_max_kinematic_steer_rad": 0.5757724571898913,
+          "raw_steer_limit_fraction": 0.011152416356877323,
+          "footprint": {
+            "sampled_poses": 2693,
+            "body_samples_per_pose": 144,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.32,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Course2025_s57_w3025/min_curvature/track.npz"
+        },
+        "true_shortest_polyline": {
+          "length_m": 52.9701218845357,
+          "current_profile": {
+            "lap_time_s": 14.836429610507562,
+            "max_speed": 6.847171469533536,
+            "max_lateral_acc": 5.999995624783938,
+            "max_kinematic_steer_rad": 0.43629509461403987,
+            "max_kinematic_steer_rate_rad_s": 1.3606002522893856,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.043516198611834
+          },
+          "raw_max_kinematic_steer_rad": 0.8206041821378335,
+          "raw_steer_limit_fraction": 0.030245746691871456,
+          "footprint": {
+            "sampled_poses": 2649,
+            "body_samples_per_pose": 144,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.32,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Course2025_s57_w3025/true_shortest_polyline/track.npz"
+        }
+      }
+    },
+    {
+      "source": "src/f1tenth/installation/maps_hall/Course2025_rev_s57_w3025.npz",
+      "source_sha256": "341ff8c2d4e19c75ac0435afaa8e09b9e596e75f4780136b692994578a9f0fcc",
+      "shortest_solver_success": true,
+      "shortest_solver_message": "CONVERGENCE: REL_REDUCTION_OF_F_<=_FACTR*EPSMCH",
+      "bounds_sha256": "dff46d39c3e2d1e17e3acf983dad97f44417b42ff6cfab9b9f04c9833f9f7b6f",
+      "margin": 0.3,
+      "candidates": {
+        "stored": {
+          "length_m": 54.52318054073615,
+          "current_profile": {
+            "lap_time_s": 13.771695025617989,
+            "max_speed": 7.3529565512295,
+            "max_lateral_acc": 5.999995711279882,
+            "max_kinematic_steer_rad": 0.4439916299241549,
+            "max_kinematic_steer_rate_rad_s": 1.2844445763795986,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.045812761689458
+          },
+          "raw_max_kinematic_steer_rad": 0.7032114244456481,
+          "raw_steer_limit_fraction": 0.007339449541284404,
+          "footprint": {
+            "sampled_poses": 2726,
+            "body_samples_per_pose": 144,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.32,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Course2025_rev_s57_w3025/stored/track.npz"
+        },
+        "centerline": {
+          "length_m": 56.639481263811724,
+          "current_profile": {
+            "lap_time_s": 15.673651342755848,
+            "max_speed": 7.020006565197569,
+            "max_lateral_acc": 5.999995515706441,
+            "max_kinematic_steer_rad": 0.42693853470292326,
+            "max_kinematic_steer_rate_rad_s": 1.8952571645227063,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.047901335792668
+          },
+          "raw_max_kinematic_steer_rad": 0.6134912073311475,
+          "raw_steer_limit_fraction": 0.005309734513274336,
+          "footprint": {
+            "sampled_poses": 2832,
+            "body_samples_per_pose": 144,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.4308131845707603,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Course2025_rev_s57_w3025/centerline/track.npz"
+        },
+        "min_curvature": {
+          "length_m": 54.521636426021196,
+          "current_profile": {
+            "lap_time_s": 13.780476712834325,
+            "max_speed": 7.347494124554653,
+            "max_lateral_acc": 5.999995679124358,
+            "max_kinematic_steer_rad": 0.4411009508414844,
+            "max_kinematic_steer_rate_rad_s": 1.2901228068731132,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.045559415481872
+          },
+          "raw_max_kinematic_steer_rad": 0.7099830358798724,
+          "raw_steer_limit_fraction": 0.007352941176470588,
+          "footprint": {
+            "sampled_poses": 2726,
+            "body_samples_per_pose": 144,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.32,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Course2025_rev_s57_w3025/min_curvature/track.npz"
+        },
+        "true_shortest_polyline": {
+          "length_m": 53.402638823567,
+          "current_profile": {
+            "lap_time_s": 14.97453773274402,
+            "max_speed": 6.860072070427297,
+            "max_lateral_acc": 5.99999578653967,
+            "max_kinematic_steer_rad": 0.4508973468872822,
+            "max_kinematic_steer_rate_rad_s": 1.6196548928904284,
+            "steer_limit_fraction": 0.0,
+            "steer_rate_limit_fraction": 0.0,
+            "max_combined_acc_proxy": 7.04361657028722
+          },
+          "raw_max_kinematic_steer_rad": 0.816310540709868,
+          "raw_steer_limit_fraction": 0.01876172607879925,
+          "footprint": {
+            "sampled_poses": 2670,
+            "body_samples_per_pose": 144,
+            "poses_touching_occupied_samples": 0,
+            "minimum_body_grid_clearance_m": 0.32,
+            "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+          },
+          "path": "results/raceline_objectives_1127/Course2025_rev_s57_w3025/true_shortest_polyline/track.npz"
+        }
+      }
+    }
+  ],
+  "qualification": "KnownPractice/2025trainingexamplesonly. Truepolyline-shortestobjective,minimum-curvatureproxy,storedlineandoptionaldensermulti-starttime-refinementcomparedwithsamebounds/occupancy. Simplifiedtimeprofileuses1msmoothedcurvatureandindependentaccel/brakelimits;kinematicandstaticfootprintscreensareNOTsufficientdynamicfeasibility. No policytraining,live-mapreplacement,realcaroperationorglobaloptimalityclaim."
+}

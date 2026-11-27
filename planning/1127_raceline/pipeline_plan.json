@@ -1,0 +1,150 @@
+{
+  "updated_utc": "2026-11-27T10:45:20.098399+00:00",
+  "user_authorized": true,
+  "objective": "High two-lap completion with minimum total lap time; racing line, speed and steering are jointly improvable.",
+  "current_stage": "offline_joint_path_speed_optimizer_pilot",
+  "previous_limitations": [
+    "Minimum-curvature initialization and broad local offset bumps restrict useful shape exploration.",
+    "A 1m smoothed-curvature speed profile can hide short sharp features.",
+    "Independent acceleration/braking and lateral bounds omit the combined force tradeoff.",
+    "Preview and teacher independently recompute speed; exporting path alone discards optimized speeds.",
+    "Reference deviation, imitation and retention guidance can together constrain PPO exploration."
+  ],
+  "implemented_now": {
+    "optimizer": "tools/mintime_joint_1127.py",
+    "method": "Periodic C2 cubic path knots and collocated squared speeds jointly optimized by SLSQP with torch automatic Jacobians. No fixed list of output paths.",
+    "objective": "sum of segment travel times; no minimum-curvature or shortest-distance surrogate in objective",
+    "constraints": [
+      "offset corridor bounds",
+      "sampled full body signed-distance clearance",
+      "analytic spline curvature with +/-0.50rad kinematic steering",
+      "2.65rad/s kinematic steering-rate limit",
+      "provisional combined accel ellipse using lateral6.0, acceleration2.9, braking3.7; vmax8.0"
+    ],
+    "control": "Optimize speed on matched reconstructed stored geometry with the same constraints; compare joint-from-stored and joint-from-center.",
+    "smoke_report": "results/joint_mintime_1127/smoke_v1/report.json",
+    "pilot_report": "results/joint_mintime_1127/pilot_v3/report.json",
+    "solver_stabilization": "Feasibility warmstart, scaled squared-speed variables, penalty continuation, best-feasible-iterate retention and dense audit. Current first Practice candidate converged on collocation but FAILED dense ellipse/rate/body margin checks; rejected."
+  },
+  "model_limitations": [
+    "Quasi-steady bicycle geometry, not full slip dynamics or delayed actuator OCP.",
+    "Current grip ellipse is an explicit hypothesis; not a measured hardware envelope.",
+    "Spline knot corridor and sampled body clearance do not certify continuous swept-body feasibility.",
+    "Direct collocation samples must pass a denser independent audit.",
+    "Local nonlinear optimizer has no global optimality certificate."
+  ],
+  "pipeline": [
+    {
+      "stage": 1,
+      "action": "Verify analytic-circle solution, gradients, matched objective and dense constraint residuals. Preserve rejected candidate diagnostics.",
+      "state": "analytic circle and objective gradient passed; track pilots started"
+    },
+    {
+      "stage": 2,
+      "action": "Improve discretization/model if dense constraints fail. Add actual simulator tracking evaluation including actuator delays, slip, nominal/worst physics and localization noise.",
+      "state": "pending"
+    },
+    {
+      "stage": "2b",
+      "action": "Add same-course separated-start moving-car LiDAR and actual scan-localizer closed-loop validation before claiming race robustness.",
+      "state": "requirements and existing code gap audited; implementation pending"
+    },
+    {
+      "stage": 3,
+      "action": "Carry the exact joint path/speed/steering artifact consistently into preview, teacher, replay and evaluation, gated to validated experimental candidates. Audit that no legacy speed recomputation silently replaces the result.",
+      "state": "pending"
+    },
+    {
+      "stage": 4,
+      "action": "Collect matched training-only demonstrations/recovery and adapt under equal budgets against old references. Keep original held-out geometries out of gradients.",
+      "state": "pending"
+    },
+    {
+      "stage": 5,
+      "action": "Run a new identifiable PPO branch; initial reference guidance then jointly decay line cost, imitation and retention toward zero. Preserve wall/collision/bay and localization-loss coverage. Audit straight penalties so useful race positioning is allowed.",
+      "state": "pending"
+    },
+    {
+      "stage": 6,
+      "action": "Evaluate completion first, then paired successful lap time and tail time, fixed straight/hairpin sectors and localization-loss recovery on the existing cohorts plus independent seeds. Promote only against the designated source and current champion with explicit regressions.",
+      "state": "pending"
+    }
+  ],
+  "coverage": {
+    "pilot": [
+      "Practice1126b",
+      "Course2025 example"
+    ],
+    "before_adoption": [
+      "both directions",
+      "narrow hairpins and long straights",
+      "held-out base geometries",
+      "random open pockets",
+      "localization loss and return"
+    ],
+    "current_PPO_mix_percent": {
+      "hall": 40,
+      "short": 30,
+      "regular": 15,
+      "open": 10,
+      "real_examples": 5
+    },
+    "note": "2025 is a known example, not the future competition course. Revisit sampling only with diagnostics. Qualifier map available14days, final map2days: broad pretraining then map-specific optimization and short adaptation with robustness retained."
+  },
+  "preserved_checkpoint": {
+    "run": "PPO30",
+    "update": 10,
+    "steps": 440000,
+    "sha256": "28ce09301a6013ffdca87a3dbdd25737fed21feca608f7cf263e5255ab30d7f7",
+    "status": "preserved, not resumed while planner changes are under validation"
+  },
+  "quota_stop": "Check fresh 5h primary usage; save and stop when remaining<20%. No unattended continuation past that threshold.",
+  "performance_claim": "No new PPO or real-car improvement claimed. Track optimization and closed-loop validation are distinct.",
+  "traffic_requirement": {
+    "updated_utc": "2026-11-27T10:49:18.606793+00:00",
+    "user_clarification": "Two cars share one course and start simultaneously from different/opposite positions on the lap; not an assumed head-on road encounter.",
+    "start_gap": "Variable separated arc-length starts; approximately half a lap as a scenario, not a measured rule.",
+    "direction": "Do not infer oncoming traffic from opposite starting positions. Model common race-direction starts as the primary working scenario, retain direction as an explicit parameter.",
+    "confirmed_code_findings": [
+      "Base gym simulator implements other-agent ray casting and agent collisions.",
+      "Current PPO F1Wrapper uses synthetic LocalizationNoise; it does not run the scan localizer on the perturbed training scans.",
+      "ScanLocalizer already trims ICP residuals and checks explained share/confirmation; no verified moving-opponent localization benchmark found in the current pipeline.",
+      "Wrapper observation conversion flattens all scans; cannot just switch num_agents to2 without explicit ego scan extraction, ego actions and per-agent parameters audit."
+    ],
+    "required_pipeline": [
+      "Build physically consistent second-car motion with shared-wall occlusion and actual vehicle collision checks. Sweep start arc-length gap, relative speed, visibility and catch-up.",
+      "Feed the same opponent-occluded scans into both the actor observation and the actual scan localizer in offline validation.",
+      "Test clean localization, rejected/lost localization, and wrong-but-valid localization; track false valid time and recovery time as well as completion/collision/lap time.",
+      "Use raw LiDAR and action history when localization is uncertain; avoid unconditionally following a wrong preview. Confidence-gated preview needs validation.",
+      "Preserve clean single-car pace/completion, static maps and family holdouts; introduce validated dynamic scenarios in a separate identifiable training branch."
+    ],
+    "not_implemented_yet": [
+      "Closed-loop two-car PPO wrapper integration",
+      "Opponent-induced scan-localizer error distribution and correlated training injection",
+      "Dynamic scenario training/evaluation cohorts"
+    ],
+    "no_hardware_action": true
+  },
+  "map_drift_requirement": {
+    "updated_utc": "2026-11-27T10:56:58.498495+00:00",
+    "user_condition": "Physical barriers drift after other cars hit them; stored SLAM map and racing line can become stale.",
+    "existing_randomization": "LiDAR range noise/dropout/spikes; speed noise/scale; steering delay/lock/response; acceleration/braking/friction; synthetic localization offset/jumps/loss; varied geometry and open pockets.",
+    "additional_gap": "Geometry variation with a matching regenerated reference is different from stale reference map against a changed physical course.",
+    "implemented": "tools/prepare_map_mismatch_1127.py warps physical occupancy with a bounded smooth spatial field; original centerline/raceline/widths and nominal_occupancy remain unchanged.",
+    "prepared_report": "results/map_mismatch_1127/known_examples_v1/report.json",
+    "prepared_variants": 15,
+    "requested_variants": 16,
+    "excluded": "One perturbation made no raster change at the existing map resolution.",
+    "perturbation_hypotheses_m": [
+      0.05,
+      0.1
+    ],
+    "qualification": "Not measured wall motion; inverse smooth warp displacement and raster route screen, no full swept-body feasibility or trained improvement.",
+    "next": [
+      "Evaluate source25u70 with identical seeds, nominal versus mismatch physical grids; this measures synthetic-localization wrapper only.",
+      "Actual scan-localizer evaluation must load nominal_occupancy, while LiDAR and collision use warped occupancy.",
+      "Combine shared-course opponent observations with stale-map geometry and wrong-valid localization diagnosis.",
+      "Train on selected mild-to-severe mismatches without reoptimizing reference from hidden physical geometry; preserve clean pace and use independent seeds for evaluation."
+    ]
+  }
+}

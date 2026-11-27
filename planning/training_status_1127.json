@@ -1,0 +1,22 @@
+{
+  "updated_utc": "2026-11-27T10:56:58.498495+00:00",
+  "phase": "Experimental reference planner redesign and robustness data preparation; PPO is not running.",
+  "local_training_branch": "codex/1126-hairpin-position-ppo",
+  "publication_branch": "codex/1127-raceline-robustness",
+  "real_car_reference": "PPO21u30 (2130); no new real-car validation.",
+  "training_source": "PPO25u70; PPO30u10 checkpoint is preserved and not promoted.",
+  "PPO30_checkpoint": {
+    "update": 10,
+    "steps": 440000,
+    "sha256": "28ce09301a6013ffdca87a3dbdd25737fed21feca608f7cf263e5255ab30d7f7",
+    "availability": "Local only; full checkpoint and replay data are not in this source snapshot."
+  },
+  "optimizer": "Quasi-steady path/speed joint nonlinear optimizer; analytic circle and objective gradients pass. Dense feasibility gates currently reject the first Practice candidate.",
+  "robustness_preparation": "15 physical-wall mismatch variants prepared, keeping nominal map and reference path fixed; not yet trained.",
+  "two_car_requirement": "Same track, separated simultaneous starting positions. Opposite positions do not imply head-on traffic. Actual opponent-occluded LiDAR plus scan-localizer validation remains to implement.",
+  "existing_randomization_retained": "LiDAR range noise/dropout/spikes; speed noise/scale; steering delay/lock/response; acceleration/braking/friction; synthetic localization offset/jumps/loss; varied geometry and open pockets.",
+  "performance_claim": "No new lap-time/completion improvement claimed from this work. Planning proxy times are not simulator or real-car lap times.",
+  "large_artifacts": "Model weights, optimizer checkpoints, replay arrays and generated maps remain local; reproduction needs the source data paths and environment described in the plan.",
+  "quota_rule": "Stop work and jobs when fresh 5h usage remaining drops below20%.",
+  "reports": "planning/1127_raceline/"
+}

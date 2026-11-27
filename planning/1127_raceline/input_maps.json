@@ -1,0 +1,22 @@
+{
+  "status": "complete",
+  "purpose": "Four unchanged known training example grids; not competition-track ground truth.",
+  "tracks": [
+    {
+      "source": "planning/1127_raceline/fixtures/Practice1126b.npz",
+      "source_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908"
+    },
+    {
+      "source": "planning/1127_raceline/fixtures/Practice1126b_rev.npz",
+      "source_sha256": "d238103f940d3d171b6c939939109f2afba0925894280f0ed0204aa3a15baf7e"
+    },
+    {
+      "source": "planning/1127_raceline/fixtures/Course2025_s57_w3025.npz",
+      "source_sha256": "473acb1ec1a6c45fddb2737fde0d5f5a3495cdd2e0bea54abb3fe0019abc4a72"
+    },
+    {
+      "source": "planning/1127_raceline/fixtures/Course2025_rev_s57_w3025.npz",
+      "source_sha256": "341ff8c2d4e19c75ac0435afaa8e09b9e596e75f4780136b692994578a9f0fcc"
+    }
+  ]
+}

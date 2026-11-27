@@ -1,0 +1,351 @@
+{
+  "status": "complete_not_trained",
+  "base_split": "four known training examples only",
+  "generation_sha256": "ce3088f5764f45213264e534f8f7d046ae25ff577218acf1a598f9b43b95a3bf",
+  "variants": [
+    {
+      "source": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+      "source_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+      "amplitude_m": 0.05,
+      "seed": 731,
+      "warp": {
+        "max_sampling_displacement_m": 0.049999999999999996,
+        "minimum_warp_jacobian_determinant": 0.9144707178478969,
+        "changed_cells": 120
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.608276253029822,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Practice1126b/warp_050_s731.npz",
+      "sha256": "c2b3aadfecefd49a701a98da4d9da6c3e618b7d0767bc6b422da9774a8046241"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+      "source_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+      "amplitude_m": 0.05,
+      "seed": 947,
+      "warp": {
+        "max_sampling_displacement_m": 0.049999999999999996,
+        "minimum_warp_jacobian_determinant": 0.9323622346328454,
+        "changed_cells": 36
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.608276253029822,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Practice1126b/warp_050_s947.npz",
+      "sha256": "2bdaf0890156886392ea481f8c3625edd6f7d9accebaeef5b8fecf9ff79ae822"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+      "source_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+      "amplitude_m": 0.1,
+      "seed": 731,
+      "warp": {
+        "max_sampling_displacement_m": 0.09999999999999999,
+        "minimum_warp_jacobian_determinant": 0.8289414356957937,
+        "changed_cells": 682
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.608276253029822,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Practice1126b/warp_100_s731.npz",
+      "sha256": "b900c95a65131ad34850f2a1851b13b6c13cb5a841db45aab4599efecc32b7ca"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+      "source_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+      "amplitude_m": 0.1,
+      "seed": 947,
+      "warp": {
+        "max_sampling_displacement_m": 0.09999999999999999,
+        "minimum_warp_jacobian_determinant": 0.8647244692656908,
+        "changed_cells": 374
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.608276253029822,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Practice1126b/warp_100_s947.npz",
+      "sha256": "c05e430eae585dbe88f85c81f7463765ee69b296dcfa1fc25b7c79434a4df5c6"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_real/Practice1126b_rev.npz",
+      "source_sha256": "d238103f940d3d171b6c939939109f2afba0925894280f0ed0204aa3a15baf7e",
+      "amplitude_m": 0.05,
+      "seed": 731,
+      "warp": {
+        "max_sampling_displacement_m": 0.049999999999999996,
+        "minimum_warp_jacobian_determinant": 0.9144707178478969,
+        "changed_cells": 120
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.608276253029822,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Practice1126b_rev/warp_050_s731.npz",
+      "sha256": "45bc09ca1e7c6ae3124fcf4f6c7c3d32cb0ebf0dd3801a42652a08093eda516c"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_real/Practice1126b_rev.npz",
+      "source_sha256": "d238103f940d3d171b6c939939109f2afba0925894280f0ed0204aa3a15baf7e",
+      "amplitude_m": 0.05,
+      "seed": 947,
+      "warp": {
+        "max_sampling_displacement_m": 0.049999999999999996,
+        "minimum_warp_jacobian_determinant": 0.9323622346328454,
+        "changed_cells": 36
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.608276253029822,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Practice1126b_rev/warp_050_s947.npz",
+      "sha256": "994fc5d7fbc49bbbbf177b1d20cbb427817be41d98ef06dba7400c89f7f18b7e"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_real/Practice1126b_rev.npz",
+      "source_sha256": "d238103f940d3d171b6c939939109f2afba0925894280f0ed0204aa3a15baf7e",
+      "amplitude_m": 0.1,
+      "seed": 731,
+      "warp": {
+        "max_sampling_displacement_m": 0.09999999999999999,
+        "minimum_warp_jacobian_determinant": 0.8289414356957937,
+        "changed_cells": 682
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.608276253029822,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Practice1126b_rev/warp_100_s731.npz",
+      "sha256": "175b40617b73b0091c4302e04164b1922566acfd59334e4bb8937b6fdeb292c3"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_real/Practice1126b_rev.npz",
+      "source_sha256": "d238103f940d3d171b6c939939109f2afba0925894280f0ed0204aa3a15baf7e",
+      "amplitude_m": 0.1,
+      "seed": 947,
+      "warp": {
+        "max_sampling_displacement_m": 0.09999999999999999,
+        "minimum_warp_jacobian_determinant": 0.8647244692656908,
+        "changed_cells": 374
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.608276253029822,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Practice1126b_rev/warp_100_s947.npz",
+      "sha256": "befde3ea5affd57e4b35766933192b8080d677ac2cee73cccbc9dff35572abf1"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_hall/Course2025_s57_w3025.npz",
+      "source_sha256": "473acb1ec1a6c45fddb2737fde0d5f5a3495cdd2e0bea54abb3fe0019abc4a72",
+      "amplitude_m": 0.05,
+      "seed": 731,
+      "warp": {
+        "max_sampling_displacement_m": 0.05,
+        "minimum_warp_jacobian_determinant": 0.940226192690466,
+        "changed_cells": 14
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.64,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Course2025_s57_w3025/warp_050_s731.npz",
+      "sha256": "a1e13f97a38128b985037f4672e39dfcf64234ac7066151a5b681d9fe750d9fc"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_hall/Course2025_s57_w3025.npz",
+      "source_sha256": "473acb1ec1a6c45fddb2737fde0d5f5a3495cdd2e0bea54abb3fe0019abc4a72",
+      "amplitude_m": 0.05,
+      "seed": 947,
+      "warp": {
+        "max_sampling_displacement_m": 0.05000000000000001,
+        "minimum_warp_jacobian_determinant": 0.9200965339625805,
+        "changed_cells": 0
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.64,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "rejected_by_screen"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_hall/Course2025_s57_w3025.npz",
+      "source_sha256": "473acb1ec1a6c45fddb2737fde0d5f5a3495cdd2e0bea54abb3fe0019abc4a72",
+      "amplitude_m": 0.1,
+      "seed": 731,
+      "warp": {
+        "max_sampling_displacement_m": 0.1,
+        "minimum_warp_jacobian_determinant": 0.8804523853809321,
+        "changed_cells": 230
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.64,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Course2025_s57_w3025/warp_100_s731.npz",
+      "sha256": "be6d6b1b273467ee2bb33d3657c54796782782c6839a9bfb6d6acfafd0fecea9"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_hall/Course2025_s57_w3025.npz",
+      "source_sha256": "473acb1ec1a6c45fddb2737fde0d5f5a3495cdd2e0bea54abb3fe0019abc4a72",
+      "amplitude_m": 0.1,
+      "seed": 947,
+      "warp": {
+        "max_sampling_displacement_m": 0.10000000000000002,
+        "minimum_warp_jacobian_determinant": 0.840193067925161,
+        "changed_cells": 107
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.64,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Course2025_s57_w3025/warp_100_s947.npz",
+      "sha256": "71ba92c75bd0a0cc19a866c7eae364280f662b1c7011bc6d1cd4637af8ee32e0"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_hall/Course2025_rev_s57_w3025.npz",
+      "source_sha256": "341ff8c2d4e19c75ac0435afaa8e09b9e596e75f4780136b692994578a9f0fcc",
+      "amplitude_m": 0.05,
+      "seed": 731,
+      "warp": {
+        "max_sampling_displacement_m": 0.05,
+        "minimum_warp_jacobian_determinant": 0.940226192690466,
+        "changed_cells": 13
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.6092618484691127,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Course2025_rev_s57_w3025/warp_050_s731.npz",
+      "sha256": "288442aff359bcd96ae4e6dc6ac39094ed2aea7106bafa6bc0031c700285fd51"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_hall/Course2025_rev_s57_w3025.npz",
+      "source_sha256": "341ff8c2d4e19c75ac0435afaa8e09b9e596e75f4780136b692994578a9f0fcc",
+      "amplitude_m": 0.05,
+      "seed": 947,
+      "warp": {
+        "max_sampling_displacement_m": 0.05000000000000001,
+        "minimum_warp_jacobian_determinant": 0.9200965339625805,
+        "changed_cells": 1
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.6092618484691127,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Course2025_rev_s57_w3025/warp_050_s947.npz",
+      "sha256": "9d57fe080336db03f389e54eecdaebe8c9ad54920a5ee6d2eabc44d8abf49fec"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_hall/Course2025_rev_s57_w3025.npz",
+      "source_sha256": "341ff8c2d4e19c75ac0435afaa8e09b9e596e75f4780136b692994578a9f0fcc",
+      "amplitude_m": 0.1,
+      "seed": 731,
+      "warp": {
+        "max_sampling_displacement_m": 0.1,
+        "minimum_warp_jacobian_determinant": 0.8804523853809321,
+        "changed_cells": 227
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.6092618484691127,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Course2025_rev_s57_w3025/warp_100_s731.npz",
+      "sha256": "3c915f876ee13458260c61b48108299f8fa35122ddfe496e1fd912f2050fc02b"
+    },
+    {
+      "source": "src/f1tenth/installation/maps_hall/Course2025_rev_s57_w3025.npz",
+      "source_sha256": "341ff8c2d4e19c75ac0435afaa8e09b9e596e75f4780136b692994578a9f0fcc",
+      "amplitude_m": 0.1,
+      "seed": 947,
+      "warp": {
+        "max_sampling_displacement_m": 0.10000000000000002,
+        "minimum_warp_jacobian_determinant": 0.840193067925161,
+        "changed_cells": 120
+      },
+      "screen": {
+        "pass_route_screen": true,
+        "free_components": 1,
+        "nominal_free_components": 1,
+        "minimum_nominal_centerpoint_clearance_m": 0.6092618484691127,
+        "note": "Route connectivity/point-clearance raster screen only; no swept body or closed-loop certificate."
+      },
+      "status": "prepared_not_trained",
+      "path": "src/f1tenth/results/map_mismatch_1127/known_examples_v1/Course2025_rev_s57_w3025/warp_100_s947.npz",
+      "sha256": "6b9e7ab08138181d48228930bcdf6ceedf3335c3228a626f6ce9d8ef3e4f5e5b"
+    }
+  ],
+  "purpose": "Stale nominal map/line versus changed physical walls, not ordinary sensor noise.",
+  "amplitude_note": "Inverse warp displacement hypotheses, not measured barrier motion or guaranteed raster boundary displacement.",
+  "integration_requirements": [
+    "Policy preview must retain original centerline/raceline and plan.",
+    "Physical raycasting and wall collision use variant occupancy.",
+    "Actual scan localizer must use nominal_occupancy; existing benchmark must not export variant occupancy as its reference map.",
+    "Do not optimize a new line on each altered occupancy: that leaks the physical map into the nominal reference.",
+    "Independent validation seeds and unmodified reference evaluation remain required."
+  ],
+  "no_policy_training": true
+}
