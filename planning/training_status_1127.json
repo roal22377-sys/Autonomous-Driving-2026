@@ -1,6 +1,6 @@
 {
-  "updated_utc": "2026-11-27T11:23:18.520043+00:00",
-  "phase": "Preparation only; no IL/PPO running. Generic planner and offline closed-loop tests, readiness NOT READY.",
+  "updated_utc": "2026-11-27T11:32:40.887397+00:00",
+  "phase": "Paused per user quota remaining19%; preparation incomplete and no IL/PPO started.",
   "local_training_branch": "codex/1126-hairpin-position-ppo",
   "publication_branch": "codex/1127-raceline-robustness",
   "real_car_reference": "PPO21u30 (2130); no new real-car validation.",
@@ -24,5 +24,6 @@
     "verified_remote_head": "92a08f9c1cb354ce5ab0d5cfda0bb3f55da58645",
     "branch": "codex/1127-raceline-robustness"
   },
-  "latest_pretraining_report": "planning/1127_raceline/pretraining_update.json"
+  "latest_pretraining_report": "planning/1127_raceline/pretraining_update.json",
+  "pretraining_ready": false
 }

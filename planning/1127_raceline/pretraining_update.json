@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-27T11:25:28.223678+00:00",
+  "updated_utc": "2026-11-27T11:32:40.887397+00:00",
   "user_scope": "Preparation and trajectory optimization allowed. IL/PPO starts only after pre-training report and explicit user training-start instruction.",
   "training_started": false,
   "status": "not_ready",
@@ -245,5 +245,16 @@
     "Uniform arc export repairs a consumer assumption but does not eliminate teacher failures.",
     "Heading-aware merge-speed diagnostic improves nominal teacher joint-profile completion1/3 to3/3, but worst remains1/3; not qualified.",
     "Course2025 solver reports convergence but fails dense steering-rate and path-regularity checks; candidate rejected."
+  ],
+  "execution_status": "paused_at_user_quota_remaining19percent",
+  "completed_all_checks": false,
+  "resume_requirements": [
+    "Fix dense constraint failures onCourse2025 and short-course candidate before accepting references.",
+    "Finish regular/open development tests; complete family coverage before broad reference generation.",
+    "Resolve teacher tracking failures under worst physics; nominal merge diagnostic alone is insufficient.",
+    "Integrate validated trajectory/profile consistently into actual training consumers; current bridge is offline only.",
+    "Complete moving-opponent occlusion plus actual scan-localizer validation, including stale nominal map/resolution and false-valid pose errors.",
+    "Audit demonstrations/replay/normalizer/splits and prepare guarded training launch.",
+    "Report full evidence before explicit user instruction to start IL/PPO."
   ]
 }

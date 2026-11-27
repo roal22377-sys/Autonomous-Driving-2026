@@ -1,5 +1,5 @@
 {
-  "status": "preparing",
+  "status": "bounded_time_limit",
   "training_started": false,
   "manifest_sha256": "dc9017ecfbd3109e16b2c42d413928df95e013c3f78db33980beb6cb93b81aa6",
   "optimizer_sha256": "fbc23bd313e3c5eb2f79c5f99baa4b0fa60cce9b20db5c526ed52373d383a595",
@@ -91,10 +91,11 @@
       "source": "src/f1tenth/installation/maps_gen/Oschersleben_rev.npz",
       "family": "regular",
       "source_sha256": "7ff7d3a1b7560b98b9244dc0b9bb8d979fd5a7aed854d1813b387e7d374d8be7",
-      "status": "running",
+      "status": "stopped_time_limit",
       "output_dir": "src/f1tenth/results/joint_mintime_1127/all_families_v5_uniform/003_Oschersleben_rev_attempt0",
-      "pid": 119
+      "pid": 119,
+      "latest_quota_check": "{\"observed_utc\": \"2026-11-27T11:28:57.067Z\", \"used_percent\": 80.0, \"resets_at\": 1795793080, \"status\": \"continue\", \"remaining_percent\": 20.0, \"age_seconds\": 73.448356, \"stop_below_percent\": 20}"
     }
   ],
-  "updated_utc": "2026-11-27T11:25:12.196211+00:00"
+  "updated_utc": "2026-11-27T11:30:27.655653+00:00"
 }
