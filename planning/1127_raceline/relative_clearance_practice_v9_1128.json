@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "status": "complete",
+  "training_started": false,
+  "qualification": "Conservative sampled static comparison only. Closed-loop and local uncertainty checks remain required.",
+  "records": [
+    {
+      "report": "src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/report.json",
+      "source": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/installation/maps_real/Practice1126b.npz",
+      "source_repo_path": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "candidate_path": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/Practice1126b/joint_from_stored/track.npz",
+      "candidate_repo_path": "src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/Practice1126b/joint_from_stored/track.npz",
+      "source_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+      "candidate_sha256": "c99d5ed967763b7e497947d6de7f7456ccb56eb3d013aeca99d1bd46677933a6",
+      "resolution_m": 0.05,
+      "source_minimum_body_grid_clearance_m": 0.30000000000000004,
+      "candidate_minimum_body_grid_clearance_m": 0.32015621187164245,
+      "clearance_loss_m": -0.020156211871642404,
+      "raster_tolerance_m": 0.025,
+      "source_static_collision_poses": 0,
+      "candidate_static_collision_poses": 0,
+      "relative_clearance_gate_passed": true
+    }
+  ]
+}

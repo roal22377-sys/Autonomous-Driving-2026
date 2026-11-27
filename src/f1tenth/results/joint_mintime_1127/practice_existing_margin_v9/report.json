@@ -1,0 +1,108 @@
+{
+  "status": "complete_not_applied",
+  "circle_check": {
+    "status": "pass",
+    "analytic_circle_time_s": 4.487989505128276,
+    "solve": {
+      "solver_success": true,
+      "message": "Optimization terminated successfully",
+      "iterations": 2,
+      "seconds": 0.33035850524902344,
+      "feasibility_warmstart_squared_violation": 0.0,
+      "returned_best_feasible": true,
+      "model_lap_time_s": 4.487988428638836,
+      "minimum_scaled_constraint": -9.60916158421199e-07,
+      "collocation_feasible": true,
+      "constraint_minima": {
+        "ellipse_start": -9.60916158421199e-07,
+        "ellipse_end": -9.605307765836457e-07,
+        "steering": 0.9094577945536939,
+        "steering_rate": 0.9603999999979442,
+        "path_derivative": 0.34871678350311647,
+        "forward_progress": 0.8999999999999995
+      }
+    },
+    "objective_gradient_max_absolute_error": 4.2300760116908975e-11
+  },
+  "tracks": [
+    {
+      "source": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/installation/maps_real/Practice1126b.npz",
+      "source_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+      "limits": {
+        "v_min": 0.5,
+        "v_max": 8.0,
+        "a_lat": 6.5,
+        "a_acc": 2.9,
+        "a_brake": 3.7,
+        "wheelbase": 0.34,
+        "steer": 0.5,
+        "rate": 2.65
+      },
+      "candidates": {
+        "joint_from_stored": {
+          "solver_success": false,
+          "message": "Iteration limit reached",
+          "iterations": 50,
+          "seconds": 24.71069073677063,
+          "feasibility_warmstart_squared_violation": 0.0,
+          "returned_best_feasible": true,
+          "model_lap_time_s": 34.91215036734596,
+          "minimum_scaled_constraint": 1.7789064909956576e-05,
+          "collocation_feasible": true,
+          "constraint_minima": {
+            "ellipse_start": 0.7179437342975963,
+            "ellipse_end": 0.6825479944239614,
+            "steering": 4.246409440733512e-05,
+            "steering_rate": 0.4860965620909976,
+            "path_derivative": 1.7789064909956576e-05,
+            "forward_progress": 0.717267387386153,
+            "body_clearance": 0.5348989696975149
+          },
+          "dense_audit": {
+            "model_lap_time_s": 34.9115330397995,
+            "minimum_scaled_constraint": 0.007688194174970853,
+            "constraint_minima": {
+              "ellipse_start": 0.7863062671775992,
+              "ellipse_end": 0.7800479944239485,
+              "steering": 0.0865841072616258,
+              "steering_rate": 0.5734076011086197,
+              "path_derivative": 0.007688194174970853,
+              "forward_progress": 0.717267387386153,
+              "body_clearance": 0.6818443670241314
+            },
+            "feasible": true,
+            "minimum_sampled_body_clearance_m": 0.34818443670241317
+          },
+          "export_audit": {
+            "spacing_mean_m": 0.09975786287126302,
+            "spacing_min_m": 0.09967317212539202,
+            "spacing_max_m": 0.09976921613276593,
+            "spacing_max_relative_error": 0.0008489631136173736,
+            "speed_geometry_aligned": true,
+            "parameterization": "uniform arc length; same original quintic and q(u)"
+          },
+          "eligible_for_closed_loop_review": true,
+          "sha256": "c99d5ed967763b7e497947d6de7f7456ccb56eb3d013aeca99d1bd46677933a6",
+          "path": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/Practice1126b/joint_from_stored/track.npz"
+        }
+      },
+      "coordinate_anchor": "center",
+      "constraint_reserve": 0.95,
+      "geometry_knots": 45,
+      "speed_knots": 90,
+      "constraint_points": 540,
+      "effective_geometry_spacing_m": 0.75
+    }
+  ],
+  "optimizer_source_sha256": "b7462a9d6581edc2bdb98f9ec39397b1769e02c72dd8fa424a268af2529bd3e2",
+  "model": "quasi-steady C4 quintic spline / longitudinal energy balance / analytic steering rate",
+  "limitations": [
+    "No global optimum certificate. No tire-slip or actuator-delay dynamics.",
+    "Combined acceleration ellipse and a_lat=6 are planning hypotheses, not measured hardware limits.",
+    "Sampled signed-distance body constraints need independent dense/static and closed-loop validation.",
+    "The fixed stored control is a spline reconstruction, not an exact original path. Infeasibility does not prove the original path infeasible.",
+    "5percent force/steering reserve and15mm body reserve tested at6x denser samples.",
+    "Parameterization derivative is bounded below by25 percent of the reference derivative to prevent nearly singular path parameterization.",
+    "Production preview and teacher do not yet consume exported speed/steering. No policy trained here."
+  ]
+}

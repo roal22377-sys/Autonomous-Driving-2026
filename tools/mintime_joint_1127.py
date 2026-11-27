@@ -305,12 +305,14 @@ def main():
     p.add_argument('--maxiter',type=int,default=120)
     p.add_argument('--clearance',type=float,default=.03)
     p.add_argument('--a-lat',type=float,default=6.,help='Planning hypothesis; not measured hardware grip')
+    p.add_argument('--max-source-time-ratio',type=float,default=2.,help='Gross solver-quality screen only: reject a feasible iterate taking over this multiple of the stored line\'s legacy planned lap time; closed-loop pace still decides adoption')
     p.add_argument('--constraint-reserve',type=float,default=.95)
     p.add_argument('--warmstart',help='Previous candidate with exactly matched original map and geometry/speed knots')
     p.add_argument('--starts',nargs='+',choices=['stored_geometry_control','joint_from_stored','joint_from_center','joint_warmstart'],
                    default=['stored_geometry_control','joint_from_stored','joint_from_center'])
     args=p.parse_args();os.chdir(SRC)
-    if not 0<args.constraint_reserve<1 or not args.a_lat>0:raise ValueError('Invalid planning bounds')
+    if not 0<args.constraint_reserve<1 or not args.a_lat>0 or args.max_source_time_ratio<=1:
+        raise ValueError('Invalid planning bounds')
     dest=Path(args.output_dir).resolve()
     if (SRC/'installation') in dest.parents:raise ValueError('Offline results only')
     dest.mkdir(parents=True,exist_ok=False)
@@ -325,7 +327,7 @@ def main():
                              'Parameterization derivative is bounded below by25 percent of the reference derivative to prevent nearly singular path parameterization.',
                              'Production preview and teacher do not yet consume exported speed/steering. No policy trained here.'])
     (dest/'report.json').write_text(json.dumps(report,indent=2)+'\n')
-    from utils.raceline import resample_closed,tangents_normals
+    from utils.raceline import resample_closed,tangents_normals,speed_profile,lap_time
     from map_to_track import cast
     for item in args.tracks:
         path=Path(item).resolve();source_hash=hashlib.sha256(path.read_bytes()).hexdigest()
@@ -355,6 +357,10 @@ def main():
             hi=np.minimum(hi,np.where(reliable,np.maximum(left,right),hi))
         if np.any(lo>hi):raise ValueError('Empty corridor')
         limits=dict(v_min=.5,v_max=8.,a_lat=args.a_lat,a_acc=2.9,a_brake=3.7,wheelbase=.34,steer=.5,rate=2.65)
+        source_xy=arrays['raceline'].astype(float)
+        source_plan_speed=speed_profile(source_xy,limits['v_min'],limits['v_max'],
+                                        limits['a_lat'],limits['a_acc'],limits['a_brake'])
+        source_legacy_plan_time=float(lap_time(source_xy,source_plan_speed))
         problem=JointProblem(c,normal,lo,hi,limits,arrays,args.samples,args.clearance,reserve=args.constraint_reserve,constraint_factor=args.constraint_factor)
         _,idx=cKDTree(arrays['raceline']).query(c)
         initial=((arrays['raceline'][idx]-c)*normal).sum(1)
@@ -366,6 +372,8 @@ def main():
                 warm_offset=z['joint_offset'].copy();warm_q=z['joint_q_collocation'].copy()
         if 'joint_warmstart' in args.starts and warm_offset is None:raise ValueError('joint_warmstart requires --warmstart')
         row=dict(source=str(path),source_sha256=source_hash,limits=limits,candidates={},
+                 source_legacy_plan_time_s=source_legacy_plan_time,
+                 max_source_time_ratio=args.max_source_time_ratio,
                  coordinate_anchor=args.anchor,
                  constraint_reserve=args.constraint_reserve,
                  geometry_knots=len(c),speed_knots=problem.m,constraint_points=problem.eval_m,
@@ -383,7 +391,9 @@ def main():
             xy,q,k,export_audit=problem.uniform_export(z)
             info['dense_audit']=audit
             info['export_audit']=export_audit
-            info['eligible_for_closed_loop_review']=bool(info['collocation_feasible'] and audit['feasible'])
+            info['source_legacy_plan_time_ratio']=float(info['model_lap_time_s']/source_legacy_plan_time)
+            info['gross_time_quality_passed']=bool(info['source_legacy_plan_time_ratio']<=args.max_source_time_ratio)
+            info['eligible_for_closed_loop_review']=bool(info['collocation_feasible'] and audit['feasible'] and info['gross_time_quality_passed'])
             folder=dest/path.stem/name;folder.mkdir(parents=True)
             candidate=dict(arrays,raceline=xy.astype(np.float32),
                            joint_speed=np.sqrt(q).astype(np.float32),

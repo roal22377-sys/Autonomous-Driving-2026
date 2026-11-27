@@ -1,0 +1,1573 @@
+{
+  "status": "complete",
+  "source_report_sha256": "e507552fccd31433c45a552f8bbc9fe47323a35d8d8020af6e1690bf4ac3b036",
+  "checkpoint_sha256": "5ab0c0fbd8ad0831246e4e331d54c36343c2d28cc80c755ee9f9e65ae7afdec8",
+  "teacher_heading_merge_gate": true,
+  "teacher_episode_limits": true,
+  "teacher_controller": "pure_pursuit",
+  "teacher_lad_off_gain": null,
+  "training_started": false,
+  "runs": [
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "source",
+      "mode": "eval",
+      "seed": 7,
+      "cap": 8.0,
+      "controller": "policy",
+      "complete": true,
+      "elapsed": 16.800000000000114,
+      "metrics": {
+        "straight": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 106,
+          "speed": 3.904157637469656,
+          "lateral_rms": 0.18229101651140822,
+          "heading_rms": 0.055636847855915,
+          "steer_weave_rms": 0.0716439704683015,
+          "seconds": 2.6499999999999946
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 204,
+          "speed": 4.207900040306119,
+          "lateral_rms": 0.1327452750903065,
+          "heading_rms": 0.09309392540187612,
+          "steer_weave_rms": 0.07700206294537469,
+          "seconds": 5.100000000000005
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 92,
+          "speed": 3.456239728207898,
+          "lateral_rms": 0.05902840907033695,
+          "heading_rms": 0.10804002967083533,
+          "steer_weave_rms": 0.1161759916779206,
+          "seconds": 2.299999999999996
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 177,
+          "speed": 2.807915463870373,
+          "lateral_rms": 0.14441971663428568,
+          "heading_rms": 0.18498512362570893,
+          "steer_weave_rms": 0.18403604721097697,
+          "seconds": 4.424999999999995
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 93,
+          "speed": 3.574400886179642,
+          "lateral_rms": 0.13089742160527698,
+          "heading_rms": 0.12175150844628542,
+          "steer_weave_rms": 0.105391241563073,
+          "seconds": 2.3249999999999957
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": false,
+      "preview_audit": null,
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0000.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "source",
+      "mode": "eval",
+      "seed": 7,
+      "cap": 8.0,
+      "controller": "expert",
+      "complete": true,
+      "elapsed": 17.20000000000009,
+      "metrics": {
+        "straight": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 111,
+          "speed": 3.809358695374817,
+          "lateral_rms": 0.1792597446766731,
+          "heading_rms": 0.09565205324823317,
+          "steer_weave_rms": 0.11242522843780867,
+          "seconds": 2.774999999999994
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 209,
+          "speed": 4.092470597249237,
+          "lateral_rms": 0.1438616032879439,
+          "heading_rms": 0.0950089319488271,
+          "steer_weave_rms": 0.0734264328409183,
+          "seconds": 5.225000000000007
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 92,
+          "speed": 3.4432373345636114,
+          "lateral_rms": 0.07897643570455846,
+          "heading_rms": 0.12178074846623572,
+          "steer_weave_rms": 0.08531975616372083,
+          "seconds": 2.299999999999996
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 188,
+          "speed": 2.530626582146125,
+          "lateral_rms": 0.06759058114943449,
+          "heading_rms": 0.1616615240479229,
+          "steer_weave_rms": 0.16052883935146076,
+          "seconds": 4.699999999999999
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 88,
+          "speed": 3.7392212419852253,
+          "lateral_rms": 0.1254540730672684,
+          "heading_rms": 0.04926214925853084,
+          "steer_weave_rms": 0.0813663841488782,
+          "seconds": 2.199999999999996
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": false,
+      "preview_audit": null,
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0001.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "source",
+      "mode": "eval",
+      "seed": 17,
+      "cap": 8.0,
+      "controller": "policy",
+      "complete": true,
+      "elapsed": 16.825000000000113,
+      "metrics": {
+        "straight": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 115,
+          "speed": 3.592187720283221,
+          "lateral_rms": 0.19156685214505492,
+          "heading_rms": 0.09418303985400973,
+          "steer_weave_rms": 0.10398649427614479,
+          "seconds": 2.874999999999994
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 196,
+          "speed": 4.403890931843505,
+          "lateral_rms": 0.1281301522149196,
+          "heading_rms": 0.08603042982373443,
+          "steer_weave_rms": 0.076628276434152,
+          "seconds": 4.900000000000002
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 93,
+          "speed": 3.451604796676829,
+          "lateral_rms": 0.07797234865356238,
+          "heading_rms": 0.11481913449990006,
+          "steer_weave_rms": 0.1205059764542011,
+          "seconds": 2.3249999999999957
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 177,
+          "speed": 2.7961380594115717,
+          "lateral_rms": 0.1587605914133729,
+          "heading_rms": 0.18021320733354354,
+          "steer_weave_rms": 0.18568205371323526,
+          "seconds": 4.424999999999995
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 92,
+          "speed": 3.6179159212963174,
+          "lateral_rms": 0.13852900828532747,
+          "heading_rms": 0.11173547390973672,
+          "steer_weave_rms": 0.10517897426183842,
+          "seconds": 2.299999999999996
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": false,
+      "preview_audit": null,
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0002.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "source",
+      "mode": "eval",
+      "seed": 17,
+      "cap": 8.0,
+      "controller": "expert",
+      "complete": true,
+      "elapsed": 17.175000000000093,
+      "metrics": {
+        "straight": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 119,
+          "speed": 3.535080820535381,
+          "lateral_rms": 0.20037309457263533,
+          "heading_rms": 0.11271381165855615,
+          "steer_weave_rms": 0.11082127871806914,
+          "seconds": 2.9749999999999934
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 202,
+          "speed": 4.243660700831204,
+          "lateral_rms": 0.143863920689515,
+          "heading_rms": 0.0931272344348176,
+          "steer_weave_rms": 0.07308654983119607,
+          "seconds": 5.050000000000004
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 92,
+          "speed": 3.485353858023239,
+          "lateral_rms": 0.0713583147982326,
+          "heading_rms": 0.11508408366951037,
+          "steer_weave_rms": 0.09030077028490704,
+          "seconds": 2.299999999999996
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 186,
+          "speed": 2.5401094624074685,
+          "lateral_rms": 0.0676325787345782,
+          "heading_rms": 0.15889644791970792,
+          "steer_weave_rms": 0.15906412766439645,
+          "seconds": 4.649999999999999
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 88,
+          "speed": 3.747709689082609,
+          "lateral_rms": 0.1270758019831264,
+          "heading_rms": 0.04667935525487266,
+          "steer_weave_rms": 0.08229771997377422,
+          "seconds": 2.199999999999996
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": false,
+      "preview_audit": null,
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0003.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "source",
+      "mode": "eval",
+      "seed": 27,
+      "cap": 8.0,
+      "controller": "policy",
+      "complete": true,
+      "elapsed": 16.20000000000015,
+      "metrics": {
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 196,
+          "speed": 2.5255602190773883,
+          "lateral_rms": 0.20838589579909764,
+          "heading_rms": 0.26707448651001964,
+          "steer_weave_rms": 0.20276412010882622,
+          "seconds": 4.900000000000002
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 95,
+          "speed": 3.5710526492173527,
+          "lateral_rms": 0.13014368162508033,
+          "heading_rms": 0.09773095458116195,
+          "steer_weave_rms": 0.08946829425409684,
+          "seconds": 2.3749999999999956
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 188,
+          "speed": 4.521949509479804,
+          "lateral_rms": 0.1195332086573964,
+          "heading_rms": 0.08060130738036994,
+          "steer_weave_rms": 0.07238481830974024,
+          "seconds": 4.699999999999999
+        },
+        "straight": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 76,
+          "speed": 5.335571942501093,
+          "lateral_rms": 0.08444982637565784,
+          "heading_rms": 0.044167125747879385,
+          "steer_weave_rms": 0.052716181857612475,
+          "seconds": 1.8999999999999972
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 93,
+          "speed": 3.4900431810062402,
+          "lateral_rms": 0.08489965800474074,
+          "heading_rms": 0.10892976420636337,
+          "steer_weave_rms": 0.13149332665846203,
+          "seconds": 2.3249999999999957
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": false,
+      "preview_audit": null,
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0004.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "source",
+      "mode": "eval",
+      "seed": 27,
+      "cap": 8.0,
+      "controller": "expert",
+      "complete": true,
+      "elapsed": 16.625000000000124,
+      "metrics": {
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 205,
+          "speed": 2.3260331824826754,
+          "lateral_rms": 0.17210209952387898,
+          "heading_rms": 0.23834784318411278,
+          "steer_weave_rms": 0.15842046068182206,
+          "seconds": 5.125000000000005
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 87,
+          "speed": 3.7200688111832423,
+          "lateral_rms": 0.1253026135652853,
+          "heading_rms": 0.0524308126429996,
+          "steer_weave_rms": 0.07019075769480898,
+          "seconds": 2.1749999999999963
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 201,
+          "speed": 4.2558583033092825,
+          "lateral_rms": 0.14769025750933137,
+          "heading_rms": 0.09457611766560146,
+          "steer_weave_rms": 0.07299576646358548,
+          "seconds": 5.025000000000004
+        },
+        "straight": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 80,
+          "speed": 5.158877957554225,
+          "lateral_rms": 0.13364794623017115,
+          "heading_rms": 0.06807042888588916,
+          "steer_weave_rms": 0.05887970038194855,
+          "seconds": 1.999999999999997
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 92,
+          "speed": 3.482147623742689,
+          "lateral_rms": 0.07456953116098568,
+          "heading_rms": 0.11926750680627145,
+          "steer_weave_rms": 0.0864995572799895,
+          "seconds": 2.299999999999996
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": false,
+      "preview_audit": null,
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0005.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "source",
+      "mode": "worst",
+      "seed": 7,
+      "cap": 8.0,
+      "controller": "policy",
+      "complete": true,
+      "elapsed": 18.575000000000014,
+      "metrics": {
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 242,
+          "speed": 2.3219254461116408,
+          "lateral_rms": 0.3467955832564541,
+          "heading_rms": 0.2994794634700657,
+          "steer_weave_rms": 0.2084907283362709,
+          "seconds": 6.0500000000000185
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 99,
+          "speed": 3.380526765413928,
+          "lateral_rms": 0.19599349751948034,
+          "heading_rms": 0.16469614884694753,
+          "steer_weave_rms": 0.10960015014587202,
+          "seconds": 2.474999999999995
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 213,
+          "speed": 4.04047354273366,
+          "lateral_rms": 0.19955163378231366,
+          "heading_rms": 0.15948458601820095,
+          "steer_weave_rms": 0.09756318854531827,
+          "seconds": 5.325000000000008
+        },
+        "straight": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 85,
+          "speed": 4.824534911594385,
+          "lateral_rms": 0.16421291281720737,
+          "heading_rms": 0.09611254301167377,
+          "steer_weave_rms": 0.06668578642410786,
+          "seconds": 2.1249999999999964
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 104,
+          "speed": 3.185833762463344,
+          "lateral_rms": 0.1708150770569447,
+          "heading_rms": 0.23018926596242262,
+          "steer_weave_rms": 0.15774450241112895,
+          "seconds": 2.5999999999999948
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": false,
+      "preview_audit": null,
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0006.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "source",
+      "mode": "worst",
+      "seed": 7,
+      "cap": 8.0,
+      "controller": "expert",
+      "complete": true,
+      "elapsed": 18.375000000000025,
+      "metrics": {
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 229,
+          "speed": 2.123384686907599,
+          "lateral_rms": 0.23278820954821952,
+          "heading_rms": 0.21608897818253758,
+          "steer_weave_rms": 0.17344626557721307,
+          "seconds": 5.725000000000014
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 96,
+          "speed": 3.4730733553374455,
+          "lateral_rms": 0.13409597829978032,
+          "heading_rms": 0.05579152610411082,
+          "steer_weave_rms": 0.07702836571583394,
+          "seconds": 2.3999999999999955
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 222,
+          "speed": 3.8773293681496948,
+          "lateral_rms": 0.15222848225481517,
+          "heading_rms": 0.09810719735184185,
+          "steer_weave_rms": 0.10204292847474096,
+          "seconds": 5.550000000000011
+        },
+        "straight": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 84,
+          "speed": 4.869215584921851,
+          "lateral_rms": 0.13536774684817857,
+          "heading_rms": 0.07235562850356396,
+          "steer_weave_rms": 0.07383477867414968,
+          "seconds": 2.0999999999999965
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 104,
+          "speed": 3.086765296700707,
+          "lateral_rms": 0.07221130993015043,
+          "heading_rms": 0.1251361396893264,
+          "steer_weave_rms": 0.14378971168043775,
+          "seconds": 2.5999999999999948
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": false,
+      "preview_audit": null,
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0007.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "source",
+      "mode": "worst",
+      "seed": 17,
+      "cap": 8.0,
+      "controller": "policy",
+      "complete": true,
+      "elapsed": 18.700000000000006,
+      "metrics": {
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 229,
+          "speed": 3.809727432000265,
+          "lateral_rms": 0.19544582313654926,
+          "heading_rms": 0.14765318994212084,
+          "steer_weave_rms": 0.10164477113340087,
+          "seconds": 5.725000000000014
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 113,
+          "speed": 2.8923038518968256,
+          "lateral_rms": 0.157593551978863,
+          "heading_rms": 0.18409964865308465,
+          "steer_weave_rms": 0.15398277045070893,
+          "seconds": 2.824999999999994
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 228,
+          "speed": 2.4920767966065633,
+          "lateral_rms": 0.32260155618958697,
+          "heading_rms": 0.2832588789757893,
+          "steer_weave_rms": 0.19058957041499228,
+          "seconds": 5.7000000000000135
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 96,
+          "speed": 3.4581399901226653,
+          "lateral_rms": 0.168244383739101,
+          "heading_rms": 0.17698161267376666,
+          "steer_weave_rms": 0.11790723728552925,
+          "seconds": 2.3999999999999955
+        },
+        "straight": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 82,
+          "speed": 4.953002120607918,
+          "lateral_rms": 0.1754084344438548,
+          "heading_rms": 0.08445799868216483,
+          "steer_weave_rms": 0.04875809834513296,
+          "seconds": 2.0499999999999967
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": false,
+      "preview_audit": null,
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0008.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "source",
+      "mode": "worst",
+      "seed": 17,
+      "cap": 8.0,
+      "controller": "expert",
+      "complete": true,
+      "elapsed": 18.400000000000023,
+      "metrics": {
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 234,
+          "speed": 3.674303117646493,
+          "lateral_rms": 0.14653560963361761,
+          "heading_rms": 0.0953726446922282,
+          "steer_weave_rms": 0.10230470128236563,
+          "seconds": 5.850000000000016
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 116,
+          "speed": 2.7803818482659035,
+          "lateral_rms": 0.05307726147752347,
+          "heading_rms": 0.09648349060905824,
+          "steer_weave_rms": 0.12781564273632398,
+          "seconds": 2.8999999999999937
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 210,
+          "speed": 2.312055639510107,
+          "lateral_rms": 0.1057599272647155,
+          "heading_rms": 0.1860659240485407,
+          "steer_weave_rms": 0.1541967952880704,
+          "seconds": 5.250000000000007
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 94,
+          "speed": 3.522475097219908,
+          "lateral_rms": 0.12492019916130613,
+          "heading_rms": 0.05670284051403695,
+          "steer_weave_rms": 0.08762703218622468,
+          "seconds": 2.3499999999999956
+        },
+        "straight": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 82,
+          "speed": 4.970497156003113,
+          "lateral_rms": 0.12535007594194986,
+          "heading_rms": 0.06305152232799252,
+          "steer_weave_rms": 0.07451522483614972,
+          "seconds": 2.0499999999999967
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": false,
+      "preview_audit": null,
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0009.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "source",
+      "mode": "worst",
+      "seed": 27,
+      "cap": 8.0,
+      "controller": "policy",
+      "complete": true,
+      "elapsed": 18.725000000000005,
+      "metrics": {
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 123,
+          "speed": 2.693495518099714,
+          "lateral_rms": 0.1906707866978825,
+          "heading_rms": 0.21201373996290407,
+          "steer_weave_rms": 0.19313622868949676,
+          "seconds": 3.074999999999993
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 234,
+          "speed": 2.4427669247982693,
+          "lateral_rms": 0.3380361503912834,
+          "heading_rms": 0.2995918344095352,
+          "steer_weave_rms": 0.19098287055247967,
+          "seconds": 5.850000000000016
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 96,
+          "speed": 3.492841203122348,
+          "lateral_rms": 0.17181791092561768,
+          "heading_rms": 0.1809009530690039,
+          "steer_weave_rms": 0.12035965285563682,
+          "seconds": 2.3999999999999955
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 214,
+          "speed": 4.015638499869476,
+          "lateral_rms": 0.2025579171425344,
+          "heading_rms": 0.16676231920141557,
+          "steer_weave_rms": 0.1011599028092945,
+          "seconds": 5.3500000000000085
+        },
+        "straight": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 82,
+          "speed": 5.004308077877372,
+          "lateral_rms": 0.14064965487523534,
+          "heading_rms": 0.08084210959025104,
+          "steer_weave_rms": 0.04943517046791261,
+          "seconds": 2.0499999999999967
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": false,
+      "preview_audit": null,
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0010.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "source",
+      "mode": "worst",
+      "seed": 27,
+      "cap": 8.0,
+      "controller": "expert",
+      "complete": true,
+      "elapsed": 18.425000000000022,
+      "metrics": {
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 129,
+          "speed": 2.5704933079666903,
+          "lateral_rms": 0.13463998912574376,
+          "heading_rms": 0.15270175493066773,
+          "steer_weave_rms": 0.17413254981319623,
+          "seconds": 3.2249999999999925
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 212,
+          "speed": 2.2940806161893765,
+          "lateral_rms": 0.10939083547570078,
+          "heading_rms": 0.1921091520613587,
+          "steer_weave_rms": 0.15177125507674047,
+          "seconds": 5.300000000000008
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 94,
+          "speed": 3.518261285131859,
+          "lateral_rms": 0.12516873043070464,
+          "heading_rms": 0.05760744045294715,
+          "steer_weave_rms": 0.08939117768749151,
+          "seconds": 2.3499999999999956
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 220,
+          "speed": 3.8889791408851164,
+          "lateral_rms": 0.15079798272743083,
+          "heading_rms": 0.09791371683135373,
+          "steer_weave_rms": 0.10232171232499315,
+          "seconds": 5.500000000000011
+        },
+        "straight": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 82,
+          "speed": 4.962179946036066,
+          "lateral_rms": 0.1262106605221233,
+          "heading_rms": 0.06276439242386721,
+          "steer_weave_rms": 0.07425663308449561,
+          "seconds": 2.0499999999999967
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": false,
+      "preview_audit": null,
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0011.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "joint_profile",
+      "mode": "eval",
+      "seed": 7,
+      "cap": 8.0,
+      "controller": "policy",
+      "complete": true,
+      "elapsed": 27.97499999999948,
+      "metrics": {
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 285,
+          "speed": 2.415955812918978,
+          "lateral_rms": 0.16079176908127654,
+          "heading_rms": 0.1865997283284048,
+          "steer_weave_rms": 0.1908543601994099,
+          "seconds": 7.125000000000034
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 172,
+          "speed": 2.286117259580871,
+          "lateral_rms": 0.1928830118705928,
+          "heading_rms": 0.16805736624191575,
+          "steer_weave_rms": 0.16955582163862423,
+          "seconds": 4.299999999999994
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 386,
+          "speed": 2.3358204902857937,
+          "lateral_rms": 0.16556339164701556,
+          "heading_rms": 0.2487530259126568,
+          "steer_weave_rms": 0.2742159149257679,
+          "seconds": 9.65000000000007
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 276,
+          "speed": 2.359681046565263,
+          "lateral_rms": 0.17646366474481096,
+          "heading_rms": 0.3487797116264367,
+          "steer_weave_rms": 0.24006018553985095,
+          "seconds": 6.9000000000000306
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": true,
+      "preview_audit": {
+        "max_speed": 0.865241289138794,
+        "source_min_speed": 0.5,
+        "dimensions_unchanged": true
+      },
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0012.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "joint_profile",
+      "mode": "eval",
+      "seed": 7,
+      "cap": 8.0,
+      "controller": "expert",
+      "complete": false,
+      "elapsed": 52.3249999999981,
+      "metrics": {
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 511,
+          "speed": 0.8581541343373482,
+          "lateral_rms": 0.06116319206841136,
+          "heading_rms": 0.07695773923005834,
+          "steer_weave_rms": 0.0469854894085812,
+          "seconds": 12.775000000000114
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 334,
+          "speed": 0.858021650318055,
+          "lateral_rms": 0.06549318127040396,
+          "heading_rms": 0.08077999245936901,
+          "steer_weave_rms": 0.040332671847036504,
+          "seconds": 8.350000000000051
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 726,
+          "speed": 0.8652412854386224,
+          "lateral_rms": 0.020512257454238885,
+          "heading_rms": 0.0742105979325931,
+          "steer_weave_rms": 0.038560340666146914,
+          "seconds": 18.150000000000038
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 522,
+          "speed": 0.846411724093892,
+          "lateral_rms": 0.0660238110217471,
+          "heading_rms": 0.11125355542522104,
+          "steer_weave_rms": 0.0491604456037694,
+          "seconds": 13.050000000000118
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": true,
+      "preview_audit": {
+        "max_speed": 0.865241289138794,
+        "source_min_speed": 0.5,
+        "dimensions_unchanged": true
+      },
+      "teacher_profile_scale": 1.0,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0013.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "joint_profile",
+      "mode": "eval",
+      "seed": 17,
+      "cap": 8.0,
+      "controller": "policy",
+      "complete": true,
+      "elapsed": 27.09999999999953,
+      "metrics": {
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 380,
+          "speed": 2.30875690946027,
+          "lateral_rms": 0.14264086036620935,
+          "heading_rms": 0.21924805474827394,
+          "steer_weave_rms": 0.25625817779644483,
+          "seconds": 9.500000000000068
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 272,
+          "speed": 2.488934645476773,
+          "lateral_rms": 0.14347181513154944,
+          "heading_rms": 0.18855272543279014,
+          "steer_weave_rms": 0.1904175992856101,
+          "seconds": 6.800000000000029
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 267,
+          "speed": 2.3693711598135825,
+          "lateral_rms": 0.14506718243981742,
+          "heading_rms": 0.30249124315741405,
+          "steer_weave_rms": 0.24681430432541912,
+          "seconds": 6.675000000000027
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 165,
+          "speed": 2.51217216890803,
+          "lateral_rms": 0.1401856539383705,
+          "heading_rms": 0.16231410032827956,
+          "steer_weave_rms": 0.18855245782264327,
+          "seconds": 4.124999999999991
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": true,
+      "preview_audit": {
+        "max_speed": 0.865241289138794,
+        "source_min_speed": 0.5,
+        "dimensions_unchanged": true
+      },
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0014.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "joint_profile",
+      "mode": "eval",
+      "seed": 17,
+      "cap": 8.0,
+      "controller": "expert",
+      "complete": false,
+      "elapsed": 52.3249999999981,
+      "metrics": {
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 665,
+          "speed": 0.8565764142063543,
+          "lateral_rms": 0.05652377800294199,
+          "heading_rms": 0.0743243408746612,
+          "steer_weave_rms": 0.05151691307756878,
+          "seconds": 16.625000000000124
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 557,
+          "speed": 0.8647823748019429,
+          "lateral_rms": 0.05216662856074335,
+          "heading_rms": 0.06157838417536251,
+          "steer_weave_rms": 0.021304911078693638,
+          "seconds": 13.92500000000013
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 519,
+          "speed": 0.8466223501931498,
+          "lateral_rms": 0.07846247790993026,
+          "heading_rms": 0.11983888877708065,
+          "steer_weave_rms": 0.05107080955986645,
+          "seconds": 12.975000000000117
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 352,
+          "speed": 0.8652412650943827,
+          "lateral_rms": 0.03619707007020964,
+          "heading_rms": 0.09026952323323408,
+          "steer_weave_rms": 0.0329266500958025,
+          "seconds": 8.800000000000058
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": true,
+      "preview_audit": {
+        "max_speed": 0.865241289138794,
+        "source_min_speed": 0.5,
+        "dimensions_unchanged": true
+      },
+      "teacher_profile_scale": 1.0,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0015.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "joint_profile",
+      "mode": "eval",
+      "seed": 27,
+      "cap": 8.0,
+      "controller": "policy",
+      "complete": false,
+      "elapsed": 0.8250000000000004,
+      "metrics": {
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 31,
+          "speed": 1.0610418646866757,
+          "lateral_rms": 0.2343662158170525,
+          "heading_rms": 0.5819612891099204,
+          "steer_weave_rms": 0.26114867421176774,
+          "seconds": 0.7750000000000004
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 2,
+          "speed": 1.8400211388070602,
+          "lateral_rms": 0.25120657141345015,
+          "heading_rms": 0.9323424434329953,
+          "steer_weave_rms": 0.10227975581005418,
+          "seconds": 0.05
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": true,
+      "preview_audit": {
+        "max_speed": 0.865241289138794,
+        "source_min_speed": 0.5,
+        "dimensions_unchanged": true
+      },
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0016.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "joint_profile",
+      "mode": "eval",
+      "seed": 27,
+      "cap": 8.0,
+      "controller": "expert",
+      "complete": false,
+      "elapsed": 52.3249999999981,
+      "metrics": {
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 536,
+          "speed": 0.8362234369917558,
+          "lateral_rms": 0.0896168237835018,
+          "heading_rms": 0.14601897607839698,
+          "steer_weave_rms": 0.05460375876454697,
+          "seconds": 13.400000000000123
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 661,
+          "speed": 0.8652410538855934,
+          "lateral_rms": 0.023182396558117793,
+          "heading_rms": 0.07596574096510049,
+          "steer_weave_rms": 0.03955873146990179,
+          "seconds": 16.52500000000013
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 330,
+          "speed": 0.8652412891387936,
+          "lateral_rms": 0.020197103707039272,
+          "heading_rms": 0.08618454852367329,
+          "steer_weave_rms": 0.027868094122896325,
+          "seconds": 8.25000000000005
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 566,
+          "speed": 0.8652412891387938,
+          "lateral_rms": 0.013956581943771515,
+          "heading_rms": 0.03864078694049268,
+          "steer_weave_rms": 0.012490736921219187,
+          "seconds": 14.150000000000134
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": true,
+      "preview_audit": {
+        "max_speed": 0.865241289138794,
+        "source_min_speed": 0.5,
+        "dimensions_unchanged": true
+      },
+      "teacher_profile_scale": 1.0,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0017.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "joint_profile",
+      "mode": "worst",
+      "seed": 7,
+      "cap": 8.0,
+      "controller": "policy",
+      "complete": false,
+      "elapsed": 1.1749999999999998,
+      "metrics": {
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 40,
+          "speed": 1.2028921500295393,
+          "lateral_rms": 0.3860360559342997,
+          "heading_rms": 0.33159657874200277,
+          "steer_weave_rms": 0.289474619258187,
+          "seconds": 1.0000000000000004
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 7,
+          "speed": 2.1146622966715323,
+          "lateral_rms": 0.12157796439155295,
+          "heading_rms": 0.6453733217757929,
+          "steer_weave_rms": 0.6353035192313631,
+          "seconds": 0.175
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": true,
+      "preview_audit": {
+        "max_speed": 0.865241289138794,
+        "source_min_speed": 0.5,
+        "dimensions_unchanged": true
+      },
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0018.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "joint_profile",
+      "mode": "worst",
+      "seed": 7,
+      "cap": 8.0,
+      "controller": "expert",
+      "complete": false,
+      "elapsed": 52.3249999999981,
+      "metrics": {
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 523,
+          "speed": 0.745439665592053,
+          "lateral_rms": 0.13726670568317956,
+          "heading_rms": 0.14696405782022495,
+          "steer_weave_rms": 0.08155711696070454,
+          "seconds": 13.075000000000118
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 634,
+          "speed": 0.7738953226702491,
+          "lateral_rms": 0.024306371341038243,
+          "heading_rms": 0.08102840291612352,
+          "steer_weave_rms": 0.051424806519606486,
+          "seconds": 15.850000000000158
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 366,
+          "speed": 0.7738953232765197,
+          "lateral_rms": 0.019944182921560093,
+          "heading_rms": 0.08564924293281427,
+          "steer_weave_rms": 0.03265120812703218,
+          "seconds": 9.150000000000063
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 570,
+          "speed": 0.7738953232765197,
+          "lateral_rms": 0.014494461032067136,
+          "heading_rms": 0.040756459050986876,
+          "steer_weave_rms": 0.016789205893298846,
+          "seconds": 14.250000000000135
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": true,
+      "preview_audit": {
+        "max_speed": 0.865241289138794,
+        "source_min_speed": 0.5,
+        "dimensions_unchanged": true
+      },
+      "teacher_profile_scale": 0.894427190999916,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0019.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "joint_profile",
+      "mode": "worst",
+      "seed": 17,
+      "cap": 8.0,
+      "controller": "policy",
+      "complete": true,
+      "elapsed": 27.5999999999995,
+      "metrics": {
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 177,
+          "speed": 2.205551758739407,
+          "lateral_rms": 0.1547349446975968,
+          "heading_rms": 0.25459665007759363,
+          "steer_weave_rms": 0.23511246266182756,
+          "seconds": 4.424999999999995
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 401,
+          "speed": 2.195499421336046,
+          "lateral_rms": 0.20342145718920773,
+          "heading_rms": 0.2440867728394007,
+          "steer_weave_rms": 0.2644879058203878,
+          "seconds": 10.025000000000075
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 303,
+          "speed": 2.2990232559951385,
+          "lateral_rms": 0.1675610418408437,
+          "heading_rms": 0.3217233317239367,
+          "steer_weave_rms": 0.22651384307618563,
+          "seconds": 7.57500000000004
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 223,
+          "speed": 2.4279452021849193,
+          "lateral_rms": 0.1692758116701712,
+          "heading_rms": 0.2118084478186548,
+          "steer_weave_rms": 0.18857993831736597,
+          "seconds": 5.575000000000012
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": true,
+      "preview_audit": {
+        "max_speed": 0.865241289138794,
+        "source_min_speed": 0.5,
+        "dimensions_unchanged": true
+      },
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0020.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "joint_profile",
+      "mode": "worst",
+      "seed": 17,
+      "cap": 8.0,
+      "controller": "expert",
+      "complete": false,
+      "elapsed": 52.3249999999981,
+      "metrics": {
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 360,
+          "speed": 0.7583692823731236,
+          "lateral_rms": 0.01970665336164928,
+          "heading_rms": 0.08694728772956078,
+          "steer_weave_rms": 0.040422449949222464,
+          "seconds": 9.00000000000006
+        },
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 744,
+          "speed": 0.7731274936674766,
+          "lateral_rms": 0.019465480306533396,
+          "heading_rms": 0.08163269772333263,
+          "steer_weave_rms": 0.05190592266416729,
+          "seconds": 18.600000000000012
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 561,
+          "speed": 0.7431111273719203,
+          "lateral_rms": 0.07090289028744476,
+          "heading_rms": 0.12894057144618534,
+          "steer_weave_rms": 0.06090426413519591,
+          "seconds": 14.025000000000132
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 428,
+          "speed": 0.7738953232765197,
+          "lateral_rms": 0.015092259354992425,
+          "heading_rms": 0.043183859084972256,
+          "steer_weave_rms": 0.01849086446024074,
+          "seconds": 10.700000000000085
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": true,
+      "preview_audit": {
+        "max_speed": 0.865241289138794,
+        "source_min_speed": 0.5,
+        "dimensions_unchanged": true
+      },
+      "teacher_profile_scale": 0.894427190999916,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0021.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "joint_profile",
+      "mode": "worst",
+      "seed": 27,
+      "cap": 8.0,
+      "controller": "policy",
+      "complete": true,
+      "elapsed": 27.374999999999513,
+      "metrics": {
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 406,
+          "speed": 2.1858112559155907,
+          "lateral_rms": 0.20562832905971604,
+          "heading_rms": 0.2646257871796009,
+          "steer_weave_rms": 0.27218801474764315,
+          "seconds": 10.150000000000077
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 298,
+          "speed": 2.3125592877816237,
+          "lateral_rms": 0.13929254790641074,
+          "heading_rms": 0.3479385265083296,
+          "steer_weave_rms": 0.22127246249093852,
+          "seconds": 7.450000000000038
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 169,
+          "speed": 2.3548521199860764,
+          "lateral_rms": 0.1989804352942118,
+          "heading_rms": 0.23531827050466964,
+          "steer_weave_rms": 0.19005559256911406,
+          "seconds": 4.2249999999999925
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 222,
+          "speed": 2.4043568608509163,
+          "lateral_rms": 0.18221358382852137,
+          "heading_rms": 0.20270371663621947,
+          "steer_weave_rms": 0.20300008926555888,
+          "seconds": 5.550000000000011
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": true,
+      "preview_audit": {
+        "max_speed": 0.865241289138794,
+        "source_min_speed": 0.5,
+        "dimensions_unchanged": true
+      },
+      "teacher_profile_scale": null,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0022.npz"
+    },
+    {
+      "source": "Practice1126b.npz",
+      "candidate": "joint_from_stored",
+      "variant": "joint_profile",
+      "mode": "worst",
+      "seed": 27,
+      "cap": 8.0,
+      "controller": "expert",
+      "complete": false,
+      "elapsed": 52.3249999999981,
+      "metrics": {
+        "entry": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 762,
+          "speed": 0.7658104961970021,
+          "lateral_rms": 0.05514971331680733,
+          "heading_rms": 0.08976152230653925,
+          "steer_weave_rms": 0.06963425415874326,
+          "seconds": 19.049999999999986
+        },
+        "hairpin": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 587,
+          "speed": 0.7596227266475349,
+          "lateral_rms": 0.06389814814235166,
+          "heading_rms": 0.11389341052294735,
+          "steer_weave_rms": 0.05141006107352253,
+          "seconds": 14.675000000000141
+        },
+        "exit": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 354,
+          "speed": 0.7738953232765197,
+          "lateral_rms": 0.021704753140192608,
+          "heading_rms": 0.07987385354217683,
+          "steer_weave_rms": 0.03278529846664824,
+          "seconds": 8.850000000000058
+        },
+        "other": {
+          "protocol": "smoothed_raceline_008_v1",
+          "samples": 390,
+          "speed": 0.7738953232765197,
+          "lateral_rms": 0.01605122639189163,
+          "heading_rms": 0.041611074662560546,
+          "steer_weave_rms": 0.021529699178850673,
+          "seconds": 9.750000000000071
+        }
+      },
+      "static_screen": {
+        "sampled_poses": 1496,
+        "body_samples_per_pose": 325,
+        "poses_touching_occupied_samples": 0,
+        "minimum_body_grid_clearance_m": 0.32015621187164245,
+        "note": "Sampled static body, no localization/tracking error or dynamic-slip envelope"
+      },
+      "profile_override": true,
+      "preview_audit": {
+        "max_speed": 0.865241289138794,
+        "source_min_speed": 0.5,
+        "dimensions_unchanged": true
+      },
+      "teacher_profile_scale": 0.894427190999916,
+      "trace": "/home/daehyeok/projects/Autonomous-Driving-2026-codex-training/src/f1tenth/results/joint_mintime_1127/practice_existing_margin_v9/paired_closed_loop_1128_traces/0023.npz"
+    }
+  ],
+  "qualification": "Known training-map closed-loop diagnostic. Frozen actor and privileged teacher; not trained improvement or broad qualification."
+}
