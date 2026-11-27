@@ -30,8 +30,18 @@ def coefficient(start, end, decay_updates, completed_update, actor_start):
 
 def check_resume(saved, current):
     """Legacy constant-guidance resumes are unchanged; annealing is immutable."""
+    if bool(saved.get('anneal_imitation_with_line', False)) != bool(current.get('anneal_imitation_with_line', False)):
+        raise ValueError('Imitation guidance coupling changed during resume; start a declared new trial')
     if saved.get('line_cost_end') is None and current.get('line_cost_end') is None:
         return
     keys = [('line_cost', 0.), ('line_cost_end', None), ('line_cost_decay_updates', 40)]
     if any(saved.get(k, default) != current.get(k, default) for k, default in keys):
         raise ValueError('Line guidance schedule changed during resume; start a declared new trial')
+
+
+def imitation_multiplier(start, current, coupled):
+    if not coupled:
+        return 1.
+    if not math.isfinite(start) or start <= 0 or not math.isfinite(current) or not 0 <= current <= start:
+        raise ValueError('Coupled imitation guidance needs a positive start and a coefficient within its range')
+    return float(current/start)

@@ -169,6 +169,8 @@ def get_args():
                    help='Optional final reference-line cost; line guidance decreases after actor training begins')
     p.add_argument('--line_cost_decay_updates', type=int, default=40,
                    help='Actor-update iterations to reach --line_cost_end; critic warm-up does not advance this schedule')
+    p.add_argument('--anneal_imitation_with_line', type=int, choices=(0, 1), default=0,
+                   help='Also multiply BC and retention losses by the line-guidance fraction, reaching zero together')
     p.add_argument('--bay_cost', type=float, default=0.0,
                    help='per step and m of the car outside the smooth corridor (a dead-end bay / pocket), utils/env.py '
                         'BAY_COST: an early signal before the crash or stuck ending it led to (PPO 13: 2)')
@@ -294,6 +296,8 @@ def get_args():
     args.update(vars(a))
     from utils.line_guidance import validate as validate_line_guidance
     validate_line_guidance(args.line_cost, args.line_cost_end, args.line_cost_decay_updates)
+    if args.anneal_imitation_with_line and (args.line_cost <= 0 or args.line_cost_end != 0):
+        raise ValueError('--anneal_imitation_with_line requires positive --line_cost and --line_cost_end 0')
     if args.lat_acc_mode == 'path_normal' and args.model != 'st':
         raise ValueError('--lat_acc_mode path_normal requires the ST vehicle model')
     args.family_select = bool(args.get('training_mix')) if args.family_select is None else bool(args.family_select)
@@ -795,6 +799,9 @@ def main():
             # Set only the reference-line term, once before the entire rollout.
             # Corridor, wall, collision and other reward terms remain independent.
             venv.set_attr('LINE_COST', line_guidance)
+        from utils.line_guidance import imitation_multiplier
+        imitation_guidance = imitation_multiplier(args.line_cost, line_guidance, args.anneal_imitation_with_line)
+        retention_weight = args.retention_weight * imitation_guidance
         t0 = time.time()
         B = {k: [] for k in ('obs', 'priv', 'act', 'logp', 'rew', 'done', 'fail', 'nobs', 'npriv')}
         comp = {k: 0.0 for k in REWARD_KEYS}
@@ -896,6 +903,7 @@ def main():
         warm = actor_start is None
         frac = 0.0 if warm else min(1.0, (update - actor_start) / max(1, n_updates - actor_start))
         bc_w = min(args.bc_start * args.bc_max, args.bc_start * (args.bc_end / args.bc_start) ** frac * bc_boost)
+        bc_w *= imitation_guidance
         lr = args.lr + (args.lr_end - args.lr) * frac
         for g in opt_actor.param_groups:
             g['lr'] = lr
@@ -943,7 +951,7 @@ def main():
                 actor_loss = pg + bc_w * bc
                 if retention is not None:
                     retention_loss, _ = retention.loss(actor, speed_weight=args.bc_speed)
-                    actor_loss = actor_loss + args.retention_weight * retention_loss
+                    actor_loss = actor_loss + retention_weight * retention_loss
                     retention_sum += float(retention_loss.detach())
                     retention_steps += 1
                 opt_actor.zero_grad()
@@ -986,9 +994,10 @@ def main():
                    kl_guard_attempted_kl=guard_attempted_kl if np.isfinite(guard_attempted_kl) else None)
         if args.line_cost_end is not None:
             row['line_guidance_coefficient'] = float(line_guidance)
+            row['imitation_guidance_multiplier'] = float(imitation_guidance)
         if retention is not None:
             row.update(retention_loss=retention_sum / max(1, retention_steps),
-                       retention_weight=args.retention_weight, retention_minibatches=retention_steps)
+                       retention_weight=retention_weight, retention_minibatches=retention_steps)
         slip=np.abs(B['priv'][...,5])
         row.update(slip_rms_rad=float(np.sqrt(np.mean(slip**2))),slip_abs_p99_rad=float(np.quantile(slip,.99)))
         sub_crash = lambda key: (float(np.mean([d['crash'] for d in recent if d.get(key)]))
