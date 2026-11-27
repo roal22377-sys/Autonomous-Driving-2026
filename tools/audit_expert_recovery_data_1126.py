@@ -23,6 +23,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--collection', default='results/expert_recovery_failures_1126/collection.json')
     parser.add_argument('--output', required=True)
+    parser.add_argument('--training_subset', action='store_true',
+        help='Validate exact failed source25 cases selected by the audited training-corpus comparison')
     cli = parser.parse_args()
     os.chdir(SRC)
     import numpy as np
@@ -39,7 +41,18 @@ def main():
     raw = source.read_bytes()
     report = json.loads(raw)
     assert report['status'] == 'complete_not_applied'
-    assert report['protocol'] == 'all_training_open_failures'
+    if cli.training_subset:
+        assert report['protocol'] == 'selected_training_corpus_failures'
+        selection_path = Path(report['selection_report'])
+        assert sha(selection_path) == report['selection_sha256']
+        selection = json.loads(selection_path.read_text())
+        assert selection['status'] == 'complete_read_only_not_selected'
+        assert selection['policies']['source25u70']['sha256'] == report['student_sha256']
+        subset = {(r['track'], r['seed']) for r in selection['runs']
+                  if r['policy'] == 'source25u70' and not r['complete']}
+        assert subset and subset == {(r['track'], r['seed']) for r in report['jobs']}
+    else:
+        assert report['protocol'] == 'all_training_open_failures'
     config = Path('results/ppo_s2r/29/backup/f1tenth.yaml')
     artifacts = dict(student=Path(report['student_checkpoint']), config=config,
         normalizer=Path('results/imitation/1607/sim2real/agent_obs_scale.pkl'),
@@ -65,11 +78,12 @@ def main():
     allowed = {str(p.resolve()) for p in Path('installation/maps_open_train').glob('*.npz')}
     jobs = {(r['track'], r['seed']): r for r in report['jobs']}
     runs = report['runs']
-    assert len(jobs) == len(runs) == 184
-    assert len({(r['track'], r['seed']) for r in runs}) == 184
+    expected_cases = len(subset) if cli.training_subset else 184
+    assert len(jobs) == len(runs) == expected_cases
+    assert len({(r['track'], r['seed']) for r in runs}) == expected_cases
     assert all(track in allowed for track, _ in jobs)
     assert [(r['track'], r['seed']) for r in report['jobs']] == [
-        (track, 64000+i) for i, track in enumerate(sorted(r['track'] for r in report['jobs']))]
+        (track, 64000+sorted(allowed).index(track)) for track in sorted(r['track'] for r in report['jobs'])]
     summaries = []
     rows = 0
     maximum_steer_error = maximum_speed_error = 0.
@@ -144,7 +158,8 @@ def main():
         maximum_steering_label_error_rad=maximum_steer_error, maximum_speed_label_error_mps=maximum_speed_error,
         actors={name:dict(path=str(path),sha256=sha(path)) for name,path in paths.items()},
         cases_with_handoff=summaries,
-        qualification='Training maps only; all184 declared cases, source hashes, raw inputs, whole-action units, timing and full2lap outcomes audited. Prefix equality was checked during collection. Actor disagreement on privileged teacher continuations is diagnostic, not a counterfactual rollout or evidence of partial-observation learnability. Rows within trajectories are correlated. No cache adoption, gradient update or held-out observation reuse.')
+        qualification=('Training maps only; exact source25 training-corpus failure subset checked against its frozen selection report; ' if cli.training_subset else 'Training maps only; all184 declared cases, ')
+        +'source hashes, raw inputs, whole-action units, timing and full2lap outcomes audited. Prefix equality was checked during collection. Actor disagreement on privileged teacher continuations is diagnostic, not a counterfactual rollout or evidence of partial-observation learnability. Rows within trajectories are correlated. No cache adoption, gradient update or held-out observation reuse.')
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result,indent=2,allow_nan=False)+'\n')
     print(json.dumps({k:result[k] for k in ('status','cases','baseline_complete','rescued','rows')}))
