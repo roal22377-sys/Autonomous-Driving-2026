@@ -27,10 +27,12 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def initialize(destination, failed_only=False):
-    global IL, torch, np, ACTOR, MEAN, STD, COLS, EXPERT, DEST, FAILED_ONLY
+def initialize(destination, failed_only=False, student_checkpoint=None):
+    global IL, torch, np, ACTOR, MEAN, STD, COLS, EXPERT, DEST, FAILED_ONLY, STUDENT
     DEST = Path(destination)
     FAILED_ONLY = failed_only
+    if student_checkpoint is not None:
+        STUDENT = str(student_checkpoint)
     import numpy as np
     import torch
     import train_il_s2r as IL
@@ -40,9 +42,18 @@ def initialize(destination, failed_only=False):
     torch.set_num_threads(1)
     args = IL.get_args(['--task_config', CONFIG])
     ck = torch.load(STUDENT, map_location='cpu', weights_only=False)
+    if not all(torch.isfinite(v).all().item() for v in ck['actor'].values()):
+        raise ValueError('Nonfinite student actor')
     ACTOR = IL.actor_from_state(ck['actor']); ACTOR.eval()
+    with torch.no_grad():
+        probe = ACTOR(torch.zeros(args.obs_dim)).loc
+    if probe.shape != (2,) or not torch.isfinite(probe).all():
+        raise ValueError('Student observation/action shape or output is invalid')
     rms = RunningMeanStd('agent_obs', args.obs_dim)
     rms.load('results/imitation/1607/sim2real', required=True)
+    if 'obs_mean' in ck or 'obs_var' in ck:
+        np.testing.assert_array_equal(ck['obs_mean'], rms.mean)
+        np.testing.assert_array_equal(ck['obs_var'], rms.var)
     MEAN, STD = rms.mean, np.sqrt(rms.var+1e-8)
     COLS = columns(args)
     EXPERT = dict(YAML().load(Path('configs/task/f1tenth_preview_1126.yaml'))['expert_plan'])
@@ -167,14 +178,23 @@ def drive(job):
 
 
 def main():
-    global DEST
+    global DEST, STUDENT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--failed_open',action='store_true',
         help='Audit all184 open training tracks; branch2s before student failure only')
+    parser.add_argument('--student_checkpoint', default=STUDENT,
+        help='Frozen actor checkpoint; embedded normalization must match frozen IL1607')
+    parser.add_argument('--destination',
+        help='Separate collection directory; must not already exist')
     cli = parser.parse_args()
     if cli.failed_open:
         DEST = Path('results/expert_recovery_failures_1126')
+    if cli.destination:
+        DEST = Path(cli.destination)
     os.chdir(SRC)
+    STUDENT = str(Path(cli.student_checkpoint).resolve())
+    if not Path(STUDENT).is_file():
+        raise FileNotFoundError(STUDENT)
     import numpy as np
     import train_il_s2r as IL
     from utils.training_mix import groups_for
@@ -204,6 +224,9 @@ def main():
     allowed = {str(Path(p).resolve()) for g in ('regular','open') for p in groups[g]}
     assert len(jobs)==(184 if cli.failed_open else 24)
     assert all(p in allowed and IL.HOLDOUT not in p for _,p,_ in jobs)
+    # Validate before starting the pool: a failing initializer otherwise causes
+    # multiprocessing to repeatedly spawn replacement workers.
+    initialize(str(DEST), cli.failed_open, STUDENT)
     (DEST/'shards').mkdir(parents=True)
     report = dict(status='running', purpose='Training-only recovery feasibility; not an adopted cache',
         student_checkpoint=STUDENT,student_sha256=sha(STUDENT),config_sha256=sha(CONFIG),
@@ -226,7 +249,7 @@ def main():
     def save():
         temp=DEST/'collection.tmp';temp.write_text(json.dumps(report,indent=2,allow_nan=False)+'\n');temp.replace(DEST/'collection.json')
     save()
-    with mp.get_context('spawn').Pool(2,initializer=initialize,initargs=(str(DEST),cli.failed_open)) as pool:
+    with mp.get_context('spawn').Pool(2,initializer=initialize,initargs=(str(DEST),cli.failed_open,STUDENT)) as pool:
         for row in pool.imap_unordered(drive,jobs):
             report['runs'].append(row);save()
             print('CASE',len(report['runs']),'/',len(jobs),Path(row['track']).name,row.get('outcome',row['status']),flush=True)
