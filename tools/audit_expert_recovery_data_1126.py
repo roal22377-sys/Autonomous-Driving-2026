@@ -53,8 +53,10 @@ def main():
     expected_columns = columns(args)
     rms = RunningMeanStd('agent_obs', args.obs_dim)
     rms.load('results/imitation/1607/sim2real', required=True)
+    # The collector may now use any frozen, normalization-compatible candidate.
+    # Label the source by its role; its exact identity is recorded below by hash.
     paths = dict(source_u70=Path('results/ppo_s2r/25/checkpoint/model_3080000.pt'),
-        student_u20=artifacts['student'], candidate_u30=Path('results/ppo_s2r/29/checkpoint/model_1320000.pt'))
+        collection_student=artifacts['student'], candidate_u30=Path('results/ppo_s2r/29/checkpoint/model_1320000.pt'))
     actors = {}
     for name, path in paths.items():
         actor = IL.actor_from_state(torch.load(path, map_location='cpu', weights_only=False)['actor'])
