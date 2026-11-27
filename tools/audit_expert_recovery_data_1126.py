@@ -81,6 +81,7 @@ def main():
             assert not r['admissible_for_future_review']
             continue
         assert r['switch_step'] == max(0, r['baseline']['steps'] - round(2/dt))
+        assert r['handoff_at_reset'] == (r['switch_step'] == 0)
         assert r['prefix_observations_and_states_exact'] == r['switch_step'] + 1
         assert r['admissible_for_future_review'] == r['handoff']['success']
         if r['handoff']['success']:
@@ -129,12 +130,15 @@ def main():
                             normalized_action_mse=(delta[mask]**2).mean(axis=0).tolist(),
                             steering_absolute_error_p95=float(np.quantile(abs(delta[mask,0]),.95)))
             summaries.append(dict(track=Path(r['track']).name, seed=r['seed'], outcome=r['outcome'],
+                handoff_at_reset=r['handoff_at_reset'], switch_time=r['switch_time'],
                 admissible=r['admissible_for_future_review'], rows=n, early_rows=int(early.sum()),
                 shard=r['shard'], shard_sha256=r['shard_sha256'], same_input_fit=fit))
             rows += n
     result = dict(status='passed_not_applied', collection_sha256=hashlib.sha256(raw).hexdigest(),
         cases=len(runs), baseline_complete=sum(r['baseline']['success'] for r in runs),
         rescued=sum(r.get('outcome') == 'rescued' for r in runs), rows=rows,
+        successful_post_prefix_recoveries=sum(r.get('outcome') == 'rescued' and not r['handoff_at_reset'] for r in runs),
+        successful_from_reset_interventions=sum(r.get('outcome') == 'rescued' and r['handoff_at_reset'] for r in runs),
         maximum_steering_label_error_rad=maximum_steer_error, maximum_speed_label_error_mps=maximum_speed_error,
         actors={name:dict(path=str(path),sha256=sha(path)) for name,path in paths.items()},
         cases_with_handoff=summaries,

@@ -57,6 +57,7 @@ def run(job):
                 break
         assert returned and verified == count+1
         return dict(track=Path(row['track']).name, track_sha256=row['track_sha256'], seed=row['seed'],
+            handoff_at_reset=row['handoff_at_reset'],
             expert_seconds=seconds, switch_time=row['switch_time'],
             returned_at=row['switch_time']+count*env.timestep,
             verified_expert_states=verified, student_baseline=row['baseline'], full_expert=row['handoff'],
