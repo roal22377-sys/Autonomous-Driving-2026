@@ -165,6 +165,10 @@ def get_args():
                    help='per step x (|offset from the race line| - --line_margin)^2 (true pose; utils/env.py LINE_COST). '
                         '11/25 PPO 14 u20: open-space crashes were corner exits 0.35-0.4 m wide of the line')
     p.add_argument('--line_margin', type=float, default=0.2, help='[m] free offset from the race line')
+    p.add_argument('--line_cost_end', type=float, default=None,
+                   help='Optional final reference-line cost; line guidance decreases after actor training begins')
+    p.add_argument('--line_cost_decay_updates', type=int, default=40,
+                   help='Actor-update iterations to reach --line_cost_end; critic warm-up does not advance this schedule')
     p.add_argument('--bay_cost', type=float, default=0.0,
                    help='per step and m of the car outside the smooth corridor (a dead-end bay / pocket), utils/env.py '
                         'BAY_COST: an early signal before the crash or stuck ending it led to (PPO 13: 2)')
@@ -288,6 +292,8 @@ def get_args():
         if a.sim_override else il_task
     args = IL.get_args([])
     args.update(vars(a))
+    from utils.line_guidance import validate as validate_line_guidance
+    validate_line_guidance(args.line_cost, args.line_cost_end, args.line_cost_decay_updates)
     if args.lat_acc_mode == 'path_normal' and args.model != 'st':
         raise ValueError('--lat_acc_mode path_normal requires the ST vehicle model')
     args.family_select = bool(args.get('training_mix')) if args.family_select is None else bool(args.family_select)
@@ -582,6 +588,8 @@ def main():
         if not os.path.isfile(resume_path):
             raise FileNotFoundError(f'{resume_path} missing: nothing to resume (run without --resume to start)')
         state = torch.load(resume_path, map_location='cpu', weights_only=False)
+        from utils.line_guidance import check_resume as check_line_guidance_resume
+        check_line_guidance_resume(state['args'], args)
         if state['args'].get('kl_guard', 'epoch') != args.kl_guard:
             raise ValueError('KL guard mode changed during resume; start a declared new trial')
         if (retention is None) != (state.get('retention') is None):
@@ -779,6 +787,14 @@ def main():
         os.replace(resume_path + '.tmp', resume_path)
     T_START = time.time()
     while update < n_updates:
+        line_guidance = args.line_cost
+        if args.line_cost_end is not None:
+            from utils.line_guidance import coefficient as line_guidance_coefficient
+            line_guidance = line_guidance_coefficient(args.line_cost, args.line_cost_end,
+                                                    args.line_cost_decay_updates, update, actor_start)
+            # Set only the reference-line term, once before the entire rollout.
+            # Corridor, wall, collision and other reward terms remain independent.
+            venv.set_attr('LINE_COST', line_guidance)
         t0 = time.time()
         B = {k: [] for k in ('obs', 'priv', 'act', 'logp', 'rew', 'done', 'fail', 'nobs', 'npriv')}
         comp = {k: 0.0 for k in REWARD_KEYS}
@@ -968,6 +984,8 @@ def main():
         row.update(kl_guard=args.kl_guard, kl_guard_rejected_minibatches=int(guard_rejected),
                    actor_attempted_minibatches=n_mb, actor_accepted_minibatches=n_mb-int(guard_rejected),
                    kl_guard_attempted_kl=guard_attempted_kl if np.isfinite(guard_attempted_kl) else None)
+        if args.line_cost_end is not None:
+            row['line_guidance_coefficient'] = float(line_guidance)
         if retention is not None:
             row.update(retention_loss=retention_sum / max(1, retention_steps),
                        retention_weight=args.retention_weight, retention_minibatches=retention_steps)
