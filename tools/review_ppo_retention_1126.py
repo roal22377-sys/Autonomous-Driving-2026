@@ -46,7 +46,7 @@ def per_cap_comparison(candidate, reference):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--run', type=int, choices=[28, 29], default=28)
+    parser.add_argument('--run', type=int, choices=[28, 29, 30], default=28)
     parser.add_argument('--update', required=True, type=int)
     parser.add_argument('--control_update', type=int,
                         help='Explicit historical checkpoint; never labelled a same-update control')
@@ -58,7 +58,7 @@ def main():
     import torch
     torch.set_num_threads(1)
     base = SRC / 'results/ppo_s2r'
-    candidate_run, control_run = cli.run, {28: 27, 29: 28}[cli.run]
+    candidate_run, control_run = cli.run, {28: 27, 29: 28, 30: 29}[cli.run]
     control_args, args = [json.loads((base / str(n) / 'backup/ppo_args.json').read_text())
                           for n in (control_run, candidate_run)]
     differences = {k: [control_args.get(k), args.get(k)]
@@ -70,6 +70,14 @@ def main():
         expected = {'save_dir', 'algo_idx', 'kl_guard'}
         if args['kl_guard'] != 'minibatch_rollback' or control_args.get('kl_guard', 'epoch') != 'epoch':
             raise ValueError('Different KL-guard intervention')
+    if candidate_run == 30:
+        expected = {'save_dir', 'algo_idx', 'line_cost_end', 'line_cost_decay_updates',
+                    'anneal_imitation_with_line', 'straight_offset_cost'}
+        if (args['line_cost_end'] != 0 or args['line_cost_decay_updates'] != 40
+                or args['anneal_imitation_with_line'] != 1 or args['straight_offset_cost'] != 0
+                or args['kl_guard'] != 'minibatch_rollback'
+                or control_args.get('kl_guard') != 'minibatch_rollback'):
+            raise ValueError('Different declared joint-guidance curriculum')
     if set(differences) != expected:
         raise ValueError('Unexpected single-factor experiment differences: ' + str(differences))
     if (args['line_cost'] != 10 or args['retention_weight'] != 5
@@ -104,7 +112,7 @@ def main():
         raise ValueError('Pace reference identity changed')
     references = dict(source_u70=source['families'], pace_u10=snapshot['best']['families'])
     restored_worst, restored_worst_provenance = None, None
-    if candidate_run == 29:
+    if candidate_run in (29, 30):
         path = SRC / 'results/analysis1126/ppo25_u70_worst_regular_reference_seed7.json'
         restored = json.loads(path.read_text())
         if (restored['checkpoint_sha256'] != source['checkpoint_sha256']
@@ -167,11 +175,40 @@ def main():
     if not all(torch.isfinite(v).all().item() for name in ('actor', 'critic', 'ccritic')
                for v in weights[name].values()):
         raise ValueError('Nonfinite candidate weights')
-    if (now['retention_weight'] != 5 or now['retention_minibatches'] < 0
+    expected_retention_weight = 5.
+    guidance_review = None
+    if candidate_run == 30:
+        import pickle
+        import time
+        from utils.line_guidance import coefficient, imitation_multiplier
+        for attempt in range(10):
+            try:
+                with (base / '30/train_log.pkl').open('rb') as f:
+                    history = pickle.load(f)
+                break
+            except (EOFError, pickle.UnpicklingError):
+                if attempt == 9:
+                    raise
+                time.sleep(.1)
+        starts = [r['update'] for r in history if r.get('update', 0) > 0 and not r.get('warm', True)]
+        if not starts:
+            raise ValueError('No actor-training iteration in candidate history')
+        actor_start = min(starts)
+        line = coefficient(args['line_cost'], args['line_cost_end'], args['line_cost_decay_updates'],
+                           cli.update-1, actor_start)
+        factor = imitation_multiplier(args['line_cost'], line, True)
+        if abs(now['line_guidance_coefficient']-line) > 1e-12 or abs(now['imitation_guidance_multiplier']-factor) > 1e-12:
+            raise ValueError('Runtime guidance does not match rollout schedule')
+        expected_retention_weight = args['retention_weight']*factor
+        guidance_review = dict(actor_start=actor_start, line_coefficient=line, imitation_multiplier=factor,
+                               effective_retention_weight=expected_retention_weight, effective_bc_weight=now['bc_w'])
+        if factor == 0 and now['bc_w'] != 0:
+            raise ValueError('Teacher BC remains active after joint guidance reached zero')
+    if (abs(now['retention_weight']-expected_retention_weight) > 1e-12 or now['retention_minibatches'] < 0
             or (candidate_run == 28 and not now['retention_minibatches'] > 0)):
         raise ValueError('Expected active retention at the reviewed actor update')
     guard_review = None
-    if candidate_run == 29:
+    if candidate_run in (29, 30):
         if (now['kl_guard'] != 'minibatch_rollback' or not 0 <= now['kl'] <= args['max_kl'] + 1e-9
                 or now['actor_accepted_minibatches'] + now['kl_guard_rejected_minibatches'] != now['actor_attempted_minibatches']
                 or now['actor_accepted_minibatches'] != now['retention_minibatches']):
@@ -196,6 +233,10 @@ def main():
                        'measures this seed-specific experiment, not statistical significance. '
                        'Passing fixed cohorts does not qualify unseen layouts, correct localization '
                        'recovery, or real-car performance. No checkpoint is promoted by this tool.'))
+    if candidate_run == 30:
+        report['joint_guidance_review'] = guidance_review
+        report['qualification'] += (' Run30 changes reference guidance, BC/retention coupling and straight offset objective together. '
+                                    'Run29 is a matched historical driving comparator; this comparison cannot isolate the causal effect of each changed term.')
     if control_update != cli.update:
         report['historical_control'] = dict(run=control_run, update=control_update,
             checkpoint_sha256=sha(base / str(control_run) / 'checkpoint' / ('model_%s.pt' % control['step'])))
