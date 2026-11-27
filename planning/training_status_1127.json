@@ -1,6 +1,6 @@
 {
-  "updated_utc": "2026-11-27T11:32:40.887397+00:00",
-  "phase": "Paused per user quota remaining19%; preparation incomplete and no IL/PPO started.",
+  "updated_utc": "2026-11-27T11:47:07.656835+00:00",
+  "phase": "Preparation tests found important failures; no learning started; no currently running task processes.",
   "local_training_branch": "codex/1126-hairpin-position-ppo",
   "publication_branch": "codex/1127-raceline-robustness",
   "real_car_reference": "PPO21u30 (2130); no new real-car validation.",
@@ -17,13 +17,13 @@
   "existing_randomization_retained": "LiDAR range noise/dropout/spikes; speed noise/scale; steering delay/lock/response; acceleration/braking/friction; synthetic localization offset/jumps/loss; varied geometry and open pockets.",
   "performance_claim": "No new lap-time/completion improvement claimed from this work. Planning proxy times are not simulator or real-car lap times.",
   "large_artifacts": "Model weights, optimizer checkpoints, replay arrays and generated maps remain local; reproduction needs the source data paths and environment described in the plan.",
-  "quota_rule": "Stop work and jobs when fresh 5h usage remaining drops below20%.",
+  "quota_rule": "Stop work and jobs when fresh5h remaining<5percent per latest user instruction.",
   "reports": "planning/1127_raceline/",
   "publication": {
     "status": "prior_head_verified_new_work_pending_publication",
     "verified_remote_head": "92a08f9c1cb354ce5ab0d5cfda0bb3f55da58645",
     "branch": "codex/1127-raceline-robustness"
   },
-  "latest_pretraining_report": "planning/1127_raceline/pretraining_update.json",
+  "latest_pretraining_report": "planning/1127_raceline/pretraining_v6_results.json",
   "pretraining_ready": false
 }

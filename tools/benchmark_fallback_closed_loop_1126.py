@@ -53,6 +53,11 @@ def main():
     p.add_argument('--recovery-hypotheses', type=int, default=4)
     p.add_argument('--audit-recovery-hypotheses', action='store_true',
                    help='Read-only per-mode fits and post-decision truth diagnostics')
+    p.add_argument('--nominal-track',help='Unchanged reference map/course when --track contains displaced physical walls')
+    p.add_argument('--shared-scan',action='store_true',help='Actor and actual scan localizer receive the same physically rendered, sensor-augmented scan')
+    p.add_argument('--opponent-start-fraction',type=float,help='Scripted same-direction opponent starts this fraction of a lap ahead')
+    p.add_argument('--opponent-cap',type=float,default=3.)
+    p.add_argument('--lidar-brake-envelope',action='store_true',help='Offline diagnostic speed governor from observed frontal range; no opponent truth inputs')
     cli = p.parse_args()
     if not 0. <= cli.return_confirm <= 5.:
         raise ValueError('return-confirm must be between0 and5 seconds')
@@ -66,6 +71,10 @@ def main():
     from utils.observation import get_obs_config
     from utils.vectorize import RunningMeanStd
     from benchmark_localizer_truth_1126 import first_stable_time
+    from f1tenth_gym.envs.laser_models import ray_cast
+    from f1tenth_gym.envs.collision_models import get_vertices,collision
+    from utils.observation import add_obs_noise
+    from utils.raceline import speed_profile
 
     dest = Path(cli.output_dir).resolve()
     if dest.exists() or SRC / 'installation' in dest.parents:
@@ -106,7 +115,7 @@ def main():
     primary_scales, fallback_scales = steering_scales(args), steering_scales(fbargs)
     track = str(Path(cli.track).resolve())
     dest.mkdir(parents=True)
-    source = Path(track)
+    source = Path(cli.nominal_track).resolve() if cli.nominal_track else Path(track)
     stem = source.stem
     reverse_candidates = ([source.with_name(stem[:-4] + '.npz')] if stem.endswith('_rev') else
                           [source.with_name(stem.replace('_rev_', '_', 1) + '.npz')] if '_rev_' in stem else
@@ -121,9 +130,15 @@ def main():
     shutil.copyfile(reverse_source, dest / 'course_rev.npz')
     map_dir = dest / 'map'
     map_dir.mkdir()
-    with np.load(track, allow_pickle=False) as z:
+    with np.load(source, allow_pickle=False) as z:
         grid = z['occupancy'].astype(np.uint8)
         origin, resolution = np.asarray(z['origin'], float), float(z['resolution'])
+        traffic_xy=z['raceline'].astype(float)
+    if cli.nominal_track:
+        with np.load(track,allow_pickle=False) as z:
+            assert str(z['nominal_source_sha256'])==sha(source),'Nominal map provenance mismatch'
+            assert np.array_equal(z['nominal_occupancy'],grid)
+            assert float(z['nominal_resolution'])==resolution
     with np.load(reverse_source, allow_pickle=False) as z:
         same_grid = (np.array_equal(grid, z['occupancy']) and np.array_equal(origin, z['origin'])
                      and resolution == float(z['resolution']))
@@ -132,7 +147,7 @@ def main():
         # Generated forward/reverse tracks may have independently rasterized
         # grids. Orient on exactly this map, using this same feasible line in
         # reverse, rather than silently mixing two metric grids.
-        with np.load(track, allow_pickle=False) as z:
+        with np.load(source, allow_pickle=False) as z:
             payload = {key: z[key] for key in z.files}
         payload['raceline'] = payload['raceline'][::-1].copy()
         np.savez_compressed(dest / 'course_rev.npz', **payload)
@@ -145,7 +160,61 @@ def main():
     iy, ix = np.nonzero(grid < 50)
     expected = np.column_stack([origin[0] + (ix + .5) * resolution, origin[1] + (iy + .5) * resolution])
     assert np.array_equal(pts, expected) and res == resolution and np.array_equal(org, origin[:2])
-    env = F1Wrapper(args, IL.MAPS, obs_noise=True, sim_mode='eval', tracks=[track])
+    traffic_segments=np.linalg.norm(np.roll(traffic_xy,-1,axis=0)-traffic_xy,axis=1)
+    traffic_arc=np.r_[0,np.cumsum(traffic_segments)]
+    traffic_speed=speed_profile(traffic_xy,.5,cli.opponent_cap,5.,2.9,3.7)
+    shared=bool(cli.shared_scan or cli.nominal_track or cli.opponent_start_fraction is not None)
+    if cli.opponent_start_fraction is not None and not 0<cli.opponent_start_fraction<1:
+        raise ValueError('Opponent start fraction must lie strictly between0 and1')
+    class ScenarioWrapper(F1Wrapper):
+        def getObs(self,obs_dict,reset=False):
+            if not shared:return super().getObs(obs_dict,reset)
+            st=self.vehicle_state();now=float(self.elapsed)
+            raw=np.asarray(obs_dict['scans'][0],float).copy()
+            if reset:
+                self.traffic_time=now;self.traffic_velocity=0.
+                nearest=int(np.argmin(np.sum((traffic_xy-st[:2])**2,axis=1)))
+                self.traffic_s=(traffic_arc[nearest]+(cli.opponent_start_fraction or .5)*traffic_arc[-1])%traffic_arc[-1]
+                self.traffic_collision=False;self.occluded_frames=0;self.occluded_beams=0
+                self.traffic_wall_overlap_frames=0
+                self.traffic_min_distance=float('inf')
+            if cli.opponent_start_fraction is not None:
+                dt=max(0.,now-self.traffic_time);self.traffic_time=now
+                target=float(np.interp(self.traffic_s,traffic_arc,np.r_[traffic_speed,traffic_speed[0]]))
+                self.traffic_velocity+=float(np.clip(target-self.traffic_velocity,-3.7*dt,2.9*dt))
+                self.traffic_s=(self.traffic_s+self.traffic_velocity*dt)%traffic_arc[-1]
+                j=min(int(np.searchsorted(traffic_arc,self.traffic_s,side='right')-1),len(traffic_xy)-1)
+                alpha=(self.traffic_s-traffic_arc[j])/max(traffic_segments[j],1e-12)
+                pos=traffic_xy[j]*(1-alpha)+traffic_xy[(j+1)%len(traffic_xy)]*alpha
+                direction=traffic_xy[(j+1)%len(traffic_xy)]-traffic_xy[j]
+                heading=float(np.arctan2(direction[1],direction[0]))
+                opponent=np.r_[pos,heading]
+                # CG -> box center is -0.01m for the .29front/.31rear body.
+                opponent[:2]-=.01*np.array([np.cos(heading),np.sin(heading)])
+                ego=np.array([st[0]-.01*np.cos(st[4]),st[1]-.01*np.sin(st[4]),st[4]])
+                opponent_vertices=get_vertices(opponent,.60,.30)
+                free_map=getattr(self._env.unwrapped.track,'_free',None)
+                if free_map is not None:
+                    free,res,origin=free_map
+                    samples=np.vstack([opponent_vertices,(opponent_vertices+np.roll(opponent_vertices,-1,axis=0))/2])
+                    ij=np.floor((samples-origin[:2])/res).astype(int)
+                    inside=(ij[:,0]>=0)&(ij[:,0]<free.shape[1])&(ij[:,1]>=0)&(ij[:,1]<free.shape[0])
+                    if not inside.all() or not free[ij[inside,1],ij[inside,0]].all():self.traffic_wall_overlap_frames+=1
+                self.traffic_collision|=bool(collision(get_vertices(ego,.60,.30),opponent_vertices))
+                distance=float(np.linalg.norm(ego[:2]-opponent[:2]));self.traffic_min_distance=min(self.traffic_min_distance,distance)
+                if distance<10.5:
+                    car=self._env.unwrapped.sim.agents[0]
+                    laser_pose=np.array([st[0]+car.lidar_pos_offset*np.cos(st[4]),st[1]+car.lidar_pos_offset*np.sin(st[4]),st[4]])
+                    before=raw.copy();raw=ray_cast(laser_pose,raw,np.asarray(car.scan_angles),opponent_vertices)
+                    changed=int(np.sum(raw<before-1e-6));self.occluded_frames+=int(changed>0);self.occluded_beams+=changed
+            raw,speed=add_obs_noise(raw,float(obs_dict['linear_vels_x'][0]),self.noise_rng,self.obs_cfg,self.speed_scale,lidar_override=self.lidar_override)
+            self.shared_scan=raw.copy()
+            current=dict(obs_dict,scans=np.asarray(obs_dict['scans']).copy(),linear_vels_x=np.asarray(obs_dict['linear_vels_x']).copy())
+            current['scans'][0]=raw;current['linear_vels_x'][0]=speed
+            previous=self.obs_noise;self.obs_noise=False
+            try:return super().getObs(current,reset)
+            finally:self.obs_noise=previous
+    env = ScenarioWrapper(args, IL.MAPS, obs_noise=True, sim_mode='eval', tracks=[track])
     env.fixed_speed_cap = cli.cap
     env.start_mode = 'center'
     rows, transitions, recovery_event_truth, recovery_audit_truth = [], [], [], []
@@ -182,7 +251,7 @@ def main():
                 odom[2] = wrap(odom[2] + (.85 * yr + .02 + rng.normal(0, .02)) * dt)
                 odom[:2] += 1.03 * float(state[3]) * dt * np.array([np.cos(odom[2]), np.sin(odom[2])])
             previous_t, previous_yaw = now, float(state[4])
-            scan = np.asarray(info['obs_dict']['scans'][0], float)
+            scan = env.shared_scan.copy() if shared else np.asarray(info['obs_dict']['scans'][0], float)
             if cli.condition == 'wrong_pose_large' and now >= 3. and not injected:
                 pv.loc.pose += np.array([6., 2., 2.])
                 pv.loc.pose[2] = wrap(pv.loc.pose[2])
@@ -253,6 +322,19 @@ def main():
                 v = min(float(unnormalize_speed(action[1], args.min_speed, args.max_speed)), cli.cap, 4.)
                 applied[1] = normalize_speed(v, args.min_speed, args.max_speed)
             applied = np.clip(applied, -1, 1)
+            if cli.lidar_brake_envelope:
+                # Conservative stationary-obstacle stopping envelope, using
+                # sensor ranges only. Existing start-kick and minimum speed stay
+                # active; this is not a certified stop or deployment change.
+                front=np.asarray(scan)[np.abs(angles)<=np.radians(7.5)]
+                front=front[np.isfinite(front)&(front>.05)]
+                if len(front)>=3:
+                    distance=float(np.partition(front,2)[2])
+                    available=max(0.,distance-max(0.,.29-laser)-.30)
+                    brake,response=3.3,.20
+                    allowed=max(args.min_speed,-brake*response+np.sqrt((brake*response)**2+2*brake*available))
+                    requested=float(unnormalize_speed(applied[1],args.min_speed,args.max_speed))
+                    applied[1]=normalize_speed(min(requested,allowed),args.min_speed,args.max_speed)
             if fb != previous_fb:
                 transitions.append(dict(time=now, fallback=bool(fb), localizer_valid=bool(valid)))
             previous_fb = fb
@@ -263,6 +345,8 @@ def main():
             digest.update(applied.tobytes())
             digest.update(state.tobytes())
             obs, _, term, trunc, info = env.step(applied)
+            if shared and env.traffic_collision:
+                env.success=False;env.collision=True;term=True
             if term or trunc:
                 break
         data = np.asarray(rows, float)
@@ -275,6 +359,7 @@ def main():
         report = dict(status='complete', condition=cli.condition, fallback=cli.fallback,
             recovery_method=cli.recovery,
             return_confirm_seconds=cli.return_confirm,
+            lidar_brake_envelope=cli.lidar_brake_envelope,
             seed=cli.seed, cap=cli.cap, success=bool(env.success), collision=bool(env.collision),
             elapsed=float(env.elapsed), fault_triggered=injected, transitions=transitions,
             fallback_steps=int(data[:, 4].sum()), false_valid_scans=int(false_valid.sum()),
@@ -300,6 +385,16 @@ def main():
                 'not policy LiDAR. Off means primary-only, not production emergency-stop mode. '
                 'Simulator command conversion approximates car switch/history semantics; not ROS or actuator qualification. '
                 'Original simulator observation augmentation is retained; no extra raycasts/noise draws for policy sensors.'))
+        if shared:
+            report['shared_scan_scenario']=dict(actor_and_localizer_same_augmented_scan=True,
+                nominal_track=str(source),physical_track=track,nominal_map_sha256=sha(source),
+                physical_map_sha256=sha(track),opponent_start_fraction=cli.opponent_start_fraction,
+                opponent_cap=cli.opponent_cap,opponent_collision=bool(env.traffic_collision),
+                occluded_frames=int(env.occluded_frames),occluded_beams=int(env.occluded_beams),
+                opponent_wall_overlap_frames=int(env.traffic_wall_overlap_frames),
+                scenario_raster_valid=env.traffic_wall_overlap_frames==0,
+                minimum_center_distance_m=float(env.traffic_min_distance) if cli.opponent_start_fraction is not None else None,
+                qualification='Scripted kinematic same-direction traffic, bounded longitudinal response and raster-wall occlusion; actual ego dynamics and box-overlap collision. Opponent has no reactive policy or tire dynamics. Shared scan includes calibrated sensor augmentation once; exact nominal map/true initialization remain favorable assumptions. Synthetic preview noise is bypassed in this diagnostic; actual localizer supplies preview.')
         if cli.recovery == 'temporal':
             report['temporal_recovery'] = dict(search_delay_seconds=cli.search_delay,
                 max_hypotheses=pv.loc.max_hypotheses,

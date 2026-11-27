@@ -130,13 +130,13 @@ class JointProblem:
         constraints = [self.reserve**2-ellipse,self.reserve**2-ellipse_end,
                        (self.reserve**2*self.limits['steer']**2-steer**2)/self.limits['steer']**2,
                        (self.reserve**2*self.limits['rate']**2-rate**2)/self.limits['rate']**2,
-                       norm-.25*self.reference_norm,forward-.1]
+                       norm-(.26 if self.reserve<1 else .25)*self.reference_norm,forward-.1]
         if self.arrays is not None:
             body_reserve=.015 if self.reserve<1 else 0.
             constraints.append((self.body_clearance(p,tangent)-self.clearance-body_reserve)/.1)
         return dt.sum(), torch.cat(constraints)
 
-    def solve(self, initial_offset, maxiter=120, fixed=False):
+    def solve(self, initial_offset, maxiter=120, fixed=False,initial_q=None):
         start = time.time()
         initial_offset = np.clip(initial_offset,self.lower,self.upper)
         with torch.no_grad():
@@ -145,6 +145,9 @@ class JointProblem:
                            .7*self.limits['a_lat']/(np.abs(k.numpy())+1e-6))
         # Constant initial speed is feasible longitudinally, even in tight corners.
         q = np.full(self.m,max(self.limits['v_min']**2,float(q_cap.min())))
+        if initial_q is not None:
+            assert np.shape(initial_q)==(self.m,),'Warmstart speed-control grid mismatch'
+            q=np.clip(initial_q,self.limits['v_min']**2,self.limits['v_max']**2)
         x0 = np.r_[initial_offset,q]
         if fixed:
             with torch.no_grad():
@@ -295,14 +298,19 @@ def main():
     p.add_argument('--output-dir',required=True)
     p.add_argument('--tracks',nargs='*',default=[])
     p.add_argument('--spacing',type=float,default=.75)
+    p.add_argument('--anchor',choices=['center','stored'],default='center',help='Coordinate frame for free lateral path variables, not a restriction to a candidate path')
     p.add_argument('--max-knots',type=int,default=120,help='Limit dense NLP size on long circuits; reported approximation')
     p.add_argument('--samples',type=int,default=2,help='Squared-speed control knots per geometric knot')
     p.add_argument('--constraint-factor',type=int,default=6,help='Constraint sampling multiplier; independent of decision count')
     p.add_argument('--maxiter',type=int,default=120)
     p.add_argument('--clearance',type=float,default=.03)
-    p.add_argument('--starts',nargs='+',choices=['stored_geometry_control','joint_from_stored','joint_from_center'],
+    p.add_argument('--a-lat',type=float,default=6.,help='Planning hypothesis; not measured hardware grip')
+    p.add_argument('--constraint-reserve',type=float,default=.95)
+    p.add_argument('--warmstart',help='Previous candidate with exactly matched original map and geometry/speed knots')
+    p.add_argument('--starts',nargs='+',choices=['stored_geometry_control','joint_from_stored','joint_from_center','joint_warmstart'],
                    default=['stored_geometry_control','joint_from_stored','joint_from_center'])
     args=p.parse_args();os.chdir(SRC)
+    if not 0<args.constraint_reserve<1 or not args.a_lat>0:raise ValueError('Invalid planning bounds')
     dest=Path(args.output_dir).resolve()
     if (SRC/'installation') in dest.parents:raise ValueError('Offline results only')
     dest.mkdir(parents=True,exist_ok=False)
@@ -313,7 +321,7 @@ def main():
                              'Combined acceleration ellipse and a_lat=6 are planning hypotheses, not measured hardware limits.',
                              'Sampled signed-distance body constraints need independent dense/static and closed-loop validation.',
                              'The fixed stored control is a spline reconstruction, not an exact original path. Infeasibility does not prove the original path infeasible.',
-                             '2 percent force/steering reserve and 15mm body reserve are tested at 6x denser samples.',
+                             f'{100*(1-args.constraint_reserve):g}percent force/steering reserve and15mm body reserve tested at6x denser samples.',
                              'Parameterization derivative is bounded below by25 percent of the reference derivative to prevent nearly singular path parameterization.',
                              'Production preview and teacher do not yet consume exported speed/steering. No policy trained here.'])
     (dest/'report.json').write_text(json.dumps(report,indent=2)+'\n')
@@ -322,32 +330,55 @@ def main():
     for item in args.tracks:
         path=Path(item).resolve();source_hash=hashlib.sha256(path.read_bytes()).hexdigest()
         with np.load(path,allow_pickle=False) as z:arrays={k:z[k].copy() for k in z.files}
-        base=arrays['centerline'].astype(float)
+        nominal_center=arrays['centerline'].astype(float)
+        base=arrays['raceline'].astype(float) if args.anchor=='stored' else nominal_center
         length=float(np.linalg.norm(np.roll(base,-1,axis=0)-base,axis=1).sum())
         spacing=max(args.spacing,length/args.max_knots)
         c,_=resample_closed(base,spacing)
         _,normal=tangents_normals(c)
-        _,j=cKDTree(arrays['centerline']).query(c)
+        _,j=cKDTree(nominal_center).query(c)
         free=arrays['occupancy']>128
-        wl=np.minimum(arrays['w_left'][j],cast(free,float(arrays['resolution']),arrays['origin'][:2],c,normal,10.))
-        wr=np.minimum(arrays['w_right'][j],cast(free,float(arrays['resolution']),arrays['origin'][:2],c,-normal,10.))
+        wl=cast(free,float(arrays['resolution']),arrays['origin'][:2],c,normal,10.)
+        wr=cast(free,float(arrays['resolution']),arrays['origin'][:2],c,-normal,10.)
+        if args.anchor=='center':
+            wl=np.minimum(arrays['w_left'][j],wl);wr=np.minimum(arrays['w_right'][j],wr)
         # Body clearance enforced separately, these are broad center-position bounds.
         lo,hi=-(wr-.18),wl-.18
+        if args.anchor=='stored':
+            _,cn=tangents_normals(nominal_center)
+            shift=((c-nominal_center[j])*cn[j]).sum(1)
+            projection=(normal*cn[j]).sum(1)
+            reliable=np.abs(projection)>.2
+            left=(arrays['w_left'][j]-.18-shift)/np.where(reliable,projection,1.)
+            right=(-arrays['w_right'][j]+.18-shift)/np.where(reliable,projection,1.)
+            lo=np.maximum(lo,np.where(reliable,np.minimum(left,right),lo))
+            hi=np.minimum(hi,np.where(reliable,np.maximum(left,right),hi))
         if np.any(lo>hi):raise ValueError('Empty corridor')
-        limits=dict(v_min=.5,v_max=8.,a_lat=6.,a_acc=2.9,a_brake=3.7,wheelbase=.34,steer=.5,rate=2.65)
-        problem=JointProblem(c,normal,lo,hi,limits,arrays,args.samples,args.clearance,constraint_factor=args.constraint_factor)
+        limits=dict(v_min=.5,v_max=8.,a_lat=args.a_lat,a_acc=2.9,a_brake=3.7,wheelbase=.34,steer=.5,rate=2.65)
+        problem=JointProblem(c,normal,lo,hi,limits,arrays,args.samples,args.clearance,reserve=args.constraint_reserve,constraint_factor=args.constraint_factor)
         _,idx=cKDTree(arrays['raceline']).query(c)
         initial=((arrays['raceline'][idx]-c)*normal).sum(1)
+        warm_offset=warm_q=None
+        if args.warmstart:
+            with np.load(args.warmstart,allow_pickle=False) as z:
+                assert np.array_equal(z['centerline'],arrays['centerline']) and np.array_equal(z['occupancy'],arrays['occupancy']),'Warmstart source map mismatch'
+                assert z['joint_center'].shape==c.shape and np.allclose(z['joint_center'],c),'Warmstart geometry mismatch'
+                warm_offset=z['joint_offset'].copy();warm_q=z['joint_q_collocation'].copy()
+        if 'joint_warmstart' in args.starts and warm_offset is None:raise ValueError('joint_warmstart requires --warmstart')
         row=dict(source=str(path),source_sha256=source_hash,limits=limits,candidates={},
+                 coordinate_anchor=args.anchor,
+                 constraint_reserve=args.constraint_reserve,
                  geometry_knots=len(c),speed_knots=problem.m,constraint_points=problem.eval_m,
                  effective_geometry_spacing_m=spacing)
         # Matched fixed-geometry control, then full joint optimization; initial paths
         # do not restrict possible final shapes inside corridor/vehicle constraints.
         for name,offset,fixed in [('stored_geometry_control',initial,True),
                                   ('joint_from_stored',initial,False),
-                                  ('joint_from_center',np.zeros(len(c)),False)]:
+                                  ('joint_from_center',np.zeros(len(c)),False),
+                                  ('joint_warmstart',warm_offset,False)]:
             if name not in args.starts:continue
-            z,info=problem.solve(offset,maxiter=args.maxiter,fixed=fixed)
+            z,info=problem.solve(offset,maxiter=args.maxiter,fixed=fixed,
+                                 initial_q=warm_q if name=='joint_warmstart' else None)
             audit,xy,q,k=problem.dense_audit(z)
             xy,q,k,export_audit=problem.uniform_export(z)
             info['dense_audit']=audit

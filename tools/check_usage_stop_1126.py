@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read only current-thread quota metadata for the user's20percent stop rule.
+"""Read current-thread quota metadata against the user's configured stop threshold.
 
 Exit20 means save/checkpoint, stop work and pause the goal. Exit3 means unknown
 or stale; it never means quota is available. This tool does not pause any goal

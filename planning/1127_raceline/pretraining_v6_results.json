@@ -1,0 +1,562 @@
+{
+  "updated_utc": "2026-11-27T11:47:07.656835+00:00",
+  "status": "not_ready_for_learning",
+  "IL_PPO_started": false,
+  "user_stop_threshold_remaining_percent": 5,
+  "scope": "Preparation resumed per user; all work below is simulation/data/code preparation. No hardware operation or network training.",
+  "dense_reference_gates": {
+    "practice": {
+      "report": "src/f1tenth/results/joint_mintime_1127/tracking_margin015_v5/report.json",
+      "candidates": [
+        {
+          "name": "joint_from_center",
+          "passed": true,
+          "model_time_s": 7.1064018568422895
+        }
+      ]
+    },
+    "2025_example": {
+      "report": "src/f1tenth/results/joint_mintime_1127/course2025_dense_guard_v6/report.json",
+      "candidates": [
+        {
+          "name": "joint_warmstart",
+          "passed": true,
+          "model_time_s": 13.210571004525088
+        }
+      ]
+    },
+    "regular": {
+      "report": "src/f1tenth/results/joint_mintime_1127/regular_coarse_v6/report.json",
+      "candidates": [
+        {
+          "name": "joint_from_stored",
+          "passed": true,
+          "model_time_s": 38.74758665759655
+        }
+      ]
+    },
+    "open": {
+      "report": "src/f1tenth/results/joint_mintime_1127/open_dense_guard_v6/report.json",
+      "candidates": [
+        {
+          "name": "joint_warmstart",
+          "passed": true,
+          "model_time_s": 38.18815894493308
+        }
+      ]
+    },
+    "short": {
+      "report": "src/f1tenth/results/joint_mintime_1127/short_anchor_v7/report.json",
+      "candidates": [
+        {
+          "name": "joint_from_stored",
+          "passed": true,
+          "model_time_s": 8.875611639509625
+        }
+      ]
+    }
+  },
+  "closed_loop_results": {
+    "practice_alat65_v6/closed_loop.json": {
+      "scope": "Frozen actor, known training geometry; planning/profile/controller hypotheses, not learning",
+      "rows": [
+        {
+          "mode": "eval",
+          "variant": "joint_profile",
+          "controller": "policy",
+          "complete": 3,
+          "total": 3,
+          "mean_successful_two_lap_seconds": 16.4916666666668
+        },
+        {
+          "mode": "eval",
+          "variant": "joint_profile",
+          "controller": "expert",
+          "complete": 3,
+          "total": 3,
+          "mean_successful_two_lap_seconds": 16.433333333333465
+        },
+        {
+          "mode": "worst",
+          "variant": "joint_profile",
+          "controller": "policy",
+          "complete": 3,
+          "total": 3,
+          "mean_successful_two_lap_seconds": 17.6333333333334
+        },
+        {
+          "mode": "worst",
+          "variant": "joint_profile",
+          "controller": "expert",
+          "complete": 0,
+          "total": 3,
+          "mean_successful_two_lap_seconds": null
+        }
+      ]
+    },
+    "practice_alat65_v6/teacher_episode_adaptation.json": {
+      "scope": "Frozen actor, known training geometry; planning/profile/controller hypotheses, not learning",
+      "rows": [
+        {
+          "mode": "eval",
+          "variant": "joint_profile",
+          "controller": "expert",
+          "complete": 3,
+          "total": 3,
+          "mean_successful_two_lap_seconds": 16.433333333333465
+        },
+        {
+          "mode": "worst",
+          "variant": "joint_profile",
+          "controller": "expert",
+          "complete": 3,
+          "total": 3,
+          "mean_successful_two_lap_seconds": 17.683333333333398
+        }
+      ]
+    },
+    "course2025_dense_guard_v6/closed_loop.json": {
+      "scope": "Frozen actor, known training geometry; planning/profile/controller hypotheses, not learning",
+      "rows": [
+        {
+          "mode": "eval",
+          "variant": "joint_profile",
+          "controller": "policy",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 33.97499999999914
+        },
+        {
+          "mode": "eval",
+          "variant": "joint_profile",
+          "controller": "expert",
+          "complete": 0,
+          "total": 1,
+          "mean_successful_two_lap_seconds": null
+        },
+        {
+          "mode": "eval",
+          "variant": "source",
+          "controller": "policy",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 33.549999999999166
+        },
+        {
+          "mode": "eval",
+          "variant": "source",
+          "controller": "expert",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 32.02499999999925
+        },
+        {
+          "mode": "worst",
+          "variant": "joint_profile",
+          "controller": "policy",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 38.07499999999891
+        },
+        {
+          "mode": "worst",
+          "variant": "joint_profile",
+          "controller": "expert",
+          "complete": 0,
+          "total": 1,
+          "mean_successful_two_lap_seconds": null
+        },
+        {
+          "mode": "worst",
+          "variant": "source",
+          "controller": "policy",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 37.12499999999896
+        },
+        {
+          "mode": "worst",
+          "variant": "source",
+          "controller": "expert",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 35.474999999999056
+        }
+      ]
+    },
+    "regular_coarse_v6/closed_loop.json": {
+      "scope": "Frozen actor, known training geometry; planning/profile/controller hypotheses, not learning",
+      "rows": [
+        {
+          "mode": "eval",
+          "variant": "joint_profile",
+          "controller": "policy",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 97.47500000000504
+        },
+        {
+          "mode": "eval",
+          "variant": "joint_profile",
+          "controller": "expert",
+          "complete": 0,
+          "total": 1,
+          "mean_successful_two_lap_seconds": null
+        },
+        {
+          "mode": "eval",
+          "variant": "source",
+          "controller": "policy",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 93.90000000000423
+        },
+        {
+          "mode": "eval",
+          "variant": "source",
+          "controller": "expert",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 90.10000000000336
+        },
+        {
+          "mode": "worst",
+          "variant": "joint_profile",
+          "controller": "policy",
+          "complete": 0,
+          "total": 1,
+          "mean_successful_two_lap_seconds": null
+        },
+        {
+          "mode": "worst",
+          "variant": "joint_profile",
+          "controller": "expert",
+          "complete": 0,
+          "total": 1,
+          "mean_successful_two_lap_seconds": null
+        },
+        {
+          "mode": "worst",
+          "variant": "source",
+          "controller": "policy",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 103.9000000000065
+        },
+        {
+          "mode": "worst",
+          "variant": "source",
+          "controller": "expert",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 95.87500000000468
+        }
+      ]
+    },
+    "open_dense_guard_v6/closed_loop.json": {
+      "scope": "Frozen actor, known training geometry; planning/profile/controller hypotheses, not learning",
+      "rows": [
+        {
+          "mode": "eval",
+          "variant": "joint_profile",
+          "controller": "policy",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 95.05000000000449
+        },
+        {
+          "mode": "eval",
+          "variant": "joint_profile",
+          "controller": "expert",
+          "complete": 0,
+          "total": 1,
+          "mean_successful_two_lap_seconds": null
+        },
+        {
+          "mode": "eval",
+          "variant": "source",
+          "controller": "policy",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 92.72500000000396
+        },
+        {
+          "mode": "eval",
+          "variant": "source",
+          "controller": "expert",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 90.2500000000034
+        },
+        {
+          "mode": "worst",
+          "variant": "joint_profile",
+          "controller": "policy",
+          "complete": 0,
+          "total": 1,
+          "mean_successful_two_lap_seconds": null
+        },
+        {
+          "mode": "worst",
+          "variant": "joint_profile",
+          "controller": "expert",
+          "complete": 0,
+          "total": 1,
+          "mean_successful_two_lap_seconds": null
+        },
+        {
+          "mode": "worst",
+          "variant": "source",
+          "controller": "policy",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 102.30000000000614
+        },
+        {
+          "mode": "worst",
+          "variant": "source",
+          "controller": "expert",
+          "complete": 1,
+          "total": 1,
+          "mean_successful_two_lap_seconds": 95.80000000000466
+        }
+      ]
+    }
+  },
+  "traffic_localizer_results": {
+    "combined_hard_brake": {
+      "success": true,
+      "collision": false,
+      "elapsed": 27.94999999999948,
+      "false_valid_scans": 0,
+      "correct_valid_fraction": 1.0,
+      "fallback_steps": 0,
+      "shared_scan_scenario": {
+        "actor_and_localizer_same_augmented_scan": true,
+        "nominal_track": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+        "physical_track": "src/f1tenth/results/map_mismatch_1127/all_families_fine_v3/Practice1126b/warp_100_s947.npz",
+        "nominal_map_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+        "physical_map_sha256": "97647ba84f00c45d1052ab3ce7ba093bff07749456d366b9dd365f45df5e8b2d",
+        "opponent_start_fraction": 0.2,
+        "opponent_cap": 2.0,
+        "opponent_collision": false,
+        "occluded_frames": 1057,
+        "occluded_beams": 68091,
+        "opponent_wall_overlap_frames": 0,
+        "scenario_raster_valid": true,
+        "minimum_center_distance_m": 0.7297205115569693,
+        "qualification": "Scripted kinematic same-direction traffic, bounded longitudinal response and raster-wall occlusion; actual ego dynamics and box-overlap collision. Opponent has no reactive policy or tire dynamics. Shared scan includes calibrated sensor augmentation once; exact nominal map/true initialization remain favorable assumptions. Synthetic preview noise is bypassed in this diagnostic; actual localizer supplies preview."
+      }
+    },
+    "combined_hard_off": {
+      "success": false,
+      "collision": true,
+      "elapsed": 4.649999999999999,
+      "false_valid_scans": 0,
+      "correct_valid_fraction": 1.0,
+      "fallback_steps": 0,
+      "shared_scan_scenario": {
+        "actor_and_localizer_same_augmented_scan": true,
+        "nominal_track": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+        "physical_track": "src/f1tenth/results/map_mismatch_1127/all_families_fine_v3/Practice1126b/warp_100_s947.npz",
+        "nominal_map_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+        "physical_map_sha256": "97647ba84f00c45d1052ab3ce7ba093bff07749456d366b9dd365f45df5e8b2d",
+        "opponent_start_fraction": 0.2,
+        "opponent_cap": 2.0,
+        "opponent_collision": true,
+        "occluded_frames": 124,
+        "occluded_beams": 6202,
+        "opponent_wall_overlap_frames": 0,
+        "scenario_raster_valid": true,
+        "minimum_center_distance_m": 0.6161256956036132,
+        "qualification": "Scripted kinematic same-direction traffic, bounded longitudinal response and raster-wall occlusion; actual ego dynamics and box-overlap collision. Opponent has no reactive policy or tire dynamics. Shared scan includes calibrated sensor augmentation once; exact nominal map/true initialization remain favorable assumptions. Synthetic preview noise is bypassed in this diagnostic; actual localizer supplies preview."
+      }
+    },
+    "combined_loss_off": {
+      "success": false,
+      "collision": true,
+      "elapsed": 6.525000000000025,
+      "false_valid_scans": 0,
+      "correct_valid_fraction": 0.4904214559386973,
+      "fallback_steps": 0,
+      "shared_scan_scenario": {
+        "actor_and_localizer_same_augmented_scan": true,
+        "nominal_track": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+        "physical_track": "src/f1tenth/results/map_mismatch_1127/all_families_fine_v3/Practice1126b/warp_100_s947.npz",
+        "nominal_map_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+        "physical_map_sha256": "97647ba84f00c45d1052ab3ce7ba093bff07749456d366b9dd365f45df5e8b2d",
+        "opponent_start_fraction": 0.2,
+        "opponent_cap": 2.0,
+        "opponent_collision": false,
+        "occluded_frames": 198,
+        "occluded_beams": 14318,
+        "opponent_wall_overlap_frames": 0,
+        "scenario_raster_valid": true,
+        "minimum_center_distance_m": 0.7554590992203828,
+        "qualification": "Scripted kinematic same-direction traffic, bounded longitudinal response and raster-wall occlusion; actual ego dynamics and box-overlap collision. Opponent has no reactive policy or tire dynamics. Shared scan includes calibrated sensor augmentation once; exact nominal map/true initialization remain favorable assumptions. Synthetic preview noise is bypassed in this diagnostic; actual localizer supplies preview."
+      }
+    },
+    "combined_loss_on": {
+      "success": false,
+      "collision": true,
+      "elapsed": 10.025000000000075,
+      "false_valid_scans": 0,
+      "correct_valid_fraction": 0.5960099750623441,
+      "fallback_steps": 149,
+      "shared_scan_scenario": {
+        "actor_and_localizer_same_augmented_scan": true,
+        "nominal_track": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+        "physical_track": "src/f1tenth/results/map_mismatch_1127/all_families_fine_v3/Practice1126b/warp_100_s947.npz",
+        "nominal_map_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+        "physical_map_sha256": "97647ba84f00c45d1052ab3ce7ba093bff07749456d366b9dd365f45df5e8b2d",
+        "opponent_start_fraction": 0.2,
+        "opponent_cap": 2.0,
+        "opponent_collision": true,
+        "occluded_frames": 339,
+        "occluded_beams": 26012,
+        "opponent_wall_overlap_frames": 0,
+        "scenario_raster_valid": true,
+        "minimum_center_distance_m": 0.6258155540762399,
+        "qualification": "Scripted kinematic same-direction traffic, bounded longitudinal response and raster-wall occlusion; actual ego dynamics and box-overlap collision. Opponent has no reactive policy or tire dynamics. Shared scan includes calibrated sensor augmentation once; exact nominal map/true initialization remain favorable assumptions. Synthetic preview noise is bypassed in this diagnostic; actual localizer supplies preview."
+      }
+    },
+    "combined_seed7": {
+      "success": true,
+      "collision": false,
+      "elapsed": 16.650000000000123,
+      "false_valid_scans": 0,
+      "correct_valid_fraction": 1.0,
+      "fallback_steps": 0,
+      "shared_scan_scenario": {
+        "actor_and_localizer_same_augmented_scan": true,
+        "nominal_track": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+        "physical_track": "src/f1tenth/results/map_mismatch_1127/all_families_fine_v3/Practice1126b/warp_050_s731.npz",
+        "nominal_map_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+        "physical_map_sha256": "1f8effa79083bc19cdd18257ff599809cd5c3472aff213eea44ad5599eb39b48",
+        "opponent_start_fraction": 0.5,
+        "opponent_cap": 3.0,
+        "opponent_collision": false,
+        "occluded_frames": 203,
+        "occluded_beams": 3745,
+        "opponent_wall_overlap_frames": 0,
+        "scenario_raster_valid": true,
+        "minimum_center_distance_m": 2.208782614554284,
+        "qualification": "Scripted kinematic same-direction traffic, bounded longitudinal response and raster-wall occlusion; actual ego dynamics and box-overlap collision. Opponent has no reactive policy or tire dynamics. Shared scan includes calibrated sensor augmentation once; exact nominal map/true initialization remain favorable assumptions. Synthetic preview noise is bypassed in this diagnostic; actual localizer supplies preview."
+      }
+    },
+    "control_brake": {
+      "success": true,
+      "collision": false,
+      "elapsed": 17.300000000000086,
+      "false_valid_scans": 0,
+      "correct_valid_fraction": 1.0,
+      "fallback_steps": 0,
+      "shared_scan_scenario": {
+        "actor_and_localizer_same_augmented_scan": true,
+        "nominal_track": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+        "physical_track": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+        "nominal_map_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+        "physical_map_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+        "opponent_start_fraction": null,
+        "opponent_cap": 3.0,
+        "opponent_collision": false,
+        "occluded_frames": 0,
+        "occluded_beams": 0,
+        "opponent_wall_overlap_frames": 0,
+        "scenario_raster_valid": true,
+        "minimum_center_distance_m": null,
+        "qualification": "Scripted kinematic same-direction traffic, bounded longitudinal response and raster-wall occlusion; actual ego dynamics and box-overlap collision. Opponent has no reactive policy or tire dynamics. Shared scan includes calibrated sensor augmentation once; exact nominal map/true initialization remain favorable assumptions. Synthetic preview noise is bypassed in this diagnostic; actual localizer supplies preview."
+      }
+    },
+    "control_seed7": {
+      "success": true,
+      "collision": false,
+      "elapsed": 16.575000000000127,
+      "false_valid_scans": 0,
+      "correct_valid_fraction": 1.0,
+      "fallback_steps": 0,
+      "shared_scan_scenario": {
+        "actor_and_localizer_same_augmented_scan": true,
+        "nominal_track": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+        "physical_track": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+        "nominal_map_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+        "physical_map_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+        "opponent_start_fraction": null,
+        "opponent_cap": 3.0,
+        "opponent_collision": false,
+        "occluded_frames": 0,
+        "occluded_beams": 0,
+        "minimum_center_distance_m": null,
+        "qualification": "Scripted kinematic same-direction traffic, bounded longitudinal response and raster-wall occlusion; actual ego dynamics and box-overlap collision. Opponent has no reactive policy or tire dynamics. Shared scan includes calibrated sensor augmentation once; exact nominal map/true initialization remain favorable assumptions. Synthetic preview noise is bypassed in this diagnostic; actual localizer supplies preview."
+      }
+    },
+    "drift_seed7": {
+      "success": true,
+      "collision": false,
+      "elapsed": 16.575000000000127,
+      "false_valid_scans": 0,
+      "correct_valid_fraction": 1.0,
+      "fallback_steps": 0,
+      "shared_scan_scenario": {
+        "actor_and_localizer_same_augmented_scan": true,
+        "nominal_track": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+        "physical_track": "src/f1tenth/results/map_mismatch_1127/all_families_fine_v3/Practice1126b/warp_050_s731.npz",
+        "nominal_map_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+        "physical_map_sha256": "1f8effa79083bc19cdd18257ff599809cd5c3472aff213eea44ad5599eb39b48",
+        "opponent_start_fraction": null,
+        "opponent_cap": 3.0,
+        "opponent_collision": false,
+        "occluded_frames": 0,
+        "occluded_beams": 0,
+        "opponent_wall_overlap_frames": 0,
+        "scenario_raster_valid": true,
+        "minimum_center_distance_m": null,
+        "qualification": "Scripted kinematic same-direction traffic, bounded longitudinal response and raster-wall occlusion; actual ego dynamics and box-overlap collision. Opponent has no reactive policy or tire dynamics. Shared scan includes calibrated sensor augmentation once; exact nominal map/true initialization remain favorable assumptions. Synthetic preview noise is bypassed in this diagnostic; actual localizer supplies preview."
+      }
+    },
+    "traffic_seed7": {
+      "success": true,
+      "collision": false,
+      "elapsed": 16.650000000000123,
+      "false_valid_scans": 0,
+      "correct_valid_fraction": 1.0,
+      "fallback_steps": 0,
+      "shared_scan_scenario": {
+        "actor_and_localizer_same_augmented_scan": true,
+        "nominal_track": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+        "physical_track": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+        "nominal_map_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+        "physical_map_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+        "opponent_start_fraction": 0.5,
+        "opponent_cap": 3.0,
+        "opponent_collision": false,
+        "occluded_frames": 201,
+        "occluded_beams": 3749,
+        "opponent_wall_overlap_frames": 0,
+        "scenario_raster_valid": true,
+        "minimum_center_distance_m": 2.200552191319495,
+        "qualification": "Scripted kinematic same-direction traffic, bounded longitudinal response and raster-wall occlusion; actual ego dynamics and box-overlap collision. Opponent has no reactive policy or tire dynamics. Shared scan includes calibrated sensor augmentation once; exact nominal map/true initialization remain favorable assumptions. Synthetic preview noise is bypassed in this diagnostic; actual localizer supplies preview."
+      }
+    }
+  },
+  "remaining_blockers": [
+    "Joint reference package fails broad teacher tracking; regular/open worst-policy runs regress. Keep existing references/models as baselines.",
+    "Only representative tracks were optimized, not all1113 training maps. Whole training reference coverage remains incomplete.",
+    "Actual training consumers/environment do not yet use the experimental trajectory, traffic and stale-map pipeline; benchmark integration is not training integration.",
+    "Dynamic following needs explicit training scenarios and a validated expert/safety mechanism; current source actor collides with close traffic despite correct localization.",
+    "Finalize paired datasets, normalization, reward/teacher interface audit and guarded launch only after these failures are resolved.",
+    "Final pre-training report and explicit user start are still required before IL/PPO."
+  ],
+  "interpretation": "Useful preparation advances and diagnosed failures, not a newly trained or globally qualified faster policy.",
+  "findings": [
+    "All five map families now have a dense-feasible representative using the generic solver; this alone does not qualify closed-loop use.",
+    "With a6.5 planning hypothesis, Practice frozen policy completes3/3 nominal and3/3 worst; teacher also completes3/3 each after episode grip/accel/brake adaptation is restored. Not a measured hardware grip limit.",
+    "Mild half-lap-separated traffic and5cm wall displacement examples complete with actual scan localization; this single-seed favorable-start result does not certify general SLAM robustness.",
+    "Close traffic collides while localization remains correct. A sensor-only braking-envelope diagnostic avoids the tested collision, at substantial pace cost. Do not adopt it as final racing behavior.",
+    "The .1m drift plus estimator-only scan-loss diagnostic still fails with or without fallback; fallback-on survives longer but eventually collides."
+  ],
+  "processes": {
+    "all_current_preparation_sessions": "Verified terminal0; superseded short center-frame attempt95851 deliberately stopped130 after stored-anchor alternative passed.",
+    "PPO30_checkpoint_sha256": "28ce09301a6013ffdca87a3dbdd25737fed21feca608f7cf263e5255ab30d7f7"
+  }
+}

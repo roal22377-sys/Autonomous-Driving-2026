@@ -32,6 +32,7 @@ def main():
     ap.add_argument('--variants',nargs='+',choices=['source','geometry_only','speed_only','curvature_only','joint_profile'],default=['source','geometry_only','joint_profile'])
     ap.add_argument('--controllers',nargs='+',choices=['policy','expert'],default=['policy','expert'])
     ap.add_argument('--heading-merge-gate',action='store_true',help='Offline teacher diagnostic: reduce speed during path-heading mismatch; not production adoption')
+    ap.add_argument('--teacher-episode-limits',action='store_true',help='Retain privileged teacher adaptation to episode grip/acceleration/braking when loading a nominal profile')
     cli=ap.parse_args();os.chdir(SRC)
     import numpy as np
     import torch
@@ -68,6 +69,7 @@ def main():
     rms=RunningMeanStd('agent_obs',args.obs_dim);rms.load(f'results/{cli.model}/sim2real',required=True)
     result=dict(status='running',source_report_sha256=sha(cli.report),checkpoint_sha256=sha(ckpath),
                 teacher_heading_merge_gate=cli.heading_merge_gate,
+                teacher_episode_limits=cli.teacher_episode_limits,
                 training_started=False,runs=[],qualification='Known training-map closed-loop diagnostic. Frozen actor and privileged teacher; not trained improvement or broad qualification.')
     for row,name,c,a,static in accepted:
         xy=a['raceline'].astype(float);speed=a['joint_speed'].astype(float)
@@ -107,7 +109,14 @@ def main():
                                     if variant in ('speed_only','joint_profile'):
                                         assert planner.n==len(speed)
                                         assert np.allclose(planner.xy,xy,atol=1e-5)
-                                        planner.v_profile=np.minimum(speed,env.speed_cap)
+                                        scale=1.
+                                        if cli.teacher_episode_limits:
+                                            ratios=[float(env.params['mu'])/float(args.mu),
+                                                    float(env.params['a_max'])/float(row['limits']['a_acc']),
+                                                    float(env.a_brake)/float(row['limits']['a_brake']),1.]
+                                            scale=float(np.sqrt(max(0.,min(ratios))))
+                                        planner.v_profile=np.minimum(speed*scale,env.speed_cap)
+                                        env.teacher_profile_scale=scale
                                 metrics=DrivingMetrics();trace=[]
                                 while True:
                                     if controller=='expert':
@@ -132,6 +141,7 @@ def main():
                                     mode=mode,seed=seed,cap=cap,controller=controller,complete=bool(env.success),
                                     elapsed=float(env.elapsed),metrics=metrics.result(),static_screen=static,
                                     profile_override=variant in ('speed_only','curvature_only','joint_profile'),preview_audit=env.__dict__.get('profile_audit'))
+                                record['teacher_profile_scale']=env.__dict__.get('teacher_profile_scale')
                                 trace_dir=output.parent/(output.stem+'_traces');trace_dir.mkdir(exist_ok=True)
                                 trace_path=trace_dir/f'{len(result["runs"]):04d}.npz'
                                 np.savez_compressed(trace_path,trace=np.asarray(trace))
