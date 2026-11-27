@@ -43,14 +43,17 @@ def main():
     p.add_argument('--run', type=int, default=28)
     p.add_argument('--control', type=int, default=27)
     p.add_argument('--update', type=int, required=True)
+    p.add_argument('--control_update', type=int)
     p.add_argument('--output', required=True)
     cli = p.parse_args()
     out = Path(cli.output)
     if out.exists():
         raise FileExistsError('Preserve previous phase review')
     base = SRC / 'results/ppo_s2r'
-    now, control = [completed_row(base / str(n) / 'train_log.pkl', cli.update)
-                    for n in (cli.run, cli.control)]
+    control_update = cli.update if cli.control_update is None else cli.control_update
+    control_label = 'same_update_control' if control_update == cli.update else 'historical_control'
+    now = completed_row(base / str(cli.run) / 'train_log.pkl', cli.update)
+    control = completed_row(base / str(cli.control) / 'train_log.pkl', control_update)
     if now['evaluation_seed_base'] != 7 or control['evaluation_seed_base'] != 7:
         raise ValueError('Unexpected fixed seed schedule')
     source_path = SRC / 'results/analysis1126/ppo25_u70_full_family_reference.json'
@@ -61,8 +64,8 @@ def main():
     result = {}
     for family, reference in source['families'].items():
         _, key, _ = COHORTS[family]
-        result[family] = dict(vs_source_u70=compare(now[key], reference['res']),
-                             vs_same_update_control=compare(now[key], control[key]))
+        result[family] = dict(vs_source_u70=compare(now[key], reference['res']))
+        result[family]['vs_' + control_label] = compare(now[key], control[key])
     report = dict(status='complete_read_only', run=cli.run, control=cli.control, update=cli.update,
         checkpoint_sha256=digest(base / str(cli.run) / 'checkpoint' / ('model_%s.pt' % now['step'])),
         source_reference_sha256=digest(source_path), protocol=PROTOCOL, families=result,
@@ -74,6 +77,9 @@ def main():
                        'Steer weave uses commanded action*nominal steering lock, not measured wheel '
                        'motion. Reference-line offset is not an optimal-raceline objective. This '
                        'diagnostic cannot override completion/lap-time selection or qualify hardware.'))
+    if control_update != cli.update:
+        report['historical_control_update'] = control_update
+        report['qualification'] += ' Historical control uses a different training update, not an equal-budget causal comparison.'
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, allow_nan=False) + '\n')
     for family, row in result.items():

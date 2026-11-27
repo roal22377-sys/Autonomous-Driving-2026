@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--run', type=int, default=28)
     parser.add_argument('--control', type=int, default=27)
     parser.add_argument('--update', required=True, type=int)
+    parser.add_argument('--control_update', type=int)
     parser.add_argument('--output', required=True)
     cli = parser.parse_args()
     os.chdir(SRC)
@@ -45,8 +46,9 @@ def main():
         raise ValueError('Diagnostic split/normalization differs from the production cache')
     with np.load(cache_path, allow_pickle=False) as z:
         families = z['family'].copy()
+    control_update = cli.update if cli.control_update is None else cli.control_update
     sources = dict(source_u70=Path('results/ppo_s2r/25/checkpoint/model_3080000.pt'),
-        control=Path('results/ppo_s2r/%d/checkpoint/model_%d.pt' % (cli.control, cli.update * 44000)),
+        control=Path('results/ppo_s2r/%d/checkpoint/model_%d.pt' % (cli.control, control_update * 44000)),
         candidate=Path('results/ppo_s2r/%d/checkpoint/model_%d.pt' % (cli.run, cli.update * 44000)))
     if not all(path.is_file() for path in sources.values()):
         raise FileNotFoundError('Wait for the complete checkpoint evaluation; no partial policy substitution')
@@ -82,6 +84,9 @@ def main():
                        'are only a supervised-fit diagnostic, never unseen-track validation. Lower MSE '
                        'does not establish better steering dynamics, completion, or lap time. '
                        'No optimizer step, environment rollout, or live learner mutation.'))
+    if control_update != cli.update:
+        report['historical_control_update'] = control_update
+        report['qualification'] += ' Control is a historical checkpoint from a different update, not a same-budget causal comparison.'
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, allow_nan=False) + '\n')
     for label, row in results.items():

@@ -48,6 +48,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run', type=int, choices=[28, 29], default=28)
     parser.add_argument('--update', required=True, type=int)
+    parser.add_argument('--control_update', type=int,
+                        help='Explicit historical checkpoint; never labelled a same-update control')
     parser.add_argument('--output', required=True)
     cli = parser.parse_args()
     out = Path(cli.output)
@@ -85,8 +87,10 @@ def main():
     if (launch['retention_manifest_sha256'] != sha(manifest_path)
             or launch['retention_cache_sha256'] != manifest['cache_sha256']):
         raise ValueError('Retention lineage differs from the launch')
-    now, control = [completed_row(base / str(n) / 'train_log.pkl', cli.update)
-                    for n in (candidate_run, control_run)]
+    control_update = cli.update if cli.control_update is None else cli.control_update
+    control_label = 'same_update_control' if control_update == cli.update else 'historical_control'
+    now = completed_row(base / str(candidate_run) / 'train_log.pkl', cli.update)
+    control = completed_row(base / str(control_run) / 'train_log.pkl', control_update)
     source_row = completed_row(base / '25/train_log.pkl', 70)
     source_path = SRC / 'results/analysis1126/ppo25_u70_full_family_reference.json'
     source = json.loads(source_path.read_text())
@@ -134,8 +138,8 @@ def main():
                 or abs(source_successes / count - source_row[rate_key]) > 1e-9):
             raise ValueError('Cohort/count mismatch: ' + group)
         row = dict(candidate_completed=successes, total=count,
-                   source_completed=source_successes, control_completed=old_successes,
-                   vs_same_update_control=matched(rows, old))
+                   source_completed=source_successes, control_completed=old_successes)
+        row['vs_' + control_label] = matched(rows, old)
         for label, families in references.items():
             if group in families:
                 row['vs_' + label] = matched(rows, families[group]['res'])
@@ -146,14 +150,14 @@ def main():
                                     if rows_key in source_row else None)
         if group == 'worst' and restored_worst is not None:
             row['vs_source_u70'] = matched(rows, restored_worst)
-        row['per_cap_comparisons'] = dict(same_update_control=per_cap_comparison(rows, old))
+        row['per_cap_comparisons'] = {control_label: per_cap_comparison(rows, old)}
         for label, families in references.items():
             if group in families:
                 row['per_cap_comparisons'][label] = per_cap_comparison(rows, families[group]['res'])
         if group == 'worst' and restored_worst is not None:
             row['per_cap_comparisons']['source_u70'] = per_cap_comparison(rows, restored_worst)
         cohorts[group] = row
-    references['same_update_control'] = control_families
+    references[control_label] = control_families
     comparisons = {label: choose_families(current, families, args['training_mix'])
                    for label, families in references.items()}
     regressions = [g for g in ('worst', 'lost_short', 'lost_general')
@@ -192,6 +196,12 @@ def main():
                        'measures this seed-specific experiment, not statistical significance. '
                        'Passing fixed cohorts does not qualify unseen layouts, correct localization '
                        'recovery, or real-car performance. No checkpoint is promoted by this tool.'))
+    if control_update != cli.update:
+        report['historical_control'] = dict(run=control_run, update=control_update,
+            checkpoint_sha256=sha(base / str(control_run) / 'checkpoint' / ('model_%s.pt' % control['step'])))
+        report['qualification'] = report['qualification'].replace(
+            'Same-update control measures this seed-specific experiment, not statistical significance.',
+            'Historical control uses a different training update; it is a matched driving reference, not a same-budget causal comparison.')
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, allow_nan=False) + '\n')
     print(json.dumps(comparisons, indent=2))
