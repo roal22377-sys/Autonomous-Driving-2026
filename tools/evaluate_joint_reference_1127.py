@@ -33,6 +33,8 @@ def main():
     ap.add_argument('--controllers',nargs='+',choices=['policy','expert'],default=['policy','expert'])
     ap.add_argument('--heading-merge-gate',action='store_true',help='Offline teacher diagnostic: reduce speed during path-heading mismatch; not production adoption')
     ap.add_argument('--teacher-episode-limits',action='store_true',help='Retain privileged teacher adaptation to episode grip/acceleration/braking when loading a nominal profile')
+    ap.add_argument('--teacher-controller',choices=['pure_pursuit','feedforward_feedback'],default='pure_pursuit',help='Offline diagnostic only; no car or production teacher change')
+    ap.add_argument('--teacher-lad-off-gain',type=float,default=None,help='Offline teacher diagnostic: add lookahead in proportion to lateral line error; production default remains unchanged')
     cli=ap.parse_args();os.chdir(SRC)
     import numpy as np
     import torch
@@ -70,6 +72,8 @@ def main():
     result=dict(status='running',source_report_sha256=sha(cli.report),checkpoint_sha256=sha(ckpath),
                 teacher_heading_merge_gate=cli.heading_merge_gate,
                 teacher_episode_limits=cli.teacher_episode_limits,
+                teacher_controller=cli.teacher_controller,
+                teacher_lad_off_gain=cli.teacher_lad_off_gain,
                 training_started=False,runs=[],qualification='Known training-map closed-loop diagnostic. Frozen actor and privileged teacher; not trained improvement or broad qualification.')
     for row,name,c,a,static in accepted:
         xy=a['raceline'].astype(float);speed=a['joint_speed'].astype(float)
@@ -106,6 +110,10 @@ def main():
                                         v_min=env.min_speed,v_max=env.speed_cap,max_steer=env.max_steer,
                                         max_steer_left=env.steer_left_max,max_steer_right=env.steer_right_max,
                                         **il.expert_kwargs(env))
+                                    if cli.teacher_lad_off_gain is not None:
+                                        planner.lad_off_gain=cli.teacher_lad_off_gain
+                                    from utils.raceline import curvature_smooth
+                                    planner.feedback_curvature=(curvature if variant!='source' else curvature_smooth(planner.xy,span=.5))
                                     if variant in ('speed_only','joint_profile'):
                                         assert planner.n==len(speed)
                                         assert np.allclose(planner.xy,xy,atol=1e-5)
@@ -121,6 +129,24 @@ def main():
                                 while True:
                                     if controller=='expert':
                                         sq,vq=env.pending_commands();v,d=planner.plan(env.vehicle_state(),sq,vq,env.timestep)
+                                        if cli.teacher_controller=='feedforward_feedback':
+                                            state=env.vehicle_state()
+                                            px,py,yaw,pv=planner.predict(state,sq,vq,env.timestep)
+                                            i=planner.last_index
+                                            tangent=planner.xy[(i+1)%planner.n]-planner.xy[(i-1)%planner.n]
+                                            desired_yaw=np.arctan2(tangent[1],tangent[0])
+                                            ey=-np.sin(desired_yaw)*(px-planner.xy[i,0])+np.cos(desired_yaw)*(py-planner.xy[i,1])
+                                            motion_yaw=yaw+float(state[6])
+                                            epsi=(desired_yaw-motion_yaw+np.pi)%(2*np.pi)-np.pi
+                                            # Small-error bicycle poles: damping .9,
+                                            # natural frequency2.5rad/s. Test, not a
+                                            # stability claim for the slipping plant.
+                                            speed_scale=max(pv,1.);wb=planner.wheelbase
+                                            kh=2*.9*2.5*wb/speed_scale
+                                            ke=2.5**2*wb/speed_scale
+                                            ff=np.arctan(wb*planner.feedback_curvature[i])
+                                            d=float(np.clip(ff+kh*epsi-np.arctan(ke*ey/speed_scale),-planner.max_steer_right,planner.max_steer_left))
+                                            planner._last_cmd=(d,v)
                                         if cli.heading_merge_gate:
                                             _,_,yaw,_=planner.predict(env.vehicle_state(),sq,vq,env.timestep)
                                             i=planner.last_index
