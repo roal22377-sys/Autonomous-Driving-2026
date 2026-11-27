@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-27T10:56:58.498495+00:00",
+  "updated_utc": "2026-11-27T11:02:10.439813+00:00",
   "phase": "Experimental reference planner redesign and robustness data preparation; PPO is not running.",
   "local_training_branch": "codex/1126-hairpin-position-ppo",
   "publication_branch": "codex/1127-raceline-robustness",
@@ -18,5 +18,13 @@
   "performance_claim": "No new lap-time/completion improvement claimed from this work. Planning proxy times are not simulator or real-car lap times.",
   "large_artifacts": "Model weights, optimizer checkpoints, replay arrays and generated maps remain local; reproduction needs the source data paths and environment described in the plan.",
   "quota_rule": "Stop work and jobs when fresh 5h usage remaining drops below20%.",
-  "reports": "planning/1127_raceline/"
+  "reports": "planning/1127_raceline/",
+  "publication": {
+    "status": "blocked_not_uploaded",
+    "github_app_error": "403 Resource not accessible by integration on git blob creation",
+    "git_push_error": "Could not resolve host github.com in the execution environment",
+    "local_commit": "8945f6bc3766c49be2863ee6845317ef010d500b",
+    "destination": "https://github.com/roal22377-sys/Autonomous-Driving-2026/tree/codex/1127-raceline-robustness",
+    "destination_exists": false
+  }
 }

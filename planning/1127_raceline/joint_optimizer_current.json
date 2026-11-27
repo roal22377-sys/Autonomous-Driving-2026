@@ -16,7 +16,80 @@
     },
     "objective_gradient_max_absolute_error": 2.98465072101628e-11
   },
-  "tracks": [],
+  "tracks": [
+    {
+      "source": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+      "source_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+      "limits": {
+        "v_min": 0.5,
+        "v_max": 8.0,
+        "a_lat": 6.0,
+        "a_acc": 2.9,
+        "a_brake": 3.7,
+        "wheelbase": 0.34,
+        "steer": 0.5,
+        "rate": 2.65
+      },
+      "candidates": {
+        "stored_geometry_control": {
+          "solver_success": false,
+          "message": "Fixed spline reconstruction exceeds steering bound; speed cannot repair geometry.",
+          "iterations": 0,
+          "seconds": 0.0010571479797363281,
+          "maximum_kinematic_steering_rad": 1.1358560832668894,
+          "model_lap_time_s": 36.44654555328762,
+          "minimum_scaled_constraint": -17.620781818323426,
+          "collocation_feasible": false,
+          "dense_audit": {
+            "model_lap_time_s": 36.446559059949394,
+            "minimum_scaled_constraint": -22.665366995480912,
+            "feasible": false,
+            "minimum_sampled_body_clearance_m": 0.34092604011014616
+          },
+          "eligible_for_closed_loop_review": false,
+          "path": "src/f1tenth/results/joint_mintime_1127/pilot_v3/Practice1126b/stored_geometry_control/track.npz"
+        },
+        "joint_from_stored": {
+          "solver_success": true,
+          "message": "Optimization terminated successfully",
+          "iterations": 111,
+          "seconds": 345.39332342147827,
+          "feasibility_warmstart_squared_violation": 9.569611125946048e-18,
+          "returned_best_feasible": false,
+          "model_lap_time_s": 7.164601718540206,
+          "minimum_scaled_constraint": -5.296226790463265e-10,
+          "collocation_feasible": true,
+          "dense_audit": {
+            "model_lap_time_s": 7.164344502951982,
+            "minimum_scaled_constraint": -0.47801697718094355,
+            "feasible": false,
+            "minimum_sampled_body_clearance_m": 0.025023187041199657
+          },
+          "eligible_for_closed_loop_review": false,
+          "path": "src/f1tenth/results/joint_mintime_1127/pilot_v3/Practice1126b/joint_from_stored/track.npz"
+        },
+        "joint_from_center": {
+          "solver_success": true,
+          "message": "Optimization terminated successfully",
+          "iterations": 108,
+          "seconds": 353.4946665763855,
+          "feasibility_warmstart_squared_violation": 2.174767353187585e-24,
+          "returned_best_feasible": false,
+          "model_lap_time_s": 7.164601718523702,
+          "minimum_scaled_constraint": -2.733713255764769e-10,
+          "collocation_feasible": true,
+          "dense_audit": {
+            "model_lap_time_s": 7.164344504372451,
+            "minimum_scaled_constraint": -0.47801404342454934,
+            "feasible": false,
+            "minimum_sampled_body_clearance_m": 0.02502327233513141
+          },
+          "eligible_for_closed_loop_review": false,
+          "path": "src/f1tenth/results/joint_mintime_1127/pilot_v3/Practice1126b/joint_from_center/track.npz"
+        }
+      }
+    }
+  ],
   "model": "quasi-steady spline path / longitudinal energy balance",
   "limitations": [
     "No global optimum certificate. No tire-slip or actuator-delay dynamics.",
@@ -27,8 +100,8 @@
     "Production preview and teacher do not yet consume exported speed/steering. No policy trained here."
   ],
   "in_progress_track": {
-    "source": "src/f1tenth/installation/maps_real/Practice1126b.npz",
-    "source_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+    "source": "src/f1tenth/installation/maps_hall/Course2025_s57_w3025.npz",
+    "source_sha256": "473acb1ec1a6c45fddb2737fde0d5f5a3495cdd2e0bea54abb3fe0019abc4a72",
     "limits": {
       "v_min": 0.5,
       "v_max": 8.0,
@@ -44,38 +117,19 @@
         "solver_success": false,
         "message": "Fixed spline reconstruction exceeds steering bound; speed cannot repair geometry.",
         "iterations": 0,
-        "seconds": 0.0010571479797363281,
-        "maximum_kinematic_steering_rad": 1.1358560832668894,
-        "model_lap_time_s": 36.44654555328762,
-        "minimum_scaled_constraint": -17.620781818323426,
+        "seconds": 0.0010988712310791016,
+        "maximum_kinematic_steering_rad": 0.5240679055422478,
+        "model_lap_time_s": 34.224709156569105,
+        "minimum_scaled_constraint": -0.1381886784777535,
         "collocation_feasible": false,
         "dense_audit": {
-          "model_lap_time_s": 36.446559059949394,
-          "minimum_scaled_constraint": -22.665366995480912,
+          "model_lap_time_s": 34.224715470431526,
+          "minimum_scaled_constraint": -0.1034340734885153,
           "feasible": false,
-          "minimum_sampled_body_clearance_m": 0.34092604011014616
+          "minimum_sampled_body_clearance_m": 0.31397303565126106
         },
         "eligible_for_closed_loop_review": false,
-        "path": "src/f1tenth/results/joint_mintime_1127/pilot_v3/Practice1126b/stored_geometry_control/track.npz"
-      },
-      "joint_from_stored": {
-        "solver_success": true,
-        "message": "Optimization terminated successfully",
-        "iterations": 111,
-        "seconds": 345.39332342147827,
-        "feasibility_warmstart_squared_violation": 9.569611125946048e-18,
-        "returned_best_feasible": false,
-        "model_lap_time_s": 7.164601718540206,
-        "minimum_scaled_constraint": -5.296226790463265e-10,
-        "collocation_feasible": true,
-        "dense_audit": {
-          "model_lap_time_s": 7.164344502951982,
-          "minimum_scaled_constraint": -0.47801697718094355,
-          "feasible": false,
-          "minimum_sampled_body_clearance_m": 0.025023187041199657
-        },
-        "eligible_for_closed_loop_review": false,
-        "path": "src/f1tenth/results/joint_mintime_1127/pilot_v3/Practice1126b/joint_from_stored/track.npz"
+        "path": "src/f1tenth/results/joint_mintime_1127/pilot_v3/Course2025_s57_w3025/stored_geometry_control/track.npz"
       }
     }
   }
