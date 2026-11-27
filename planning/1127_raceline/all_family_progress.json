@@ -1,0 +1,100 @@
+{
+  "status": "preparing",
+  "training_started": false,
+  "manifest_sha256": "dc9017ecfbd3109e16b2c42d413928df95e013c3f78db33980beb6cb93b81aa6",
+  "optimizer_sha256": "fbc23bd313e3c5eb2f79c5f99baa4b0fa60cce9b20db5c526ed52373d383a595",
+  "selected_tracks": [
+    {
+      "path": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+      "relative_path": "installation/maps_real/Practice1126b.npz",
+      "family": "real",
+      "role": "train",
+      "sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+      "length_m": 33.87648752919097,
+      "direction": "forward"
+    },
+    {
+      "path": "src/f1tenth/installation/maps_hall/Course2025_s57_w3025.npz",
+      "relative_path": "installation/maps_hall/Course2025_s57_w3025.npz",
+      "family": "hall",
+      "role": "train",
+      "sha256": "473acb1ec1a6c45fddb2737fde0d5f5a3495cdd2e0bea54abb3fe0019abc4a72",
+      "length_m": 56.65576939586436,
+      "direction": "forward"
+    },
+    {
+      "path": "src/f1tenth/installation/maps_short/Rand504_rev_s50_w504.npz",
+      "relative_path": "installation/maps_short/Rand504_rev_s50_w504.npz",
+      "family": "short",
+      "role": "train",
+      "sha256": "c56cfd835c44681e88c333a7397aa467186b200edb77e084d04fc142563c307f",
+      "length_m": 50.59119804487227,
+      "direction": "reverse"
+    },
+    {
+      "path": "src/f1tenth/installation/maps_gen/Oschersleben_rev.npz",
+      "relative_path": "installation/maps_gen/Oschersleben_rev.npz",
+      "family": "regular",
+      "role": "train",
+      "sha256": "7ff7d3a1b7560b98b9244dc0b9bb8d979fd5a7aed854d1813b387e7d374d8be7",
+      "length_m": 260.744007466933,
+      "direction": "reverse"
+    },
+    {
+      "path": "src/f1tenth/installation/maps_open_train/Oschersleben_rev_w200.npz",
+      "relative_path": "installation/maps_open_train/Oschersleben_rev_w200.npz",
+      "family": "open",
+      "role": "train",
+      "sha256": "280188b2d2b7413917d74ed1529156a35d474fc08a9eb3ad79704701e433f1be",
+      "length_m": 260.744007466933,
+      "direction": "reverse"
+    }
+  ],
+  "jobs": [
+    {
+      "source": "src/f1tenth/installation/maps_real/Practice1126b.npz",
+      "family": "real",
+      "source_sha256": "52d41623b2cc27cae3031e6a9df9ae609e6350a0a7bc779777ed067addf23908",
+      "status": "complete",
+      "output_dir": "src/f1tenth/results/joint_mintime_1127/all_families_v5_uniform/000_Practice1126b_attempt0",
+      "pid": 8,
+      "latest_quota_check": "{\"observed_utc\": \"2026-11-27T11:19:51.864Z\", \"used_percent\": 71.0, \"resets_at\": 1795793080, \"status\": \"continue\", \"remaining_percent\": 29.0, \"age_seconds\": 2.794943, \"stop_below_percent\": 20}",
+      "exit_code": 0,
+      "report": "src/f1tenth/results/joint_mintime_1127/all_families_v5_uniform/000_Practice1126b_attempt0/report.json",
+      "dense_feasible_candidates": 1
+    },
+    {
+      "source": "src/f1tenth/installation/maps_hall/Course2025_s57_w3025.npz",
+      "family": "hall",
+      "source_sha256": "473acb1ec1a6c45fddb2737fde0d5f5a3495cdd2e0bea54abb3fe0019abc4a72",
+      "status": "complete",
+      "output_dir": "src/f1tenth/results/joint_mintime_1127/all_families_v5_uniform/001_Course2025_s57_w3025_attempt0",
+      "pid": 43,
+      "latest_quota_check": "{\"observed_utc\": \"2026-11-27T11:22:00.302Z\", \"used_percent\": 74.0, \"resets_at\": 1795793080, \"status\": \"continue\", \"remaining_percent\": 26.0, \"age_seconds\": 10.722071, \"stop_below_percent\": 20}",
+      "exit_code": 0,
+      "report": "src/f1tenth/results/joint_mintime_1127/all_families_v5_uniform/001_Course2025_s57_w3025_attempt0/report.json",
+      "dense_feasible_candidates": 0
+    },
+    {
+      "source": "src/f1tenth/installation/maps_short/Rand504_rev_s50_w504.npz",
+      "family": "short",
+      "source_sha256": "c56cfd835c44681e88c333a7397aa467186b200edb77e084d04fc142563c307f",
+      "status": "complete",
+      "output_dir": "src/f1tenth/results/joint_mintime_1127/all_families_v5_uniform/002_Rand504_rev_s50_w504_attempt0",
+      "pid": 81,
+      "latest_quota_check": "{\"observed_utc\": \"2026-11-27T11:24:46.276Z\", \"used_percent\": 77.0, \"resets_at\": 1795793080, \"status\": \"continue\", \"remaining_percent\": 23.0, \"age_seconds\": 5.462719, \"stop_below_percent\": 20}",
+      "exit_code": 0,
+      "report": "src/f1tenth/results/joint_mintime_1127/all_families_v5_uniform/002_Rand504_rev_s50_w504_attempt0/report.json",
+      "dense_feasible_candidates": 0
+    },
+    {
+      "source": "src/f1tenth/installation/maps_gen/Oschersleben_rev.npz",
+      "family": "regular",
+      "source_sha256": "7ff7d3a1b7560b98b9244dc0b9bb8d979fd5a7aed854d1813b387e7d374d8be7",
+      "status": "running",
+      "output_dir": "src/f1tenth/results/joint_mintime_1127/all_families_v5_uniform/003_Oschersleben_rev_attempt0",
+      "pid": 119
+    }
+  ],
+  "updated_utc": "2026-11-27T11:25:12.196211+00:00"
+}

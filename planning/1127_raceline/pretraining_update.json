@@ -1,0 +1,249 @@
+{
+  "updated_utc": "2026-11-27T11:25:28.223678+00:00",
+  "user_scope": "Preparation and trajectory optimization allowed. IL/PPO starts only after pre-training report and explicit user training-start instruction.",
+  "training_started": false,
+  "status": "not_ready",
+  "train_counts": {
+    "regular": 736,
+    "open": 184,
+    "short": 90,
+    "hall": 101,
+    "real": 2
+  },
+  "evaluation_counts": {
+    "regular": 46,
+    "hall": 51,
+    "short": 16,
+    "open": 132
+  },
+  "development_suite": "16 training-only representatives; initial bounded5 cover each family, including2025 example. No broad qualification yet.",
+  "implemented": [
+    "Separate speed-control nodes from denser constraint points; avoid hidden steering-rate peaks without inflating decision count.",
+    "Quintic analytic geometry, force endpoints, path-parameter regularity and full body-distance constraints.",
+    "Matched uniform-arc export of geometry, squared speed and curvature; consumer sampling assumption repaired.",
+    "Offline preview/teacher use the same exported profile, with source/geometry-only/joint-profile ablations.",
+    "Generic map-drift generation from training manifest; preserve nominal map/reference while refining only physical occupancy resolution."
+  ],
+  "measured_export_issue": {
+    "before_spacing_min_m": 0.002604046,
+    "before_spacing_max_m": 0.012533116,
+    "after_spacing_mean_m": 0.09991927,
+    "after_max_relative_spacing_error": 0.00024324,
+    "result": "Fixed, but does not by itself fix teacher tracking."
+  },
+  "tracking_failure_diagnostic": {
+    "teacher_before_failure_path_error_m": 0.049799,
+    "heading_error_deg": 18.785,
+    "body_yaw_reach_proxy_m": 0.096606,
+    "initial_line_minimum_body_clearance_m": 0.04299,
+    "interpretation": "Insufficient geometric margin is one plausible contributor; widening margin alone does not eliminate teacher failures."
+  },
+  "closed_loop_015": {
+    "scope": "Practice1126b one known training layout/direction, frozen source25u70 actor,3seeds per nominal/worst condition,8m/s cap, two-lap elapsed times. No PPO updates.",
+    "rows": [
+      {
+        "mode": "eval",
+        "variant": "source",
+        "controller": "policy",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 16.60833333333346
+      },
+      {
+        "mode": "eval",
+        "variant": "source",
+        "controller": "expert",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 16.683333333333454
+      },
+      {
+        "mode": "eval",
+        "variant": "geometry_only",
+        "controller": "policy",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 15.916666666666819
+      },
+      {
+        "mode": "eval",
+        "variant": "geometry_only",
+        "controller": "expert",
+        "complete": 0,
+        "total": 3,
+        "mean_successful_two_lap_seconds": null
+      },
+      {
+        "mode": "eval",
+        "variant": "joint_profile",
+        "controller": "policy",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 16.708333333333453
+      },
+      {
+        "mode": "eval",
+        "variant": "joint_profile",
+        "controller": "expert",
+        "complete": 1,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 15.925000000000159
+      },
+      {
+        "mode": "worst",
+        "variant": "source",
+        "controller": "policy",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 18.666666666666675
+      },
+      {
+        "mode": "worst",
+        "variant": "source",
+        "controller": "expert",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 18.075000000000042
+      },
+      {
+        "mode": "worst",
+        "variant": "geometry_only",
+        "controller": "policy",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 17.008333333333436
+      },
+      {
+        "mode": "worst",
+        "variant": "geometry_only",
+        "controller": "expert",
+        "complete": 0,
+        "total": 3,
+        "mean_successful_two_lap_seconds": null
+      },
+      {
+        "mode": "worst",
+        "variant": "joint_profile",
+        "controller": "policy",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 17.758333333333393
+      },
+      {
+        "mode": "worst",
+        "variant": "joint_profile",
+        "controller": "expert",
+        "complete": 1,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 16.950000000000106
+      }
+    ]
+  },
+  "blocked_before_training": [
+    "Teacher fails to track new geometry consistently; margin015 alone is insufficient.",
+    "The combined new speed/curvature preview does not improve nominal frozen-policy pace in this small diagnostic; adaptation and broader evaluation remain required.",
+    "All-family candidate coverage, closed-loop robust verification and integration into training consumers are incomplete.",
+    "Actual opponent-occluded LiDAR/scan-localizer closed-loop evaluation remains to implement.",
+    "Stale-map localizer must use nominal occupancy AND nominal resolution, not physical occupancy/resolution.",
+    "Training data/normalizer/source hashes and a guarded launch command still need final audit."
+  ],
+  "map_drift_preparation": {
+    "families": 5,
+    "hypothesis_amplitudes_m": [
+      0.05,
+      0.1
+    ],
+    "physical_resolution_max_m": 0.05,
+    "prepared": 19,
+    "total": 20,
+    "trained": false,
+    "requires_closed_loop_validation": true
+  },
+  "policy_profile_ablation": {
+    "scope": "Practice1126b known training course,3seeds; diagnostic only, no learning",
+    "rows": [
+      {
+        "mode": "eval",
+        "variant": "curvature_only",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 15.908333333333486
+      },
+      {
+        "mode": "eval",
+        "variant": "speed_only",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 16.575000000000127
+      },
+      {
+        "mode": "worst",
+        "variant": "curvature_only",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 17.033333333333434
+      },
+      {
+        "mode": "worst",
+        "variant": "speed_only",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 17.725000000000062
+      }
+    ]
+  },
+  "teacher_heading_gate_diagnostic": {
+    "scope": "Practice1126b known training course,3seeds; diagnostic only, no learning",
+    "rows": [
+      {
+        "mode": "eval",
+        "variant": "geometry_only",
+        "complete": 0,
+        "total": 3,
+        "mean_successful_two_lap_seconds": null
+      },
+      {
+        "mode": "eval",
+        "variant": "joint_profile",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 16.566666666666794
+      },
+      {
+        "mode": "eval",
+        "variant": "source",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 17.000000000000103
+      },
+      {
+        "mode": "worst",
+        "variant": "geometry_only",
+        "complete": 0,
+        "total": 3,
+        "mean_successful_two_lap_seconds": null
+      },
+      {
+        "mode": "worst",
+        "variant": "joint_profile",
+        "complete": 1,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 16.67500000000012
+      },
+      {
+        "mode": "worst",
+        "variant": "source",
+        "complete": 3,
+        "total": 3,
+        "mean_successful_two_lap_seconds": 18.400000000000023
+      }
+    ]
+  },
+  "current_interpretation": [
+    "Path geometry changes improve this frozen actor on the one tested course; this is not a trained or global gain.",
+    "Separate curvature-only and speed-only probes indicate most nominal pace loss comes with the exported speed input in this diagnostic. Inputs may require adaptation; no hardware-grip conclusion.",
+    "Uniform arc export repairs a consumer assumption but does not eliminate teacher failures.",
+    "Heading-aware merge-speed diagnostic improves nominal teacher joint-profile completion1/3 to3/3, but worst remains1/3; not qualified.",
+    "Course2025 solver reports convergence but fails dense steering-rate and path-regularity checks; candidate rejected."
+  ]
+}

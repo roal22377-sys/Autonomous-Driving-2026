@@ -73,16 +73,28 @@ def main():
     p.add_argument('--output-dir',required=True)
     p.add_argument('--amplitudes',type=float,nargs='+',default=[.05,.10])
     p.add_argument('--seeds',type=int,nargs='+',default=[731,947])
+    p.add_argument('--manifest',help='Preparation inventory or development suite; training rows only')
+    p.add_argument('--per-family',type=int,default=1,help='With manifest: shortest maps per family;0 selects every training map')
+    p.add_argument('--physical-resolution',type=float,help='Upsample only physical grid to at most this resolution; retain original nominal map resolution')
     args=p.parse_args()
     if any(a<=0 or a>.2 for a in args.amplitudes):raise ValueError('Expected explicit small 0<a<=.2m hypotheses')
     dest=Path(args.output_dir).resolve()
     if SRC/'installation' in dest.parents:raise ValueError('Offline outputs only')
     dest.mkdir(parents=True,exist_ok=False)
-    generation_path=SRC/'results/reference_lines_1126/limits_v3_seeded/report.json'
+    generation_path=Path(args.manifest).resolve() if args.manifest else SRC/'results/reference_lines_1126/limits_v3_seeded/report.json'
     if not generation_path.exists():
         generation_path=ROOT/'planning/1127_raceline/input_maps.json'
-    generation=json.loads(generation_path.read_text());assert generation['status']=='complete'
-    report=dict(status='running',base_split='four known training examples only',
+    generation=json.loads(generation_path.read_text())
+    if args.manifest:
+        rows=generation.get('train',generation.get('tracks',[]))
+        assert rows and all(row['role']=='train' for row in rows),'Training-only deformation preparation'
+        selected=[]
+        for family in sorted({row['family'] for row in rows}):
+            subset=sorted([r for r in rows if r['family']==family],key=lambda r:r['length_m'])
+            selected.extend(subset[:args.per_family] if args.per_family else subset)
+        generation={'tracks':[dict(source=row['path'],source_sha256=row['sha256']) for row in selected]}
+    else:assert generation['status']=='complete'
+    report=dict(status='running',base_split='production training families only' if args.manifest else 'four known training examples only',
                 generation_sha256=sha(generation_path),variants=[],
                 purpose='Stale nominal map/line versus changed physical walls, not ordinary sensor noise.',
                 amplitude_note='Inverse warp displacement hypotheses, not measured barrier motion or guaranteed raster boundary displacement.',
@@ -97,14 +109,21 @@ def main():
         if not source.is_absolute():source=ROOT/source
         before=sha(source);assert before==item['source_sha256']
         with np.load(source,allow_pickle=False) as z:arrays={k:z[k].copy() for k in z.files}
+        nominal_res=float(arrays['resolution'])
+        if args.physical_resolution is not None and args.physical_resolution<=0:raise ValueError('Positive physical resolution required')
+        factor=max(1,int(np.ceil(nominal_res/args.physical_resolution))) if args.physical_resolution else 1
+        physical_res=nominal_res/factor
+        physical_base=np.repeat(np.repeat(arrays['occupancy'],factor,axis=0),factor,axis=1)
         for amplitude in args.amplitudes:
             for seed in args.seeds:
-                actual,stats=warp(arrays['occupancy'],float(arrays['resolution']),amplitude,seed)
-                validation=screen(actual,arrays)
+                actual,stats=warp(physical_base,physical_res,amplitude,seed)
+                validation=screen(actual,dict(arrays,resolution=np.array(physical_res)))
                 row=dict(source=str(source),source_sha256=before,amplitude_m=amplitude,
-                         seed=seed,warp=stats,screen=validation)
+                         seed=seed,warp=stats,screen=validation,
+                         physical_resolution_m=physical_res,nominal_resolution_m=nominal_res)
                 if validation['pass_route_screen'] and stats['changed_cells']>0:
                     variant=dict(arrays,occupancy=actual,nominal_occupancy=arrays['occupancy'],
+                                 resolution=np.array(physical_res),nominal_resolution=np.array(nominal_res),
                                  mismatch_amplitude_m=np.array(amplitude),mismatch_seed=np.array(seed),
                                  nominal_source_sha256=np.array(before))
                     target=dest/source.stem/('warp_%03d_s%d.npz'%(round(amplitude*1000),seed))
@@ -112,8 +131,9 @@ def main():
                     np.savez_compressed(target,**variant)
                     with np.load(target,allow_pickle=False) as z:
                         for k in arrays:
-                            if k!='occupancy':assert np.array_equal(z[k],arrays[k]),k
+                            if k not in ('occupancy','resolution'):assert np.array_equal(z[k],arrays[k]),k
                         assert np.array_equal(z['nominal_occupancy'],arrays['occupancy'])
+                        assert float(z['nominal_resolution'])==nominal_res
                     row.update(status='prepared_not_trained',path=str(target),sha256=sha(target))
                 else:row['status']='rejected_by_screen'
                 report['variants'].append(row)

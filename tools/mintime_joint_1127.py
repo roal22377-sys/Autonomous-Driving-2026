@@ -36,23 +36,32 @@ def tensor(x):
 
 class JointProblem:
     def __init__(self, center, normals, lower, upper, limits, arrays=None,
-                 samples=3, clearance=.03, reserve=.98):
+                 samples=3, clearance=.03, reserve=.98, constraint_factor=1):
         self.center, self.normals = center, normals
         self.lower, self.upper, self.limits = lower, upper, limits
         self.n, self.samples = len(center), samples
         self.m = self.n * samples
+        self.constraint_factor=int(constraint_factor)
+        if self.constraint_factor<1:raise ValueError('Positive constraint factor required')
+        self.eval_samples=self.samples*self.constraint_factor
+        self.eval_m=self.m*self.constraint_factor
         self.clearance = clearance
         self.reserve = reserve
         self.constraint_names=['ellipse_start','ellipse_end','steering','steering_rate',
                                'path_derivative','forward_progress']
         if arrays is not None:self.constraint_names.append('body_clearance')
         self.u = np.arange(self.m)/samples
+        self.eval_u=np.arange(self.eval_m)/self.eval_samples
+        self.q_indices=torch.as_tensor(np.arange(self.eval_m)//self.constraint_factor)
+        self.q_fraction=tensor((np.arange(self.eval_m)%self.constraint_factor)/self.constraint_factor)
         basis = make_interp_spline(np.arange(self.n+1),
                                    np.vstack([np.eye(self.n), np.eye(self.n)[:1]]),
                                    bc_type='periodic',k=5)
-        self.matrices = [tensor(basis(self.u, nu=d)) for d in range(4)]
+        self.basis=basis
+        self.matrices = [tensor(basis(self.eval_u, nu=d)) for d in range(4)]
         direction = self.matrices[1] @ tensor(center)
-        self.reference_direction = direction / torch.sqrt((direction*direction).sum(1))[:,None]
+        self.reference_norm=torch.sqrt((direction*direction).sum(1))
+        self.reference_direction = direction / self.reference_norm[:,None]
         self.arrays = arrays
         if arrays is not None:
             free = arrays['occupancy'] > 128
@@ -93,15 +102,16 @@ class JointProblem:
         return -.003*torch.logsumexp(-val/.003,dim=1)
 
     def values(self, z):
-        off, q = z[:self.n], z[self.n:]
+        off, control_q = z[:self.n], z[self.n:]
+        q=control_q[self.q_indices]*(1-self.q_fraction)+control_q[(self.q_indices+1)%self.m]*self.q_fraction
         p,tangent,k,norm = self.geometry(off)
         # Trapezoidal arc length and exact constant-acceleration segment travel time.
-        ds = .5*(norm+torch.roll(norm,-1))/self.samples
+        ds = .5*(norm+torch.roll(norm,-1))/self.eval_samples
         v = torch.sqrt(q)
         dt = 2*ds/(v+torch.roll(v,-1))
         # q is piecewise linear in the knot parameter. Check longitudinal
         # acceleration at BOTH segment endpoints; using only mean ds hid peaks.
-        dqdu=(torch.roll(q,-1)-q)*self.samples
+        dqdu=(torch.roll(q,-1)-q)*self.eval_samples
         ax = dqdu/(2*norm)
         ax_end = dqdu/(2*torch.roll(norm,-1))
         ay = q*k
@@ -120,7 +130,7 @@ class JointProblem:
         constraints = [self.reserve**2-ellipse,self.reserve**2-ellipse_end,
                        (self.reserve**2*self.limits['steer']**2-steer**2)/self.limits['steer']**2,
                        (self.reserve**2*self.limits['rate']**2-rate**2)/self.limits['rate']**2,
-                       norm-.02,forward-.1]
+                       norm-.25*self.reference_norm,forward-.1]
         if self.arrays is not None:
             body_reserve=.015 if self.reserve<1 else 0.
             constraints.append((self.body_clearance(p,tangent)-self.clearance-body_reserve)/.1)
@@ -131,10 +141,10 @@ class JointProblem:
         initial_offset = np.clip(initial_offset,self.lower,self.upper)
         with torch.no_grad():
             _,_,k,_ = self.geometry(tensor(initial_offset))
-        q = np.minimum(self.limits['v_max']**2,
-                       .7*self.limits['a_lat']/(np.abs(k.numpy())+1e-6))
+        q_cap = np.minimum(self.limits['v_max']**2,
+                           .7*self.limits['a_lat']/(np.abs(k.numpy())+1e-6))
         # Constant initial speed is feasible longitudinally, even in tight corners.
-        q[:] = max(self.limits['v_min']**2,float(q.min()))
+        q = np.full(self.m,max(self.limits['v_min']**2,float(q_cap.min())))
         x0 = np.r_[initial_offset,q]
         if fixed:
             with torch.no_grad():
@@ -217,12 +227,12 @@ class JointProblem:
                     returned_best_feasible=bool(not np.array_equal(chosen,result.x)),
                     model_lap_time_s=float(f),minimum_scaled_constraint=float(g.min()),
                     collocation_feasible=bool(g.min()>=-1e-5))
-        info['constraint_minima']=dict(zip(self.constraint_names,g.detach().numpy().reshape(-1,self.m).min(1).tolist()))
+        info['constraint_minima']=dict(zip(self.constraint_names,g.detach().numpy().reshape(-1,self.eval_m).min(1).tolist()))
         return z,info
 
     def dense_audit(self,z,factor=6):
         dense = JointProblem(self.center,self.normals,self.lower,self.upper,self.limits,
-                             self.arrays,self.samples*factor,self.clearance,reserve=1.)
+                             self.arrays,self.eval_samples*factor,self.clearance,reserve=1.)
         q = np.interp(dense.u,np.r_[self.u,self.n],np.r_[z[self.n:],z[self.n]])
         zz = np.r_[z[:self.n],q]
         with torch.no_grad():
@@ -232,6 +242,29 @@ class JointProblem:
         return dict(model_lap_time_s=float(f),minimum_scaled_constraint=float(g.min()),
                     constraint_minima=dict(zip(dense.constraint_names,g.numpy().reshape(-1,dense.m).min(1).tolist())),
                     feasible=bool(g.min()>=-1e-4),minimum_sampled_body_clearance_m=clearance), p.numpy(), q, k.numpy()
+
+    def uniform_export(self,z,spacing=.1):
+        """Uniform arc length for consumers whose lookahead uses index * mean ds.
+
+        Keep the optimized quintic geometry and interpolate squared speed using
+        its original parameter. Never resample speed independently of position.
+        """
+        _,dense,_,_=self.dense_audit(z)
+        seg=np.linalg.norm(np.roll(dense,-1,axis=0)-dense,axis=1)
+        arc=np.r_[0,np.cumsum(seg)]
+        u_dense=np.arange(len(dense))*self.n/len(dense)
+        s=np.linspace(0,arc[-1],max(8,int(np.ceil(arc[-1]/spacing))),endpoint=False)
+        u=np.interp(s,arc,np.r_[u_dense,self.n])
+        matrices=[tensor(self.basis(u,nu=d)) for d in range(4)]
+        with torch.no_grad():p,_,k,_=self.geometry(tensor(z[:self.n]),matrices)
+        q=np.interp(u,np.r_[self.u,self.n],np.r_[z[self.n:],z[self.n]])
+        xy=p.numpy();segments=np.linalg.norm(np.roll(xy,-1,axis=0)-xy,axis=1)
+        audit=dict(spacing_mean_m=float(segments.mean()),spacing_min_m=float(segments.min()),
+                   spacing_max_m=float(segments.max()),
+                   spacing_max_relative_error=float(np.abs(segments/segments.mean()-1).max()),
+                   speed_geometry_aligned=True,parameterization='uniform arc length; same original quintic and q(u)')
+        assert audit['spacing_max_relative_error']<.02,audit
+        return xy,q,k.numpy(),audit
 
 
 def circle_check():
@@ -262,9 +295,13 @@ def main():
     p.add_argument('--output-dir',required=True)
     p.add_argument('--tracks',nargs='*',default=[])
     p.add_argument('--spacing',type=float,default=.75)
-    p.add_argument('--samples',type=int,default=6)
+    p.add_argument('--max-knots',type=int,default=120,help='Limit dense NLP size on long circuits; reported approximation')
+    p.add_argument('--samples',type=int,default=2,help='Squared-speed control knots per geometric knot')
+    p.add_argument('--constraint-factor',type=int,default=6,help='Constraint sampling multiplier; independent of decision count')
     p.add_argument('--maxiter',type=int,default=120)
     p.add_argument('--clearance',type=float,default=.03)
+    p.add_argument('--starts',nargs='+',choices=['stored_geometry_control','joint_from_stored','joint_from_center'],
+                   default=['stored_geometry_control','joint_from_stored','joint_from_center'])
     args=p.parse_args();os.chdir(SRC)
     dest=Path(args.output_dir).resolve()
     if (SRC/'installation') in dest.parents:raise ValueError('Offline results only')
@@ -277,6 +314,7 @@ def main():
                              'Sampled signed-distance body constraints need independent dense/static and closed-loop validation.',
                              'The fixed stored control is a spline reconstruction, not an exact original path. Infeasibility does not prove the original path infeasible.',
                              '2 percent force/steering reserve and 15mm body reserve are tested at 6x denser samples.',
+                             'Parameterization derivative is bounded below by25 percent of the reference derivative to prevent nearly singular path parameterization.',
                              'Production preview and teacher do not yet consume exported speed/steering. No policy trained here.'])
     (dest/'report.json').write_text(json.dumps(report,indent=2)+'\n')
     from utils.raceline import resample_closed,tangents_normals
@@ -284,7 +322,10 @@ def main():
     for item in args.tracks:
         path=Path(item).resolve();source_hash=hashlib.sha256(path.read_bytes()).hexdigest()
         with np.load(path,allow_pickle=False) as z:arrays={k:z[k].copy() for k in z.files}
-        c,_=resample_closed(arrays['centerline'].astype(float),args.spacing)
+        base=arrays['centerline'].astype(float)
+        length=float(np.linalg.norm(np.roll(base,-1,axis=0)-base,axis=1).sum())
+        spacing=max(args.spacing,length/args.max_knots)
+        c,_=resample_closed(base,spacing)
         _,normal=tangents_normals(c)
         _,j=cKDTree(arrays['centerline']).query(c)
         free=arrays['occupancy']>128
@@ -294,18 +335,23 @@ def main():
         lo,hi=-(wr-.18),wl-.18
         if np.any(lo>hi):raise ValueError('Empty corridor')
         limits=dict(v_min=.5,v_max=8.,a_lat=6.,a_acc=2.9,a_brake=3.7,wheelbase=.34,steer=.5,rate=2.65)
-        problem=JointProblem(c,normal,lo,hi,limits,arrays,args.samples,args.clearance)
+        problem=JointProblem(c,normal,lo,hi,limits,arrays,args.samples,args.clearance,constraint_factor=args.constraint_factor)
         _,idx=cKDTree(arrays['raceline']).query(c)
         initial=((arrays['raceline'][idx]-c)*normal).sum(1)
-        row=dict(source=str(path),source_sha256=source_hash,limits=limits,candidates={})
+        row=dict(source=str(path),source_sha256=source_hash,limits=limits,candidates={},
+                 geometry_knots=len(c),speed_knots=problem.m,constraint_points=problem.eval_m,
+                 effective_geometry_spacing_m=spacing)
         # Matched fixed-geometry control, then full joint optimization; initial paths
         # do not restrict possible final shapes inside corridor/vehicle constraints.
         for name,offset,fixed in [('stored_geometry_control',initial,True),
                                   ('joint_from_stored',initial,False),
                                   ('joint_from_center',np.zeros(len(c)),False)]:
+            if name not in args.starts:continue
             z,info=problem.solve(offset,maxiter=args.maxiter,fixed=fixed)
             audit,xy,q,k=problem.dense_audit(z)
+            xy,q,k,export_audit=problem.uniform_export(z)
             info['dense_audit']=audit
+            info['export_audit']=export_audit
             info['eligible_for_closed_loop_review']=bool(info['collocation_feasible'] and audit['feasible'])
             folder=dest/path.stem/name;folder.mkdir(parents=True)
             candidate=dict(arrays,raceline=xy.astype(np.float32),
@@ -313,9 +359,11 @@ def main():
                            joint_steering=np.arctan(limits['wheelbase']*k).astype(np.float32),
                            joint_offset=z[:problem.n],joint_center=c,
                            joint_q_collocation=z[problem.n:],joint_collocation_samples=np.array(problem.samples),
+                           joint_constraint_factor=np.array(problem.constraint_factor),
                            joint_spline_degree=np.array(5),
                            gen_sig=np.array('joint_mintime_experiment:'+source_hash+':'+name))
             np.savez_compressed(folder/'track.npz',**candidate)
+            info['sha256']=hashlib.sha256((folder/'track.npz').read_bytes()).hexdigest()
             info['path']=str(folder/'track.npz');row['candidates'][name]=info
             print(path.stem,name,json.dumps(info),flush=True)
             report['in_progress_track']=row

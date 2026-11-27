@@ -1,6 +1,6 @@
 {
-  "updated_utc": "2026-11-27T11:06:25.789740+00:00",
-  "phase": "Experimental reference planner redesign and robustness data preparation; PPO is not running.",
+  "updated_utc": "2026-11-27T11:23:18.520043+00:00",
+  "phase": "Preparation only; no IL/PPO running. Generic planner and offline closed-loop tests, readiness NOT READY.",
   "local_training_branch": "codex/1126-hairpin-position-ppo",
   "publication_branch": "codex/1127-raceline-robustness",
   "real_car_reference": "PPO21u30 (2130); no new real-car validation.",
@@ -20,13 +20,9 @@
   "quota_rule": "Stop work and jobs when fresh 5h usage remaining drops below20%.",
   "reports": "planning/1127_raceline/",
   "publication": {
-    "status": "blocked_not_uploaded",
-    "github_app_error": "403 Resource not accessible by integration on git blob creation",
-    "git_push_error": "Could not resolve host github.com in the execution environment",
-    "local_commit": "8945f6bc3766c49be2863ee6845317ef010d500b",
-    "destination": "https://github.com/roal22377-sys/Autonomous-Driving-2026/tree/codex/1127-raceline-robustness",
-    "destination_exists": false,
-    "credential_helper_present": true,
-    "credential_note": "Windows Git Credential Manager is configured. DNS fails before authentication; no claim that stored credentials are invalid."
-  }
+    "status": "prior_head_verified_new_work_pending_publication",
+    "verified_remote_head": "92a08f9c1cb354ce5ab0d5cfda0bb3f55da58645",
+    "branch": "codex/1127-raceline-robustness"
+  },
+  "latest_pretraining_report": "planning/1127_raceline/pretraining_update.json"
 }
